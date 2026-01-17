@@ -13,8 +13,8 @@
   - MongoDB Atlas (Cloud Database)
   - Mongoose 8.x (ODM)
   - JWT (jsonwebtoken) + bcrypt
-- **Deployment:** Railway / Render
-- **Frontend:** Separate repository - [alpha-studio](../alpha-studio)
+- **Deployment:** Render (https://alpha-studio-backend.onrender.com)
+- **Frontend:** Separate repository - [alpha-studio](../alpha-studio) (https://alphastudio.vercel.app)
 
 ---
 
