@@ -6,6 +6,7 @@
   "main": "server/index.js",
   "scripts": {
     "start": "node server/index.js",
+    "server": "node server/index.js",
     "dev": "nodemon server/index.js",
     "db:test": "node server/db/test-connection.js",
     "db:init": "node server/db/init-collections.js",

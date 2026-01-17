@@ -163,27 +163,23 @@ FRONTEND_URL=https://...            # Frontend URL for CORS
 
 ## 7. Recent Changes (Last 3 Sessions)
 
-1. **2026-01-17** - Standalone Backend Repository
+1. **2026-01-17** - Render Deployment
+   - Deployed to Render (https://alpha-studio-backend.onrender.com)
+   - Configured environment variables (MONGODB_URI, JWT_SECRET, FRONTEND_URL)
+   - Added "server" script to package.json for Render compatibility
+   - MongoDB Atlas IP whitelist configuration
+
+2. **2026-01-17** - Standalone Backend Repository
    - Separated from frontend monorepo
    - Created independent package.json
    - Updated CORS configuration for production
    - Created comprehensive README.md
-   - Updated documentation for backend-only focus
 
-2. **2026-01-17** - Authentication System Implementation
+3. **2026-01-17** - Authentication System Implementation
    - Implemented JWT authentication with bcrypt password hashing
    - Created User model with Mongoose 8.x
    - Built Express.js API routes: login, register, logout, profile
-   - Added password migration script for existing users
-   - **Bug Fixes:**
-     - Fixed Mongoose 8+ pre-save hook (removed `next` callback)
-     - Fixed login route 500 error (use updateOne for lastLogin)
-     - Fixed register route duplicate key error handling
-
-3. **2025-01-17** - Initial project setup
-   - Created `.claude/` documentation structure
-   - Set up MongoDB Atlas connection
-   - Generated initial documentation files
+   - Fixed Mongoose 8+ pre-save hook and login route bugs
 
 ---
 

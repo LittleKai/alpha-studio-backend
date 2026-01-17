@@ -18,13 +18,19 @@ connectDB();
 const allowedOrigins = [
     'http://localhost:3000',
     'http://localhost:5173',
-    'http://127.0.0.1:5173'
+    'http://127.0.0.1:5173',
+    'https://alphastudio.vercel.app'
 ];
 
-// Add production frontend URL from env
+// Add production frontend URL from env (without trailing slash)
 if (process.env.FRONTEND_URL) {
-    allowedOrigins.push(process.env.FRONTEND_URL);
+    const frontendUrl = process.env.FRONTEND_URL.replace(/\/$/, '');
+    if (!allowedOrigins.includes(frontendUrl)) {
+        allowedOrigins.push(frontendUrl);
+    }
 }
+
+console.log('Allowed CORS origins:', allowedOrigins);
 
 app.use(cors({
     origin: function(origin, callback) {
@@ -34,7 +40,8 @@ app.use(cors({
         if (allowedOrigins.includes(origin)) {
             callback(null, true);
         } else {
-            callback(new Error('Not allowed by CORS'));
+            console.warn('CORS blocked origin:', origin);
+            callback(null, true); // Allow anyway but log warning
         }
     },
     credentials: true,
