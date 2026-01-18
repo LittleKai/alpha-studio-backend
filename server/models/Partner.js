@@ -1,6 +1,14 @@
 import mongoose from 'mongoose';
+import { slugify, generateUniqueSlugForModel } from '../utils/slugify.js';
 
 const partnerSchema = new mongoose.Schema({
+    slug: {
+        type: String,
+        unique: true,
+        lowercase: true,
+        trim: true,
+        index: true
+    },
     companyName: {
         type: String,
         required: [true, 'Company name is required'],
@@ -69,6 +77,15 @@ const partnerSchema = new mongoose.Schema({
     }
 }, {
     timestamps: true
+});
+
+// Pre-save hook to auto-generate slug
+partnerSchema.pre('save', async function(next) {
+    // Only generate slug if companyName changed or slug is empty
+    if (this.isModified('companyName') || !this.slug) {
+        this.slug = await generateUniqueSlugForModel(this.companyName, mongoose.model('Partner'), this._id);
+    }
+    next();
 });
 
 // Text index for search

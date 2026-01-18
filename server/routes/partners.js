@@ -125,13 +125,25 @@ router.get('/stats', async (req, res) => {
     }
 });
 
-// @route   GET /api/partners/:id
-// @desc    Get single partner by ID
+// Helper function to find partner by ID or slug
+async function findPartnerByIdOrSlug(identifier) {
+    // Check if identifier is a valid MongoDB ObjectId
+    const isObjectId = /^[0-9a-fA-F]{24}$/.test(identifier);
+
+    if (isObjectId) {
+        return await Partner.findById(identifier).populate('createdBy', 'name email');
+    }
+
+    // Otherwise, try to find by slug
+    return await Partner.findOne({ slug: identifier }).populate('createdBy', 'name email');
+}
+
+// @route   GET /api/partners/:idOrSlug
+// @desc    Get single partner by ID or slug
 // @access  Mod/Admin
-router.get('/:id', async (req, res) => {
+router.get('/:idOrSlug', async (req, res) => {
     try {
-        const partner = await Partner.findById(req.params.id)
-            .populate('createdBy', 'name email');
+        const partner = await findPartnerByIdOrSlug(req.params.idOrSlug);
 
         if (!partner) {
             return res.status(404).json({
@@ -233,10 +245,10 @@ router.post('/', async (req, res) => {
     }
 });
 
-// @route   PUT /api/partners/:id
+// @route   PUT /api/partners/:idOrSlug
 // @desc    Update a partner
 // @access  Mod/Admin
-router.put('/:id', async (req, res) => {
+router.put('/:idOrSlug', async (req, res) => {
     try {
         const {
             companyName,
@@ -253,7 +265,7 @@ router.put('/:id', async (req, res) => {
             socialLinks
         } = req.body;
 
-        const partner = await Partner.findById(req.params.id);
+        const partner = await findPartnerByIdOrSlug(req.params.idOrSlug);
 
         if (!partner) {
             return res.status(404).json({
@@ -305,12 +317,12 @@ router.put('/:id', async (req, res) => {
     }
 });
 
-// @route   DELETE /api/partners/:id
+// @route   DELETE /api/partners/:idOrSlug
 // @desc    Delete a partner
 // @access  Mod/Admin
-router.delete('/:id', async (req, res) => {
+router.delete('/:idOrSlug', async (req, res) => {
     try {
-        const partner = await Partner.findById(req.params.id);
+        const partner = await findPartnerByIdOrSlug(req.params.idOrSlug);
 
         if (!partner) {
             return res.status(404).json({
@@ -319,7 +331,7 @@ router.delete('/:id', async (req, res) => {
             });
         }
 
-        await Partner.findByIdAndDelete(req.params.id);
+        await Partner.findByIdAndDelete(partner._id);
 
         res.json({
             success: true,
@@ -342,12 +354,12 @@ router.delete('/:id', async (req, res) => {
     }
 });
 
-// @route   PATCH /api/partners/:id/publish
+// @route   PATCH /api/partners/:idOrSlug/publish
 // @desc    Publish a partner
 // @access  Mod/Admin
-router.patch('/:id/publish', async (req, res) => {
+router.patch('/:idOrSlug/publish', async (req, res) => {
     try {
-        const partner = await Partner.findById(req.params.id);
+        const partner = await findPartnerByIdOrSlug(req.params.idOrSlug);
 
         if (!partner) {
             return res.status(404).json({
@@ -389,12 +401,12 @@ router.patch('/:id/publish', async (req, res) => {
     }
 });
 
-// @route   PATCH /api/partners/:id/unpublish
+// @route   PATCH /api/partners/:idOrSlug/unpublish
 // @desc    Unpublish a partner
 // @access  Mod/Admin
-router.patch('/:id/unpublish', async (req, res) => {
+router.patch('/:idOrSlug/unpublish', async (req, res) => {
     try {
-        const partner = await Partner.findById(req.params.id);
+        const partner = await findPartnerByIdOrSlug(req.params.idOrSlug);
 
         if (!partner) {
             return res.status(404).json({

@@ -163,13 +163,25 @@ router.get('/stats', authMiddleware, adminOnly, async (req, res) => {
     }
 });
 
-// @route   GET /api/courses/:id
-// @desc    Get single course by ID
+// Helper function to find course by ID or slug
+async function findCourseByIdOrSlug(identifier) {
+    // Check if identifier is a valid MongoDB ObjectId
+    const isObjectId = /^[0-9a-fA-F]{24}$/.test(identifier);
+
+    if (isObjectId) {
+        return await Course.findById(identifier).populate('createdBy', 'name email');
+    }
+
+    // Otherwise, try to find by slug
+    return await Course.findOne({ slug: identifier }).populate('createdBy', 'name email');
+}
+
+// @route   GET /api/courses/:idOrSlug
+// @desc    Get single course by ID or slug
 // @access  Public
-router.get('/:id', async (req, res) => {
+router.get('/:idOrSlug', async (req, res) => {
     try {
-        const course = await Course.findById(req.params.id)
-            .populate('createdBy', 'name email');
+        const course = await findCourseByIdOrSlug(req.params.idOrSlug);
 
         if (!course) {
             return res.status(404).json({
@@ -296,10 +308,10 @@ router.post('/', authMiddleware, adminOnly, async (req, res) => {
     }
 });
 
-// @route   PUT /api/courses/:id
+// @route   PUT /api/courses/:idOrSlug
 // @desc    Update a course
 // @access  Admin
-router.put('/:id', authMiddleware, adminOnly, async (req, res) => {
+router.put('/:idOrSlug', authMiddleware, adminOnly, async (req, res) => {
     try {
         const {
             title,
@@ -318,7 +330,7 @@ router.put('/:id', authMiddleware, adminOnly, async (req, res) => {
             learningOutcomes
         } = req.body;
 
-        const course = await Course.findById(req.params.id);
+        const course = await findCourseByIdOrSlug(req.params.idOrSlug);
 
         if (!course) {
             return res.status(404).json({
@@ -382,12 +394,12 @@ router.put('/:id', authMiddleware, adminOnly, async (req, res) => {
     }
 });
 
-// @route   DELETE /api/courses/:id
+// @route   DELETE /api/courses/:idOrSlug
 // @desc    Delete a course
 // @access  Admin
-router.delete('/:id', authMiddleware, adminOnly, async (req, res) => {
+router.delete('/:idOrSlug', authMiddleware, adminOnly, async (req, res) => {
     try {
-        const course = await Course.findById(req.params.id);
+        const course = await findCourseByIdOrSlug(req.params.idOrSlug);
 
         if (!course) {
             return res.status(404).json({
@@ -404,7 +416,7 @@ router.delete('/:id', authMiddleware, adminOnly, async (req, res) => {
             });
         }
 
-        await Course.findByIdAndDelete(req.params.id);
+        await Course.findByIdAndDelete(course._id);
 
         res.json({
             success: true,
@@ -427,12 +439,12 @@ router.delete('/:id', authMiddleware, adminOnly, async (req, res) => {
     }
 });
 
-// @route   PATCH /api/courses/:id/publish
+// @route   PATCH /api/courses/:idOrSlug/publish
 // @desc    Publish a course
 // @access  Admin
-router.patch('/:id/publish', authMiddleware, adminOnly, async (req, res) => {
+router.patch('/:idOrSlug/publish', authMiddleware, adminOnly, async (req, res) => {
     try {
-        const course = await Course.findById(req.params.id);
+        const course = await findCourseByIdOrSlug(req.params.idOrSlug);
 
         if (!course) {
             return res.status(404).json({
@@ -474,12 +486,12 @@ router.patch('/:id/publish', authMiddleware, adminOnly, async (req, res) => {
     }
 });
 
-// @route   PATCH /api/courses/:id/unpublish
+// @route   PATCH /api/courses/:idOrSlug/unpublish
 // @desc    Unpublish a course (set to draft)
 // @access  Admin
-router.patch('/:id/unpublish', authMiddleware, adminOnly, async (req, res) => {
+router.patch('/:idOrSlug/unpublish', authMiddleware, adminOnly, async (req, res) => {
     try {
-        const course = await Course.findById(req.params.id);
+        const course = await findCourseByIdOrSlug(req.params.idOrSlug);
 
         if (!course) {
             return res.status(404).json({
@@ -520,12 +532,12 @@ router.patch('/:id/unpublish', authMiddleware, adminOnly, async (req, res) => {
     }
 });
 
-// @route   PATCH /api/courses/:id/archive
+// @route   PATCH /api/courses/:idOrSlug/archive
 // @desc    Archive a course
 // @access  Admin
-router.patch('/:id/archive', authMiddleware, adminOnly, async (req, res) => {
+router.patch('/:idOrSlug/archive', authMiddleware, adminOnly, async (req, res) => {
     try {
-        const course = await Course.findById(req.params.id);
+        const course = await findCourseByIdOrSlug(req.params.idOrSlug);
 
         if (!course) {
             return res.status(404).json({

@@ -1,4 +1,5 @@
 import mongoose from 'mongoose';
+import { slugify, generateUniqueSlugForModel } from '../utils/slugify.js';
 
 const lessonSchema = new mongoose.Schema({
     lessonId: {
@@ -41,6 +42,13 @@ const moduleSchema = new mongoose.Schema({
 }, { _id: false });
 
 const courseSchema = new mongoose.Schema({
+    slug: {
+        type: String,
+        unique: true,
+        lowercase: true,
+        trim: true,
+        index: true
+    },
     title: {
         vi: {
             type: String,
@@ -173,6 +181,16 @@ courseSchema.virtual('totalLessons').get(function() {
 // Ensure virtuals are included in JSON output
 courseSchema.set('toJSON', { virtuals: true });
 courseSchema.set('toObject', { virtuals: true });
+
+// Pre-save hook to auto-generate slug
+courseSchema.pre('save', async function(next) {
+    // Only generate slug if title changed or slug is empty
+    if (this.isModified('title') || !this.slug) {
+        const baseText = this.title?.en || this.title?.vi || 'course';
+        this.slug = await generateUniqueSlugForModel(baseText, mongoose.model('Course'), this._id);
+    }
+    next();
+});
 
 // Text index for search
 courseSchema.index({
