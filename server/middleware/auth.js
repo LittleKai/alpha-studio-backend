@@ -82,3 +82,14 @@ export const adminOnly = (req, res, next) => {
     }
     next();
 };
+
+// Mod only middleware (allows admin and mod)
+export const modOnly = (req, res, next) => {
+    if (req.user?.role !== 'admin' && req.user?.role !== 'mod') {
+        return res.status(403).json({
+            success: false,
+            message: 'Access denied. Admin or Moderator only.'
+        });
+    }
+    next();
+};

@@ -5,6 +5,8 @@ import dotenv from 'dotenv';
 import connectDB from './db/connection.js';
 import authRoutes from './routes/auth.js';
 import courseRoutes from './routes/courses.js';
+import partnerRoutes from './routes/partners.js';
+import jobRoutes from './routes/jobs.js';
 
 // Load env variables
 dotenv.config();
@@ -63,6 +65,8 @@ if (process.env.NODE_ENV !== 'production') {
 // Routes
 app.use('/api/auth', authRoutes);
 app.use('/api/courses', courseRoutes);
+app.use('/api/partners', partnerRoutes);
+app.use('/api/jobs', jobRoutes);
 
 // Health check
 app.get('/api/health', (req, res) => {

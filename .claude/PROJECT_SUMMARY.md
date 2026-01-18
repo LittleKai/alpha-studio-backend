@@ -59,6 +59,16 @@ alpha-studio-backend/
 │   ├── GET  /me          # Get current user (auth required)
 │   ├── PUT  /profile     # Update profile (auth required)
 │   └── PUT  /password    # Change password (auth required)
+├── /courses (admin only)
+│   ├── GET    /           # List courses (pagination, filters, search)
+│   ├── GET    /stats      # Course statistics
+│   ├── GET    /:id        # Get single course
+│   ├── POST   /           # Create course
+│   ├── PUT    /:id        # Update course
+│   ├── DELETE /:id        # Delete course
+│   ├── PATCH  /:id/publish    # Publish course
+│   ├── PATCH  /:id/unpublish  # Unpublish course
+│   └── PATCH  /:id/archive    # Archive course
 └── /health               # Health check endpoint
 ```
 
@@ -90,6 +100,12 @@ alpha-studio-backend/
 - Development: localhost:3000, localhost:5173, 127.0.0.1:5173
 - Production: Set via `FRONTEND_URL` environment variable
 - Supports credentials for cookie-based auth
+- Methods: GET, POST, PUT, PATCH, DELETE, OPTIONS
+
+### Admin Authorization
+- **adminOnly middleware:** Checks `user.role === 'admin'`
+- **Protected routes:** All /api/courses/* endpoints
+- Returns 403 Forbidden for non-admin users
 
 ### Error Handling
 - Centralized error middleware
@@ -112,7 +128,13 @@ alpha-studio-backend/
 | Health Check | ✅ Complete | index.js | API status endpoint |
 | Password Hashing | ✅ Complete | models/User.js | bcrypt with 12 rounds |
 | JWT Middleware | ✅ Complete | middleware/auth.js | Token verification |
-| CORS Support | ✅ Complete | index.js | Multi-origin support |
+| Admin Middleware | ✅ Complete | middleware/auth.js | Role-based authorization |
+| CORS Support | ✅ Complete | index.js | Multi-origin + PATCH method |
+| Course CRUD | ✅ Complete | routes/courses.js | Create, Read, Update, Delete |
+| Course Publishing | ✅ Complete | routes/courses.js | Publish, Unpublish, Archive |
+| Course Statistics | ✅ Complete | routes/courses.js | Aggregated stats endpoint |
+| Multilingual Courses | ✅ Complete | models/Course.js | VI/EN title and description |
+| Course Modules/Lessons | ✅ Complete | models/Course.js | Nested schema structure |
 
 ---
 
@@ -147,8 +169,10 @@ alpha-studio-backend/
 
 ### Critical Files (read before major changes):
 - `server/models/User.js` - User schema and password hashing
-- `server/middleware/auth.js` - JWT verification logic
+- `server/models/Course.js` - Course schema with multilingual fields
+- `server/middleware/auth.js` - JWT verification + adminOnly middleware
 - `server/routes/auth.js` - All authentication endpoints
+- `server/routes/courses.js` - Course CRUD and management endpoints
 - `server/db/connection.js` - MongoDB connection setup
 - `DATABASE.md` - Complete database schema documentation
 
@@ -165,23 +189,26 @@ FRONTEND_URL=https://...            # Frontend URL for CORS
 
 ## 7. Recent Changes (Last 3 Sessions)
 
-1. **2026-01-17** - Render Deployment
+1. **2026-01-18** - Course Management API
+   - Created Course model with multilingual support (VI/EN)
+   - Implemented full CRUD API for courses (admin only)
+   - Added publish/unpublish/archive endpoints (PATCH)
+   - Added course statistics endpoint
+   - Created adminOnly middleware for authorization
+   - Fixed CORS to include PATCH method
+   - Nested schema for modules and lessons with virtual fields
+
+2. **2026-01-17** - Render Deployment
    - Deployed to Render (https://alpha-studio-backend.onrender.com)
    - Configured environment variables (MONGODB_URI, JWT_SECRET, FRONTEND_URL)
    - Added "server" script to package.json for Render compatibility
    - MongoDB Atlas IP whitelist configuration
 
-2. **2026-01-17** - Standalone Backend Repository
+3. **2026-01-17** - Standalone Backend Repository
    - Separated from frontend monorepo
    - Created independent package.json
    - Updated CORS configuration for production
    - Created comprehensive README.md
-
-3. **2026-01-17** - Authentication System Implementation
-   - Implemented JWT authentication with bcrypt password hashing
-   - Created User model with Mongoose 8.x
-   - Built Express.js API routes: login, register, logout, profile
-   - Fixed Mongoose 8+ pre-save hook and login route bugs
 
 ---
 
