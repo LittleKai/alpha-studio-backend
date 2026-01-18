@@ -1,5 +1,5 @@
 # Project Summary
-**Last Updated:** 2026-01-17 (Standalone Backend Repository)
+**Last Updated:** 2026-01-18 (Course Management API)
 **Updated By:** Claude Code
 
 ---
@@ -31,11 +31,13 @@ alpha-studio-backend/
 │   │   ├── test-connection.js     # Connection test script
 │   │   └── migrate-passwords.js   # Password hashing migration
 │   ├── models/
-│   │   └── User.js                # User model with bcrypt
+│   │   ├── User.js                # User model with bcrypt
+│   │   └── Course.js              # Course model with multilingual support
 │   ├── middleware/
-│   │   └── auth.js                # JWT auth middleware
+│   │   └── auth.js                # JWT auth + adminOnly middleware
 │   └── routes/
-│       └── auth.js                # Auth API routes
+│       ├── auth.js                # Auth API routes
+│       └── courses.js             # Course CRUD + publish/archive routes
 ├── .claude/                       # Documentation
 │   ├── PROJECT_SUMMARY.md
 │   ├── CONVENTIONS.md
