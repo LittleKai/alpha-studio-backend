@@ -4,12 +4,23 @@ import { authMiddleware, modOnly } from '../middleware/auth.js';
 
 const router = express.Router();
 
-// All routes require mod/admin access
-router.use(authMiddleware, modOnly);
+// Helper function to check if user is mod/admin from token
+async function checkIsMod(authHeader) {
+    try {
+        const token = authHeader.replace('Bearer ', '');
+        const { verifyToken } = await import('../middleware/auth.js');
+        const decoded = verifyToken(token);
+        const User = (await import('../models/User.js')).default;
+        const user = await User.findById(decoded.userId);
+        return user && (user.role === 'admin' || user.role === 'mod');
+    } catch {
+        return false;
+    }
+}
 
 // @route   GET /api/partners
 // @desc    Get all partners with filtering, pagination, search
-// @access  Mod/Admin
+// @access  Public (published only) / Mod/Admin (all)
 router.get('/', async (req, res) => {
     try {
         const {
@@ -24,12 +35,19 @@ router.get('/', async (req, res) => {
         // Build query
         const query = {};
 
-        if (partnerType) {
-            query.partnerType = partnerType;
+        // Check if user is mod/admin
+        const authHeader = req.headers.authorization;
+        const isMod = authHeader && await checkIsMod(authHeader);
+
+        // Public users only see published partners
+        if (status && isMod) {
+            query.status = status;
+        } else if (!isMod) {
+            query.status = 'published';
         }
 
-        if (status) {
-            query.status = status;
+        if (partnerType) {
+            query.partnerType = partnerType;
         }
 
         if (search) {
@@ -85,7 +103,7 @@ router.get('/', async (req, res) => {
 // @route   GET /api/partners/stats
 // @desc    Get partner statistics
 // @access  Mod/Admin
-router.get('/stats', async (req, res) => {
+router.get('/stats', authMiddleware, modOnly, async (req, res) => {
     try {
         const [
             totalPartners,
@@ -140,12 +158,23 @@ async function findPartnerByIdOrSlug(identifier) {
 
 // @route   GET /api/partners/:idOrSlug
 // @desc    Get single partner by ID or slug
-// @access  Mod/Admin
+// @access  Public (published only) / Mod/Admin (all)
 router.get('/:idOrSlug', async (req, res) => {
     try {
         const partner = await findPartnerByIdOrSlug(req.params.idOrSlug);
 
         if (!partner) {
+            return res.status(404).json({
+                success: false,
+                message: 'Partner not found'
+            });
+        }
+
+        // Check if partner is published (or user is mod/admin)
+        const authHeader = req.headers.authorization;
+        const isMod = authHeader && await checkIsMod(authHeader);
+
+        if (partner.status !== 'published' && !isMod) {
             return res.status(404).json({
                 success: false,
                 message: 'Partner not found'
@@ -176,7 +205,7 @@ router.get('/:idOrSlug', async (req, res) => {
 // @route   POST /api/partners
 // @desc    Create a new partner
 // @access  Mod/Admin
-router.post('/', async (req, res) => {
+router.post('/', authMiddleware, modOnly, async (req, res) => {
     try {
         const {
             companyName,
@@ -190,7 +219,8 @@ router.post('/', async (req, res) => {
             status,
             featured,
             order,
-            socialLinks
+            socialLinks,
+            skills
         } = req.body;
 
         if (!companyName) {
@@ -213,6 +243,7 @@ router.post('/', async (req, res) => {
             featured: featured || false,
             order: order || 0,
             socialLinks: socialLinks || {},
+            skills: skills || [],
             createdBy: req.user._id
         });
 
@@ -248,7 +279,7 @@ router.post('/', async (req, res) => {
 // @route   PUT /api/partners/:idOrSlug
 // @desc    Update a partner
 // @access  Mod/Admin
-router.put('/:idOrSlug', async (req, res) => {
+router.put('/:idOrSlug', authMiddleware, modOnly, async (req, res) => {
     try {
         const {
             companyName,
@@ -262,7 +293,8 @@ router.put('/:idOrSlug', async (req, res) => {
             status,
             featured,
             order,
-            socialLinks
+            socialLinks,
+            skills
         } = req.body;
 
         const partner = await findPartnerByIdOrSlug(req.params.idOrSlug);
@@ -285,6 +317,7 @@ router.put('/:idOrSlug', async (req, res) => {
         if (featured !== undefined) partner.featured = featured;
         if (order !== undefined) partner.order = order;
         if (socialLinks) partner.socialLinks = socialLinks;
+        if (skills !== undefined) partner.skills = skills;
 
         if (status && status !== partner.status) {
             partner.status = status;
@@ -320,7 +353,7 @@ router.put('/:idOrSlug', async (req, res) => {
 // @route   DELETE /api/partners/:idOrSlug
 // @desc    Delete a partner
 // @access  Mod/Admin
-router.delete('/:idOrSlug', async (req, res) => {
+router.delete('/:idOrSlug', authMiddleware, modOnly, async (req, res) => {
     try {
         const partner = await findPartnerByIdOrSlug(req.params.idOrSlug);
 
@@ -357,7 +390,7 @@ router.delete('/:idOrSlug', async (req, res) => {
 // @route   PATCH /api/partners/:idOrSlug/publish
 // @desc    Publish a partner
 // @access  Mod/Admin
-router.patch('/:idOrSlug/publish', async (req, res) => {
+router.patch('/:idOrSlug/publish', authMiddleware, modOnly, async (req, res) => {
     try {
         const partner = await findPartnerByIdOrSlug(req.params.idOrSlug);
 
@@ -404,7 +437,7 @@ router.patch('/:idOrSlug/publish', async (req, res) => {
 // @route   PATCH /api/partners/:idOrSlug/unpublish
 // @desc    Unpublish a partner
 // @access  Mod/Admin
-router.patch('/:idOrSlug/unpublish', async (req, res) => {
+router.patch('/:idOrSlug/unpublish', authMiddleware, modOnly, async (req, res) => {
     try {
         const partner = await findPartnerByIdOrSlug(req.params.idOrSlug);
 

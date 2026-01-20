@@ -1,5 +1,5 @@
 # Project Summary
-**Last Updated:** 2026-01-18 (Course Management API)
+**Last Updated:** 2026-01-19 (Partner Skills, Index Cleanup)
 **Updated By:** Claude Code
 
 ---
@@ -32,12 +32,16 @@ alpha-studio-backend/
 │   │   └── migrate-passwords.js   # Password hashing migration
 │   ├── models/
 │   │   ├── User.js                # User model with bcrypt
-│   │   └── Course.js              # Course model with multilingual support
+│   │   ├── Course.js              # Course model with multilingual support
+│   │   ├── Job.js                 # Job listings with multilingual support
+│   │   └── Partner.js             # Partner profiles with skills array
 │   ├── middleware/
 │   │   └── auth.js                # JWT auth + adminOnly middleware
 │   └── routes/
 │       ├── auth.js                # Auth API routes
-│       └── courses.js             # Course CRUD + publish/archive routes
+│       ├── courses.js             # Course CRUD + publish/archive routes
+│       ├── jobs.js                # Job CRUD + publish/close routes
+│       └── partners.js            # Partner CRUD + publish/unpublish routes
 ├── .claude/                       # Documentation
 │   ├── PROJECT_SUMMARY.md
 │   ├── CONVENTIONS.md
@@ -69,6 +73,24 @@ alpha-studio-backend/
 │   ├── PATCH  /:id/publish    # Publish course
 │   ├── PATCH  /:id/unpublish  # Unpublish course
 │   └── PATCH  /:id/archive    # Archive course
+├── /jobs (admin for write, public for read)
+│   ├── GET    /           # List jobs (pagination, filters, search)
+│   ├── GET    /stats      # Job statistics
+│   ├── GET    /:id        # Get single job
+│   ├── POST   /           # Create job (admin)
+│   ├── PUT    /:id        # Update job (admin)
+│   ├── DELETE /:id        # Delete job (admin)
+│   ├── PATCH  /:id/publish    # Publish job (admin)
+│   └── PATCH  /:id/close      # Close job (admin)
+├── /partners (admin for write, public for read)
+│   ├── GET    /           # List partners (pagination, filters, search)
+│   ├── GET    /stats      # Partner statistics
+│   ├── GET    /:id        # Get single partner
+│   ├── POST   /           # Create partner (admin)
+│   ├── PUT    /:id        # Update partner (admin)
+│   ├── DELETE /:id        # Delete partner (admin)
+│   ├── PATCH  /:id/publish    # Publish partner (admin)
+│   └── PATCH  /:id/unpublish  # Unpublish partner (admin)
 └── /health               # Health check endpoint
 ```
 
@@ -135,6 +157,14 @@ alpha-studio-backend/
 | Course Statistics | ✅ Complete | routes/courses.js | Aggregated stats endpoint |
 | Multilingual Courses | ✅ Complete | models/Course.js | VI/EN title and description |
 | Course Modules/Lessons | ✅ Complete | models/Course.js | Nested schema structure |
+| Job CRUD | ✅ Complete | routes/jobs.js | Create, Read, Update, Delete |
+| Job Publishing | ✅ Complete | routes/jobs.js | Publish, Close |
+| Job Statistics | ✅ Complete | routes/jobs.js | Aggregated stats endpoint |
+| Partner CRUD | ✅ Complete | routes/partners.js | Create, Read, Update, Delete |
+| Partner Publishing | ✅ Complete | routes/partners.js | Publish, Unpublish |
+| Partner Statistics | ✅ Complete | routes/partners.js | Aggregated stats endpoint |
+| Partner Skills | ✅ Complete | models/Partner.js | String array for skills |
+| Stale Index Cleanup | ✅ Complete | db/connection.js | Auto-drops stale indexes on startup |
 
 ---
 
@@ -189,7 +219,14 @@ FRONTEND_URL=https://...            # Frontend URL for CORS
 
 ## 7. Recent Changes (Last 3 Sessions)
 
-1. **2026-01-18** - Course Management API
+1. **2026-01-19** - Partner Skills, Index Cleanup
+   - Added `skills` field to Partner model (array of strings)
+   - Added `cleanupStaleIndexes()` function in `db/connection.js`
+   - Auto-drops stale `userId_1` index from partners collection on startup
+   - Fixed duplicate key error when creating partners
+   - Partner model now supports text search on company name and descriptions
+
+2. **2026-01-18** - Course Management API
    - Created Course model with multilingual support (VI/EN)
    - Implemented full CRUD API for courses (admin only)
    - Added publish/unpublish/archive endpoints (PATCH)
@@ -198,17 +235,11 @@ FRONTEND_URL=https://...            # Frontend URL for CORS
    - Fixed CORS to include PATCH method
    - Nested schema for modules and lessons with virtual fields
 
-2. **2026-01-17** - Render Deployment
+3. **2026-01-17** - Render Deployment
    - Deployed to Render (https://alpha-studio-backend.onrender.com)
    - Configured environment variables (MONGODB_URI, JWT_SECRET, FRONTEND_URL)
    - Added "server" script to package.json for Render compatibility
    - MongoDB Atlas IP whitelist configuration
-
-3. **2026-01-17** - Standalone Backend Repository
-   - Separated from frontend monorepo
-   - Created independent package.json
-   - Updated CORS configuration for production
-   - Created comprehensive README.md
 
 ---
 

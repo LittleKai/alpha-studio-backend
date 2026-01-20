@@ -67,6 +67,10 @@ const partnerSchema = new mongoose.Schema({
         linkedin: { type: String, default: '' },
         twitter: { type: String, default: '' }
     },
+    skills: [{
+        type: String,
+        trim: true
+    }],
     createdBy: {
         type: mongoose.Schema.Types.ObjectId,
         ref: 'User'
