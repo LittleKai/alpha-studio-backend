@@ -8,7 +8,14 @@
       "Bash(npx tsc:*)",
       "Bash(node:*)",
       "Bash(xcopy:*)",
-      "Bash(robocopy:*)"
-    ]
+      "Bash(robocopy:*)",
+      "Bash(git reset:*)",
+      "Bash(git commit:*)",
+      "Bash(tree:*)",
+      "Edit(.claude/*)",
+      "Edit(.claude/**/*)",
+      "Edit(*)"
+    ],
+    "autoApprove": true
   }
 }
