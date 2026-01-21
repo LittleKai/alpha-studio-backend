@@ -182,11 +182,38 @@ router.get('/me', authMiddleware, async (req, res) => {
 // @access  Private
 router.put('/profile', authMiddleware, async (req, res) => {
     try {
-        const { name, avatar } = req.body;
+        const {
+            name,
+            avatar,
+            bio,
+            skills,
+            phone,
+            location,
+            birthDate,
+            showBirthDate,
+            socials,
+            featuredWorks,
+            attachments
+        } = req.body;
 
         const updateData = {};
         if (name) updateData.name = name;
         if (avatar !== undefined) updateData.avatar = avatar;
+        if (bio !== undefined) updateData.bio = bio;
+        if (skills !== undefined) updateData.skills = skills;
+        if (phone !== undefined) updateData.phone = phone;
+        if (location !== undefined) updateData.location = location;
+        if (birthDate !== undefined) updateData.birthDate = birthDate;
+        if (showBirthDate !== undefined) updateData.showBirthDate = showBirthDate;
+        if (socials !== undefined) updateData.socials = socials;
+        if (featuredWorks !== undefined) {
+            // Limit to reasonable number of featured works
+            updateData.featuredWorks = featuredWorks.slice(0, 10);
+        }
+        if (attachments !== undefined) {
+            // Limit to 3 attachments
+            updateData.attachments = attachments.slice(0, 3);
+        }
 
         const user = await User.findByIdAndUpdate(
             req.user._id,

@@ -29,6 +29,48 @@ const userSchema = new mongoose.Schema({
         type: String,
         default: null
     },
+    // Extended profile fields
+    bio: {
+        type: String,
+        default: '',
+        maxlength: [500, 'Bio cannot exceed 500 characters']
+    },
+    skills: [{
+        type: String,
+        trim: true
+    }],
+    phone: {
+        type: String,
+        default: ''
+    },
+    location: {
+        type: String,
+        default: ''
+    },
+    birthDate: {
+        type: Date,
+        default: null
+    },
+    showBirthDate: {
+        type: Boolean,
+        default: false
+    },
+    socials: {
+        linkedin: { type: String, default: '' },
+        behance: { type: String, default: '' },
+        github: { type: String, default: '' }
+    },
+    featuredWorks: [{
+        image: { type: String, required: true },
+        title: { type: String, required: true },
+        description: { type: String, default: '' }
+    }],
+    attachments: [{
+        url: { type: String, required: true },
+        filename: { type: String, required: true },
+        type: { type: String, default: 'file' },
+        size: { type: Number, default: 0 }
+    }],
     subscription: {
         plan: {
             type: String,
