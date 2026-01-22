@@ -22,9 +22,9 @@ const BANK_INFO = {
 const CREDIT_PACKAGES = [
     { id: 'pkg0', credits: 10, price: 10000, label: '10 Credits' },
     { id: 'pkg1', credits: 100, price: 100000, label: '100 Credits' },
-    { id: 'pkg2', credits: 210, price: 200000, label: '210 Credits', bonus: '+10%' },
+    { id: 'pkg2', credits: 210, price: 200000, label: '210 Credits', bonus: '+5%' },
     { id: 'pkg3', credits: 550, price: 500000, label: '550 Credits', bonus: '+10%', popular: true },
-    { id: 'pkg4', credits: 1200, price: 1000000, label: '1.200 Credits', bonus: '+20%' }
+    { id: 'pkg4', credits: 1120, price: 1000000, label: '1.120 Credits', bonus: '+12%' }
 ];
 
 /**
@@ -430,7 +430,7 @@ router.get('/history', authMiddleware, async (req, res) => {
         const { page = 1, limit = 20, status } = req.query;
         const query = { userId: req.user._id };
 
-        if (status && ['pending', 'completed', 'failed', 'cancelled'].includes(status)) {
+        if (status && ['pending', 'completed', 'failed', 'cancelled', 'timeout'].includes(status)) {
             query.status = status;
         }
 
@@ -464,6 +464,48 @@ router.get('/history', authMiddleware, async (req, res) => {
         res.status(500).json({
             success: false,
             message: 'Failed to get payment history'
+        });
+    }
+});
+
+/**
+ * POST /api/payment/confirm/:transactionId
+ * User confirms they have made the payment (sets confirmedAt timestamp)
+ * Used for timeout tracking - if no webhook match within 5 minutes, transaction times out
+ * AUTH REQUIRED
+ */
+router.post('/confirm/:transactionId', authMiddleware, async (req, res) => {
+    try {
+        const transaction = await Transaction.findOne({
+            _id: req.params.transactionId,
+            userId: req.user._id,
+            status: 'pending'
+        });
+
+        if (!transaction) {
+            return res.status(404).json({
+                success: false,
+                message: 'Không tìm thấy giao dịch hoặc giao dịch đã được xử lý'
+            });
+        }
+
+        // Set confirmedAt if not already set
+        if (!transaction.confirmedAt) {
+            transaction.confirmedAt = new Date();
+            await transaction.save();
+        }
+
+        res.json({
+            success: true,
+            message: 'Đã ghi nhận xác nhận thanh toán',
+            data: transaction
+        });
+
+    } catch (error) {
+        console.error('Confirm payment error:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Không thể xác nhận thanh toán'
         });
     }
 });
@@ -621,7 +663,7 @@ router.get('/admin/transactions', authMiddleware, adminOnly, async (req, res) =>
         const { page = 1, limit = 50, status, userId } = req.query;
         const query = {};
 
-        if (status && ['pending', 'completed', 'failed', 'cancelled'].includes(status)) {
+        if (status && ['pending', 'completed', 'failed', 'cancelled', 'timeout'].includes(status)) {
             query.status = status;
         }
         if (userId) {

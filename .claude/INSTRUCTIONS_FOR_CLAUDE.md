@@ -4,6 +4,13 @@
 Read PROJECT_SUMMARY.md FIRST, not the entire codebase.
 Update documentation AFTER every change.
 
+## MULTILINGUAL REQUIREMENT (IMPORTANT)
+All user-facing text must support both Vietnamese (vi) and English (en):
+- API response messages should be in Vietnamese by default
+- Error messages should be clear and user-friendly in Vietnamese
+- Consider adding language header support for future i18n
+- Frontend handles translations via i18n context
+
 ---
 
 ## BEFORE ANY TASK
@@ -43,26 +50,37 @@ Use template from `.claude/templates/change-log-template.md`
 
 ---
 
-## ALPHA STUDIO SPECIFIC RULES
+## ALPHA STUDIO BACKEND SPECIFIC RULES
 
-### Styling
-- ALWAYS use CSS Custom Properties (see CONVENTIONS.md)
-- NEVER hardcode colors - use `var(--bg-primary)`, etc.
-- Use `glass-card` class for card effects
+### API Response Format
+- Always return consistent JSON: `{ success: boolean, message: string, data?: any }`
+- Error messages should be in Vietnamese (primary language)
+- Use try/catch for all async operations
 
-### i18n
-- Add translations to ALL 3 files: `en.ts`, `vi.ts`, `zh.ts`
-- Use `t('section.key')` pattern
-- Vietnamese is the primary language
+### API Response Messages (Multilingual)
+When writing API responses, always provide user-friendly messages:
+```javascript
+// Good - Vietnamese message
+res.status(400).json({ success: false, message: 'Số credits không hợp lệ' });
 
-### Components
-- Keep under 500 lines
-- Use `useTranslation()` for all user-facing text
-- Use `useTheme()` for theme-aware components
+// Good - Clear error
+res.status(404).json({ success: false, message: 'Không tìm thấy giao dịch' });
+```
 
-### API
-- All AI calls go through `geminiService.ts`
-- Environment variable: `VITE_GEMINI_API_KEY`
+### Database
+- Use Mongoose for all database operations
+- Always add appropriate indexes for frequently queried fields
+- Use `populate()` for referenced documents
+
+### Authentication
+- Use `authMiddleware` for protected routes
+- Use `adminOnly` middleware for admin-only routes
+- JWT token in Authorization header or httpOnly cookie
+
+### Error Handling
+- Catch Mongoose validation errors
+- Handle duplicate key errors (code 11000)
+- Log errors to console with context
 
 ---
 

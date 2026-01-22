@@ -26,8 +26,13 @@ const transactionSchema = new mongoose.Schema({
     },
     status: {
         type: String,
-        enum: ['pending', 'completed', 'failed', 'cancelled'],
+        enum: ['pending', 'completed', 'failed', 'cancelled', 'timeout'],
         default: 'pending'
+    },
+    // Track when user confirmed payment (clicked "Đã chuyển khoản")
+    confirmedAt: {
+        type: Date,
+        default: null
     },
     transactionCode: {
         type: String,

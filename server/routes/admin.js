@@ -272,60 +272,34 @@ router.get('/transactions', async (req, res) => {
 });
 
 /**
- * POST /api/admin/transactions/:id/process
- * Manually process a pending transaction
+ * POST /api/admin/transactions/check-timeout
+ * Check and update timeout transactions (confirmed > 5 minutes without webhook match)
  */
-router.post('/transactions/:id/process', async (req, res) => {
+router.post('/transactions/check-timeout', async (req, res) => {
     try {
-        const { action, note } = req.body; // action: 'approve' or 'reject'
+        const fiveMinutesAgo = new Date(Date.now() - 5 * 60 * 1000);
 
-        const transaction = await Transaction.findById(req.params.id);
-        if (!transaction) {
-            return res.status(404).json({ success: false, message: 'Transaction not found' });
-        }
-
-        if (transaction.status !== 'pending') {
-            return res.status(400).json({ success: false, message: 'Transaction is not pending' });
-        }
-
-        if (action === 'approve') {
-            // Update transaction
-            transaction.status = 'completed';
-            transaction.processedBy = req.user._id;
-            transaction.adminNote = note || 'Approved by admin';
-            transaction.processedAt = new Date();
-            await transaction.save();
-
-            // Add credits to user
-            if (transaction.userId) {
-                await User.findByIdAndUpdate(transaction.userId, {
-                    $inc: { balance: transaction.credits }
-                });
+        // Find transactions that were confirmed but not matched within 5 minutes
+        const result = await Transaction.updateMany(
+            {
+                status: 'pending',
+                confirmedAt: { $ne: null, $lt: fiveMinutesAgo }
+            },
+            {
+                $set: {
+                    status: 'timeout',
+                    failedReason: 'No webhook received within 5 minutes after confirmation'
+                }
             }
+        );
 
-            res.json({
-                success: true,
-                message: 'Đã duyệt giao dịch',
-                data: transaction
-            });
-        } else if (action === 'reject') {
-            transaction.status = 'failed';
-            transaction.processedBy = req.user._id;
-            transaction.adminNote = note || 'Rejected by admin';
-            transaction.failedReason = note || 'Rejected by admin';
-            transaction.processedAt = new Date();
-            await transaction.save();
-
-            res.json({
-                success: true,
-                message: 'Đã từ chối giao dịch',
-                data: transaction
-            });
-        } else {
-            res.status(400).json({ success: false, message: 'Invalid action' });
-        }
+        res.json({
+            success: true,
+            message: `Updated ${result.modifiedCount} transactions to timeout`,
+            data: { modifiedCount: result.modifiedCount }
+        });
     } catch (error) {
-        console.error('Admin process transaction error:', error);
+        console.error('Admin check timeout error:', error);
         res.status(500).json({ success: false, message: 'Lỗi server' });
     }
 });
@@ -479,6 +453,123 @@ router.post('/webhook-logs/:id/reprocess', async (req, res) => {
         });
     } catch (error) {
         console.error('Admin reprocess webhook error:', error);
+        res.status(500).json({ success: false, message: 'Lỗi server' });
+    }
+});
+
+/**
+ * POST /api/admin/webhook-logs/:id/assign-user
+ * Assign a user to an unmatched webhook and credit their account
+ */
+router.post('/webhook-logs/:id/assign-user', async (req, res) => {
+    try {
+        const { userId, note } = req.body;
+
+        if (!userId) {
+            return res.status(400).json({ success: false, message: 'User ID is required' });
+        }
+
+        const log = await WebhookLog.findById(req.params.id);
+        if (!log) {
+            return res.status(404).json({ success: false, message: 'Log not found' });
+        }
+
+        if (log.status === 'matched') {
+            return res.status(400).json({ success: false, message: 'Webhook already matched' });
+        }
+
+        const user = await User.findById(userId);
+        if (!user) {
+            return res.status(404).json({ success: false, message: 'User not found' });
+        }
+
+        const amount = log.parsedData?.amount || 0;
+        if (amount <= 0) {
+            return res.status(400).json({ success: false, message: 'Invalid amount in webhook' });
+        }
+
+        // Calculate credits based on amount (using base rate: 1000 VND = 1 credit)
+        // Or find matching package
+        const CREDIT_PACKAGES = [
+            { price: 10000, credits: 10 },
+            { price: 100000, credits: 100 },
+            { price: 200000, credits: 210 },
+            { price: 500000, credits: 550 },
+            { price: 1000000, credits: 1120 }
+        ];
+        const pkg = CREDIT_PACKAGES.find(p => p.price === amount);
+        const credits = pkg ? pkg.credits : Math.floor(amount / 1000);
+
+        // Create transaction record
+        const transactionCode = `WEBHOOK${Date.now()}${Math.random().toString(36).substring(2, 6).toUpperCase()}`;
+        const transaction = new Transaction({
+            userId: user._id,
+            type: 'topup',
+            amount: amount,
+            credits: credits,
+            status: 'completed',
+            transactionCode,
+            paymentMethod: 'bank_transfer',
+            description: `Admin assigned from webhook: ${note || 'Manual assignment'}`,
+            webhookData: log.payload,
+            webhookLogId: log._id,
+            bankTransactionId: log.parsedData?.bankTransactionId || null,
+            processedBy: req.user._id,
+            adminNote: note || 'Assigned from unmatched webhook by admin',
+            processedAt: new Date()
+        });
+        await transaction.save();
+
+        // Update user balance
+        user.balance = (user.balance || 0) + credits;
+        await user.save();
+
+        // Update webhook log
+        log.status = 'matched';
+        log.matchedTransactionId = transaction._id;
+        log.matchedUserId = user._id;
+        log.processingNotes = `Manually assigned to ${user.name} (${user.email}) by admin. Credits: ${credits}`;
+        await log.save();
+
+        res.json({
+            success: true,
+            message: `Đã cộng ${credits} credits cho ${user.name}`,
+            data: { log, transaction, newBalance: user.balance }
+        });
+    } catch (error) {
+        console.error('Admin assign webhook user error:', error);
+        res.status(500).json({ success: false, message: 'Lỗi server' });
+    }
+});
+
+/**
+ * POST /api/admin/webhook-logs/:id/ignore
+ * Mark a webhook as ignored (cancelled)
+ */
+router.post('/webhook-logs/:id/ignore', async (req, res) => {
+    try {
+        const { note } = req.body;
+
+        const log = await WebhookLog.findById(req.params.id);
+        if (!log) {
+            return res.status(404).json({ success: false, message: 'Log not found' });
+        }
+
+        if (log.status === 'matched') {
+            return res.status(400).json({ success: false, message: 'Cannot ignore matched webhook' });
+        }
+
+        log.status = 'ignored';
+        log.processingNotes = `Ignored by admin: ${note || 'No reason provided'}`;
+        await log.save();
+
+        res.json({
+            success: true,
+            message: 'Đã bỏ qua webhook này',
+            data: log
+        });
+    } catch (error) {
+        console.error('Admin ignore webhook error:', error);
         res.status(500).json({ success: false, message: 'Lỗi server' });
     }
 });

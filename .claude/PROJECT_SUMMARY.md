@@ -1,5 +1,5 @@
 # Project Summary
-**Last Updated:** 2026-01-19 (Partner Skills, Index Cleanup)
+**Last Updated:** 2026-01-22 (Payment System with Casso Webhook V2)
 **Updated By:** Claude Code
 
 ---
@@ -31,21 +31,26 @@ alpha-studio-backend/
 │   │   ├── test-connection.js     # Connection test script
 │   │   └── migrate-passwords.js   # Password hashing migration
 │   ├── models/
-│   │   ├── User.js                # User model with bcrypt
+│   │   ├── User.js                # User model with bcrypt + balance field
 │   │   ├── Course.js              # Course model with multilingual support
 │   │   ├── Job.js                 # Job listings with multilingual support
-│   │   └── Partner.js             # Partner profiles with skills array
+│   │   ├── Partner.js             # Partner profiles with skills array
+│   │   ├── Transaction.js         # Payment transactions (topup, spend, etc.)
+│   │   └── WebhookLog.js          # Casso webhook logging
 │   ├── middleware/
 │   │   └── auth.js                # JWT auth + adminOnly middleware
 │   └── routes/
 │       ├── auth.js                # Auth API routes
 │       ├── courses.js             # Course CRUD + publish/archive routes
 │       ├── jobs.js                # Job CRUD + publish/close routes
-│       └── partners.js            # Partner CRUD + publish/unpublish routes
+│       ├── partners.js            # Partner CRUD + publish/unpublish routes
+│       ├── payment.js             # Payment API (create, confirm, cancel, webhook)
+│       └── admin.js               # Admin API (users, transactions, webhook management)
 ├── .claude/                       # Documentation
 │   ├── PROJECT_SUMMARY.md
 │   ├── CONVENTIONS.md
 │   ├── DATABASE.md
+│   ├── INSTRUCTIONS_FOR_CLAUDE.md
 │   └── history/
 ├── package.json
 ├── .env.example
@@ -91,6 +96,31 @@ alpha-studio-backend/
 │   ├── DELETE /:id        # Delete partner (admin)
 │   ├── PATCH  /:id/publish    # Publish partner (admin)
 │   └── PATCH  /:id/unpublish  # Unpublish partner (admin)
+├── /payment
+│   ├── GET    /pricing           # Get credit packages (public)
+│   ├── GET    /bank-info         # Get bank info (public)
+│   ├── POST   /create            # Create payment request (auth)
+│   ├── POST   /confirm/:id       # Confirm payment (auth)
+│   ├── DELETE /cancel/:id        # Cancel payment (auth)
+│   ├── GET    /history           # Get payment history (auth)
+│   ├── GET    /pending           # Get pending payments (auth)
+│   ├── GET    /status/:id        # Check payment status (auth)
+│   ├── POST   /webhook           # Casso webhook (no auth)
+│   ├── POST   /verify            # Admin verify payment (admin)
+│   └── GET    /admin/transactions # Admin get all transactions (admin)
+├── /admin (admin only)
+│   ├── GET    /users             # List users with search
+│   ├── GET    /users/:id         # Get user details + stats
+│   ├── GET    /users/:id/transactions  # Get user transactions
+│   ├── POST   /users/:id/topup   # Manual top-up
+│   ├── GET    /transactions      # List all transactions
+│   ├── POST   /transactions/check-timeout  # Check timeout transactions
+│   ├── GET    /webhook-logs      # List webhook logs
+│   ├── GET    /webhook-logs/:id  # Get webhook log detail
+│   ├── POST   /webhook-logs/:id/reprocess  # Reprocess webhook
+│   ├── POST   /webhook-logs/:id/assign-user  # Assign user to webhook
+│   ├── POST   /webhook-logs/:id/ignore  # Ignore webhook
+│   └── GET    /stats             # Dashboard statistics
 └── /health               # Health check endpoint
 ```
 
@@ -107,8 +137,8 @@ alpha-studio-backend/
 ### Database Architecture (MongoDB Atlas)
 - **Connection:** MongoDB Atlas Cloud (Cluster0)
 - **Database Name:** `alpha-studio`
-- **Collections:** 8 collections
-  - `users` - User accounts with hashed passwords
+- **Collections:** 10 collections
+  - `users` - User accounts with hashed passwords + balance
   - `courses` - Course information
   - `students` - Student profiles
   - `partners` - Partner profiles
@@ -116,6 +146,8 @@ alpha-studio-backend/
   - `studio_sessions` - AI studio session history
   - `transformations` - Available transformations
   - `api_usage` - API usage tracking
+  - `transactions` - Payment transactions (topup, spend, refund, manual_topup, bonus)
+  - `webhooklogs` - Casso webhook logs for debugging/reprocessing
 - **Documentation:** See DATABASE.md for detailed schema
 
 ### CORS Configuration
@@ -165,6 +197,12 @@ alpha-studio-backend/
 | Partner Statistics | ✅ Complete | routes/partners.js | Aggregated stats endpoint |
 | Partner Skills | ✅ Complete | models/Partner.js | String array for skills |
 | Stale Index Cleanup | ✅ Complete | db/connection.js | Auto-drops stale indexes on startup |
+| Payment System | ✅ Complete | routes/payment.js, models/Transaction.js | Credit packages, VietQR, Casso webhook |
+| Webhook Logging | ✅ Complete | models/WebhookLog.js | Stores all incoming webhooks for debugging |
+| Admin Management | ✅ Complete | routes/admin.js | Users, transactions, webhook management |
+| Manual Top-up | ✅ Complete | routes/admin.js | Admin can top-up users manually |
+| Webhook Assignment | ✅ Complete | routes/admin.js | Admin can assign unmatched webhooks to users |
+| Transaction Timeout | ✅ Complete | routes/admin.js | Auto-timeout after 5 min without webhook match |
 
 ---
 
@@ -198,11 +236,15 @@ alpha-studio-backend/
 6. Return consistent JSON response format: `{ success, message, data? }`
 
 ### Critical Files (read before major changes):
-- `server/models/User.js` - User schema and password hashing
+- `server/models/User.js` - User schema and password hashing + balance field
 - `server/models/Course.js` - Course schema with multilingual fields
+- `server/models/Transaction.js` - Payment transaction schema
+- `server/models/WebhookLog.js` - Webhook log schema
 - `server/middleware/auth.js` - JWT verification + adminOnly middleware
 - `server/routes/auth.js` - All authentication endpoints
 - `server/routes/courses.js` - Course CRUD and management endpoints
+- `server/routes/payment.js` - Payment API and Casso webhook handler
+- `server/routes/admin.js` - Admin management endpoints
 - `server/db/connection.js` - MongoDB connection setup
 - `DATABASE.md` - Complete database schema documentation
 
@@ -213,20 +255,33 @@ JWT_SECRET=your_secret_key          # JWT signing secret
 PORT=3001                           # Server port (default: 3001)
 NODE_ENV=development                # Environment mode
 FRONTEND_URL=https://...            # Frontend URL for CORS
+CASSO_WEBHOOK_SECRET=your_secret    # Casso webhook verification secret
 ```
 
 ---
 
 ## 7. Recent Changes (Last 3 Sessions)
 
-1. **2026-01-19** - Partner Skills, Index Cleanup
+1. **2026-01-22** - Payment System with Casso Webhook V2
+   - Created Transaction model with statuses: pending, completed, failed, cancelled, timeout
+   - Created WebhookLog model for storing incoming Casso webhooks
+   - Implemented payment routes: create, confirm, cancel, history, pending, status, webhook
+   - Integrated Casso Webhook V2 format (data as object, not array)
+   - Credit packages: 10k=10, 100k=100, 200k=210(+5%), 500k=550(+10%), 1M=1120(+12%)
+   - Bank: OCB, Account: CASS55252503, Holder: NGUYEN ANH DUC
+   - VietQR generation for QR code payments
+   - Admin management: users, transactions, webhook logs
+   - Admin can assign users to unmatched webhooks (auto-credits)
+   - Transaction timeout: confirmed transactions timeout after 5 min without webhook match
+
+2. **2026-01-19** - Partner Skills, Index Cleanup
    - Added `skills` field to Partner model (array of strings)
    - Added `cleanupStaleIndexes()` function in `db/connection.js`
    - Auto-drops stale `userId_1` index from partners collection on startup
    - Fixed duplicate key error when creating partners
    - Partner model now supports text search on company name and descriptions
 
-2. **2026-01-18** - Course Management API
+3. **2026-01-18** - Course Management API
    - Created Course model with multilingual support (VI/EN)
    - Implemented full CRUD API for courses (admin only)
    - Added publish/unpublish/archive endpoints (PATCH)
@@ -234,12 +289,6 @@ FRONTEND_URL=https://...            # Frontend URL for CORS
    - Created adminOnly middleware for authorization
    - Fixed CORS to include PATCH method
    - Nested schema for modules and lessons with virtual fields
-
-3. **2026-01-17** - Render Deployment
-   - Deployed to Render (https://alpha-studio-backend.onrender.com)
-   - Configured environment variables (MONGODB_URI, JWT_SECRET, FRONTEND_URL)
-   - Added "server" script to package.json for Render compatibility
-   - MongoDB Atlas IP whitelist configuration
 
 ---
 
