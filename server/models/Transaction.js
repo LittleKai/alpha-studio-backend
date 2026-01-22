@@ -6,15 +6,23 @@ const transactionSchema = new mongoose.Schema({
         ref: 'User',
         required: false // Can be null for unmatched webhooks
     },
+
+    // Transaction type
+    type: {
+        type: String,
+        enum: ['topup', 'spend', 'refund', 'manual_topup', 'bonus'],
+        default: 'topup',
+        index: true
+    },
+
     amount: {
         type: Number,
         required: [true, 'Amount is required'],
-        min: [1000, 'Minimum amount is 1000 VND']
+        min: [0, 'Amount cannot be negative']
     },
     credits: {
         type: Number,
-        required: [true, 'Credits is required'],
-        min: [0, 'Credits cannot be negative']
+        required: [true, 'Credits is required']
     },
     status: {
         type: String,
@@ -30,11 +38,28 @@ const transactionSchema = new mongoose.Schema({
     },
     paymentMethod: {
         type: String,
-        enum: ['bank_transfer', 'momo', 'vnpay'],
+        enum: ['bank_transfer', 'momo', 'vnpay', 'manual', 'system'],
         default: 'bank_transfer'
     },
+
+    // Service usage tracking (for spend transactions)
+    serviceType: {
+        type: String,
+        enum: ['gpu_rental', 'course', 'job_post', 'partner_fee', 'other', null],
+        default: null
+    },
+    serviceDetails: {
+        type: mongoose.Schema.Types.Mixed,
+        default: null
+    },
+
     webhookData: {
         type: mongoose.Schema.Types.Mixed,
+        default: null
+    },
+    webhookLogId: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'WebhookLog',
         default: null
     },
     bankTransactionId: {
@@ -45,6 +70,18 @@ const transactionSchema = new mongoose.Schema({
         type: String,
         default: ''
     },
+
+    // Admin processing
+    processedBy: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'User',
+        default: null
+    },
+    adminNote: {
+        type: String,
+        default: null
+    },
+
     processedAt: {
         type: Date,
         default: null
@@ -61,10 +98,14 @@ const transactionSchema = new mongoose.Schema({
     timestamps: true
 });
 
-// Index for faster queries
+// Indexes for faster queries
 transactionSchema.index({ userId: 1, createdAt: -1 });
 transactionSchema.index({ transactionCode: 1 });
 transactionSchema.index({ status: 1 });
+transactionSchema.index({ type: 1, createdAt: -1 });
+transactionSchema.index({ serviceType: 1 });
+transactionSchema.index({ processedBy: 1 });
+transactionSchema.index({ createdAt: -1 });
 
 // Virtual for formatted amount
 transactionSchema.virtual('formattedAmount').get(function() {

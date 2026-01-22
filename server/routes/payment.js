@@ -2,6 +2,7 @@ import express from 'express';
 import crypto from 'crypto';
 import Transaction from '../models/Transaction.js';
 import User from '../models/User.js';
+import WebhookLog from '../models/WebhookLog.js';
 import { authMiddleware, adminOnly } from '../middleware/auth.js';
 
 const router = express.Router();
@@ -87,18 +88,20 @@ const getCreditsForAmount = (amount) => {
  * Casso Webhook V2 format:
  * {
  *   "error": 0,
- *   "data": [{
- *     "id": 123456,
- *     "tid": "FT123456789",
- *     "description": "ALPHA123ABC chuyen tien",
+ *   "data": {
+ *     "id": 0,
+ *     "reference": "BANK_REF_ID",
+ *     "description": "ALPHA123ABC giao dich",
  *     "amount": 100000,
- *     "when": "2024-01-01 12:00:00",
- *     "bank_sub_acc_id": "0011100027976006",
- *     "corresponsiveName": "NGUYEN VAN A",
- *     "corresponsiveAccount": "1234567890",
- *     "corresponsiveBankId": "970436",
- *     "corresponsiveBankName": "Vietcombank"
- *   }]
+ *     "runningBalance": 25000000,
+ *     "transactionDateTime": "2025-02-12 15:36:21",
+ *     "accountNumber": "CASS55252503",
+ *     "bankName": "OCB",
+ *     "bankAbbreviation": "OCB",
+ *     "counterAccountName": "NGUYEN VAN A",
+ *     "counterAccountNumber": "1234567890",
+ *     "counterAccountBankId": ""
+ *   }
  * }
  */
 router.post('/webhook', async (req, res) => {
@@ -112,6 +115,15 @@ router.post('/webhook', async (req, res) => {
         // Verify webhook
         if (!verifyCassoWebhook(req)) {
             console.error('Invalid Casso webhook signature');
+            // Log invalid webhook
+            await WebhookLog.create({
+                source: 'casso',
+                payload: req.body,
+                status: 'error',
+                errorMessage: 'Invalid webhook signature',
+                ipAddress: req.ip,
+                headers: req.headers
+            });
             return res.status(200).json({ success: false, message: 'Invalid signature' });
         }
 
@@ -120,97 +132,149 @@ router.post('/webhook', async (req, res) => {
         // Check for error
         if (webhookData.error !== 0) {
             console.error('Casso webhook error:', webhookData.error);
+            await WebhookLog.create({
+                source: 'casso',
+                payload: webhookData,
+                status: 'error',
+                errorMessage: `Casso error code: ${webhookData.error}`,
+                ipAddress: req.ip,
+                headers: req.headers
+            });
             return res.status(200).json({ success: false, message: 'Webhook error' });
         }
 
-        // Process each transaction in data array
-        const transactions = webhookData.data || [];
-
-        for (const txData of transactions) {
-            const {
-                id: cassoId,
-                tid: bankTxId,
-                description,
-                amount,
-                when: txTime,
-                corresponsiveName,
-                corresponsiveAccount,
-                corresponsiveBankName
-            } = txData;
-
-            console.log(`Processing transaction: ${bankTxId}, amount: ${amount}, desc: ${description}`);
-
-            // Extract transfer content from description (format: ALPHAXXXXXX)
-            const contentMatch = description?.toUpperCase().match(/ALPHA[A-Z0-9]{6}/);
-
-            if (!contentMatch) {
-                console.log(`No ALPHA code found in description: ${description}`);
-                continue;
-            }
-
-            const transferContent = contentMatch[0];
-            console.log(`Found transfer content: ${transferContent}`);
-
-            // Find pending transaction with this transfer content
-            const transaction = await Transaction.findOne({
-                transactionCode: transferContent,
-                status: 'pending'
+        // Casso V2: data is an object, not array
+        const txData = webhookData.data;
+        if (!txData) {
+            console.error('No transaction data in webhook');
+            await WebhookLog.create({
+                source: 'casso',
+                payload: webhookData,
+                status: 'error',
+                errorMessage: 'No transaction data in webhook',
+                ipAddress: req.ip,
+                headers: req.headers
             });
-
-            if (!transaction) {
-                console.log(`No pending transaction found for: ${transferContent}`);
-
-                // Save unmatched transaction for manual review
-                const unmatchedTx = new Transaction({
-                    userId: null,
-                    amount: amount,
-                    credits: getCreditsForAmount(amount),
-                    status: 'pending',
-                    transactionCode: `UNMATCHED_${bankTxId}`,
-                    paymentMethod: 'bank_transfer',
-                    bankTransactionId: bankTxId,
-                    webhookData: txData,
-                    description: `Unmatched: ${description} from ${corresponsiveName}`
-                });
-                await unmatchedTx.save();
-                continue;
-            }
-
-            // Verify amount matches (allow 0 variance for exact match)
-            if (transaction.amount !== amount) {
-                console.error(`Amount mismatch: expected ${transaction.amount}, got ${amount}`);
-                transaction.status = 'failed';
-                transaction.failedReason = `Amount mismatch: expected ${transaction.amount}, got ${amount}`;
-                transaction.webhookData = txData;
-                await transaction.save();
-                continue;
-            }
-
-            // Update transaction to completed
-            transaction.status = 'completed';
-            transaction.webhookData = txData;
-            transaction.bankTransactionId = bankTxId;
-            transaction.processedAt = new Date();
-            transaction.description = `Nạp ${transaction.credits} credits từ ${corresponsiveName || 'Unknown'}`;
-            await transaction.save();
-
-            // Add credits to user balance
-            if (transaction.userId) {
-                const updatedUser = await User.findByIdAndUpdate(
-                    transaction.userId,
-                    { $inc: { balance: transaction.credits } },
-                    { new: true }
-                );
-                console.log(`User ${transaction.userId} balance updated: +${transaction.credits} credits. New balance: ${updatedUser?.balance}`);
-            }
-
-            console.log(`Transaction ${transferContent} completed successfully`);
+            return res.status(200).json({ success: false, message: 'No data' });
         }
 
-        return res.status(200).json({ success: true, message: 'Webhook processed' });
+        // Extract fields from Casso V2 format
+        const {
+            id: cassoId,
+            reference: bankTxId,
+            description,
+            amount,
+            transactionDateTime: txTime,
+            counterAccountName,
+            counterAccountNumber,
+            accountNumber,
+            bankName
+        } = txData;
+
+        console.log(`Processing transaction: ${bankTxId}, amount: ${amount}, desc: ${description}`);
+
+        // Create webhook log entry
+        const webhookLog = new WebhookLog({
+            source: 'casso',
+            payload: txData,
+            parsedData: {
+                transactionCode: null,
+                amount: amount,
+                description: description,
+                bankTransactionId: bankTxId,
+                when: txTime ? new Date(txTime) : new Date()
+            },
+            status: 'processing',
+            ipAddress: req.ip,
+            headers: req.headers
+        });
+
+        // Extract transfer content from description (format: ALPHAXXXXXX)
+        const contentMatch = description?.toUpperCase().match(/ALPHA[A-Z0-9]{6}/);
+
+        if (!contentMatch) {
+            console.log(`No ALPHA code found in description: ${description}`);
+            webhookLog.status = 'unmatched';
+            webhookLog.processingNotes = `No ALPHA code found. Description: ${description}`;
+            await webhookLog.save();
+            return res.status(200).json({ success: true, message: 'No matching code found' });
+        }
+
+        const transferContent = contentMatch[0];
+        webhookLog.parsedData.transactionCode = transferContent;
+        console.log(`Found transfer content: ${transferContent}`);
+
+        // Find pending transaction with this transfer content
+        const transaction = await Transaction.findOne({
+            transactionCode: transferContent,
+            status: 'pending'
+        });
+
+        if (!transaction) {
+            console.log(`No pending transaction found for: ${transferContent}`);
+            webhookLog.status = 'unmatched';
+            webhookLog.processingNotes = `No pending transaction found for code: ${transferContent}`;
+            await webhookLog.save();
+            return res.status(200).json({ success: true, message: 'No pending transaction found' });
+        }
+
+        // Verify amount matches
+        if (transaction.amount !== amount) {
+            console.error(`Amount mismatch: expected ${transaction.amount}, got ${amount}`);
+            transaction.status = 'failed';
+            transaction.failedReason = `Amount mismatch: expected ${transaction.amount}, got ${amount}`;
+            transaction.webhookData = txData;
+            transaction.webhookLogId = webhookLog._id;
+            await transaction.save();
+
+            webhookLog.status = 'error';
+            webhookLog.errorMessage = `Amount mismatch: expected ${transaction.amount}, got ${amount}`;
+            webhookLog.matchedTransactionId = transaction._id;
+            webhookLog.matchedUserId = transaction.userId;
+            await webhookLog.save();
+            return res.status(200).json({ success: true, message: 'Amount mismatch' });
+        }
+
+        // Update transaction to completed
+        transaction.status = 'completed';
+        transaction.webhookData = txData;
+        transaction.webhookLogId = webhookLog._id;
+        transaction.bankTransactionId = bankTxId;
+        transaction.processedAt = new Date();
+        transaction.description = `Nạp ${transaction.credits} credits từ ${counterAccountName || 'Bank Transfer'}`;
+        await transaction.save();
+
+        // Update webhook log
+        webhookLog.status = 'matched';
+        webhookLog.matchedTransactionId = transaction._id;
+        webhookLog.matchedUserId = transaction.userId;
+        webhookLog.processingNotes = `Successfully matched and processed. Credits: ${transaction.credits}`;
+        await webhookLog.save();
+
+        // Add credits to user balance
+        if (transaction.userId) {
+            const updatedUser = await User.findByIdAndUpdate(
+                transaction.userId,
+                { $inc: { balance: transaction.credits } },
+                { new: true }
+            );
+            console.log(`User ${transaction.userId} balance updated: +${transaction.credits} credits. New balance: ${updatedUser?.balance}`);
+        }
+
+        console.log(`Transaction ${transferContent} completed successfully`);
+        return res.status(200).json({ success: true, message: 'Webhook processed successfully' });
 
     } catch (error) {
         console.error('Webhook processing error:', error);
+        // Log error
+        await WebhookLog.create({
+            source: 'casso',
+            payload: req.body,
+            status: 'error',
+            errorMessage: error.message,
+            ipAddress: req.ip,
+            headers: req.headers
+        });
         return res.status(200).json({ success: false, message: 'Processing error' });
     }
 });
@@ -280,6 +344,7 @@ router.post('/create', authMiddleware, async (req, res) => {
 
         const transaction = new Transaction({
             userId: req.user._id,
+            type: 'topup',
             amount: pkg.price,
             credits: pkg.credits,
             status: 'pending',

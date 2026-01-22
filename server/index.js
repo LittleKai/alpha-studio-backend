@@ -8,6 +8,7 @@ import courseRoutes from './routes/courses.js';
 import partnerRoutes from './routes/partners.js';
 import jobRoutes from './routes/jobs.js';
 import paymentRoutes from './routes/payment.js';
+import adminRoutes from './routes/admin.js';
 
 // Load env variables
 dotenv.config();
@@ -69,6 +70,7 @@ app.use('/api/courses', courseRoutes);
 app.use('/api/partners', partnerRoutes);
 app.use('/api/jobs', jobRoutes);
 app.use('/api/payment', paymentRoutes);
+app.use('/api/admin', adminRoutes);
 
 // Health check
 app.get('/api/health', (req, res) => {
