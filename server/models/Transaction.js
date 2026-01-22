@@ -4,23 +4,29 @@ const transactionSchema = new mongoose.Schema({
     userId: {
         type: mongoose.Schema.Types.ObjectId,
         ref: 'User',
-        required: [true, 'User ID is required']
+        required: false // Can be null for unmatched webhooks
     },
     amount: {
         type: Number,
         required: [true, 'Amount is required'],
         min: [1000, 'Minimum amount is 1000 VND']
     },
+    credits: {
+        type: Number,
+        required: [true, 'Credits is required'],
+        min: [0, 'Credits cannot be negative']
+    },
     status: {
         type: String,
-        enum: ['pending', 'completed', 'failed'],
+        enum: ['pending', 'completed', 'failed', 'cancelled'],
         default: 'pending'
     },
     transactionCode: {
         type: String,
         required: [true, 'Transaction code is required'],
         unique: true,
-        trim: true
+        trim: true,
+        uppercase: true
     },
     paymentMethod: {
         type: String,
@@ -29,6 +35,10 @@ const transactionSchema = new mongoose.Schema({
     },
     webhookData: {
         type: mongoose.Schema.Types.Mixed,
+        default: null
+    },
+    bankTransactionId: {
+        type: String,
         default: null
     },
     description: {
@@ -41,6 +51,10 @@ const transactionSchema = new mongoose.Schema({
     },
     failedReason: {
         type: String,
+        default: null
+    },
+    expiresAt: {
+        type: Date,
         default: null
     }
 }, {

@@ -6,176 +6,351 @@ import { authMiddleware, adminOnly } from '../middleware/auth.js';
 
 const router = express.Router();
 
-// Webhook secret key from payment gateway (store in .env)
-const WEBHOOK_SECRET = process.env.PAYMENT_WEBHOOK_SECRET || 'your-webhook-secret-key';
+// Casso Webhook Secret (get from Casso dashboard)
+const CASSO_WEBHOOK_SECRET = process.env.CASSO_WEBHOOK_SECRET || '';
 
 // Bank account info for display
 const BANK_INFO = {
-    bankName: process.env.BANK_NAME || 'MB Bank',
-    accountNumber: process.env.BANK_ACCOUNT_NUMBER || '0123456789',
-    accountHolder: process.env.BANK_ACCOUNT_HOLDER || 'ALPHA STUDIO',
-    branch: process.env.BANK_BRANCH || 'Ho Chi Minh City'
+    bankId: 'OCB',
+    bankName: 'OCB (Phương Đông)',
+    accountNumber: 'CASS55252503',
+    accountHolder: 'NGUYEN ANH DUC'
+};
+
+// Credit packages configuration
+const CREDIT_PACKAGES = [
+    { id: 'pkg0', credits: 10, price: 10000, label: '10 Credits' },
+    { id: 'pkg1', credits: 100, price: 100000, label: '100 Credits' },
+    { id: 'pkg2', credits: 210, price: 200000, label: '210 Credits', bonus: '+10%' },
+    { id: 'pkg3', credits: 550, price: 500000, label: '550 Credits', bonus: '+10%', popular: true },
+    { id: 'pkg4', credits: 1200, price: 1000000, label: '1.200 Credits', bonus: '+20%' }
+];
+
+/**
+ * Generate random transfer content: alphaXXXXXX (6 random chars)
+ * Uses only non-confusing characters (no I, O, 0, l)
+ */
+const generateTransferContent = () => {
+    const uppercase = 'ABCDEFGHJKLMNPQRSTUVWXYZ'; // removed I and O
+    const numbers = '123456789'; // removed 0
+    const allChars = uppercase + numbers;
+
+    let result = '';
+    // Ensure mix of letters and numbers
+    result += uppercase.charAt(Math.floor(Math.random() * uppercase.length));
+    result += uppercase.charAt(Math.floor(Math.random() * uppercase.length));
+    result += numbers.charAt(Math.floor(Math.random() * numbers.length));
+    result += numbers.charAt(Math.floor(Math.random() * numbers.length));
+    result += allChars.charAt(Math.floor(Math.random() * allChars.length));
+    result += allChars.charAt(Math.floor(Math.random() * allChars.length));
+
+    // Shuffle
+    result = result.split('').sort(() => 0.5 - Math.random()).join('');
+
+    return `ALPHA${result}`;
 };
 
 /**
- * Verify webhook signature
- * Different payment gateways use different signature methods
+ * Verify Casso webhook signature
+ * Casso uses: secure_token in header or query param
  */
-const verifyWebhookSignature = (payload, signature, secret) => {
-    // Common signature verification methods:
-    // 1. HMAC-SHA256
-    const expectedSignature = crypto
-        .createHmac('sha256', secret)
-        .update(JSON.stringify(payload))
-        .digest('hex');
+const verifyCassoWebhook = (req) => {
+    if (!CASSO_WEBHOOK_SECRET) {
+        console.warn('CASSO_WEBHOOK_SECRET not set, skipping verification');
+        return true;
+    }
 
-    return crypto.timingSafeEqual(
-        Buffer.from(signature || ''),
-        Buffer.from(expectedSignature)
-    );
+    const secureToken = req.headers['secure-token'] ||
+                        req.headers['x-secure-token'] ||
+                        req.query.secure_token;
+
+    return secureToken === CASSO_WEBHOOK_SECRET;
 };
 
 /**
- * Generate unique transaction code for user
- * Format: AS + userId (last 4 chars) + timestamp + random
+ * Find credits for a given amount from packages
  */
-const generateTransactionCode = (userId) => {
-    const userPart = userId.toString().slice(-4).toUpperCase();
-    const timestamp = Date.now().toString(36).toUpperCase();
-    const random = Math.random().toString(36).substring(2, 6).toUpperCase();
-    return `AS${userPart}${timestamp}${random}`;
+const getCreditsForAmount = (amount) => {
+    const pkg = CREDIT_PACKAGES.find(p => p.price === amount);
+    if (pkg) return pkg.credits;
+
+    // If exact match not found, calculate based on base rate (1000 VND = 1 credit)
+    // with no bonus
+    return Math.floor(amount / 1000);
 };
 
 /**
  * POST /api/payment/webhook
- * Receive webhook from payment gateway
- * NO AUTH REQUIRED - payment gateway calls this from outside
+ * Receive webhook from Casso
+ * NO AUTH REQUIRED
+ *
+ * Casso Webhook V2 format:
+ * {
+ *   "error": 0,
+ *   "data": [{
+ *     "id": 123456,
+ *     "tid": "FT123456789",
+ *     "description": "ALPHA123ABC chuyen tien",
+ *     "amount": 100000,
+ *     "when": "2024-01-01 12:00:00",
+ *     "bank_sub_acc_id": "0011100027976006",
+ *     "corresponsiveName": "NGUYEN VAN A",
+ *     "corresponsiveAccount": "1234567890",
+ *     "corresponsiveBankId": "970436",
+ *     "corresponsiveBankName": "Vietcombank"
+ *   }]
+ * }
  */
 router.post('/webhook', async (req, res) => {
-    // Always return 200 to prevent payment gateway from retrying
-    // Log everything for debugging
-    console.log('=== PAYMENT WEBHOOK RECEIVED ===');
+    console.log('=== CASSO WEBHOOK RECEIVED ===');
     console.log('Headers:', JSON.stringify(req.headers, null, 2));
     console.log('Body:', JSON.stringify(req.body, null, 2));
-    console.log('================================');
+    console.log('==============================');
 
+    // Always return 200 to Casso
     try {
+        // Verify webhook
+        if (!verifyCassoWebhook(req)) {
+            console.error('Invalid Casso webhook signature');
+            return res.status(200).json({ success: false, message: 'Invalid signature' });
+        }
+
         const webhookData = req.body;
-        const signature = req.headers['x-webhook-signature'] ||
-                         req.headers['x-signature'] ||
-                         req.headers['authorization'];
 
-        // Verify signature (if provided)
-        // Note: Skip verification in development or if signature not provided
-        const skipVerification = process.env.NODE_ENV === 'development' || !signature;
-
-        if (!skipVerification) {
-            const isValid = verifyWebhookSignature(webhookData, signature, WEBHOOK_SECRET);
-            if (!isValid) {
-                console.error('Invalid webhook signature');
-                // Still return 200 but don't process
-                return res.status(200).json({
-                    success: false,
-                    message: 'Invalid signature'
-                });
-            }
+        // Check for error
+        if (webhookData.error !== 0) {
+            console.error('Casso webhook error:', webhookData.error);
+            return res.status(200).json({ success: false, message: 'Webhook error' });
         }
 
-        // Parse webhook data based on payment gateway format
-        // Common fields: transactionCode, amount, status, description
-        const {
-            transactionCode,
-            code,           // Alternative field name
-            transferCode,   // Alternative field name
-            amount,
-            transferAmount, // Alternative field name
-            content,        // Transfer content/description
-            description,
-            status,
-            gateway
-        } = webhookData;
+        // Process each transaction in data array
+        const transactions = webhookData.data || [];
 
-        const txCode = transactionCode || code || transferCode;
-        const txAmount = parseInt(amount || transferAmount, 10);
-        const txDescription = content || description || '';
+        for (const txData of transactions) {
+            const {
+                id: cassoId,
+                tid: bankTxId,
+                description,
+                amount,
+                when: txTime,
+                corresponsiveName,
+                corresponsiveAccount,
+                corresponsiveBankName
+            } = txData;
 
-        if (!txCode) {
-            console.error('No transaction code in webhook');
-            return res.status(200).json({
-                success: false,
-                message: 'Missing transaction code'
+            console.log(`Processing transaction: ${bankTxId}, amount: ${amount}, desc: ${description}`);
+
+            // Extract transfer content from description (format: ALPHAXXXXXX)
+            const contentMatch = description?.toUpperCase().match(/ALPHA[A-Z0-9]{6}/);
+
+            if (!contentMatch) {
+                console.log(`No ALPHA code found in description: ${description}`);
+                continue;
+            }
+
+            const transferContent = contentMatch[0];
+            console.log(`Found transfer content: ${transferContent}`);
+
+            // Find pending transaction with this transfer content
+            const transaction = await Transaction.findOne({
+                transactionCode: transferContent,
+                status: 'pending'
             });
-        }
 
-        // Extract user transaction code from description
-        // Expected format: "AS[userId][timestamp][random] ..." or content contains the code
-        const codeMatch = txDescription.match(/AS[A-Z0-9]{10,}/i) ||
-                         txCode.match(/AS[A-Z0-9]{10,}/i);
-        const userTxCode = codeMatch ? codeMatch[0].toUpperCase() : txCode;
+            if (!transaction) {
+                console.log(`No pending transaction found for: ${transferContent}`);
 
-        // Find existing pending transaction or create new one
-        let transaction = await Transaction.findOne({
-            transactionCode: userTxCode,
-            status: 'pending'
-        });
-
-        if (transaction) {
-            // Update existing transaction
-            transaction.status = 'completed';
-            transaction.webhookData = webhookData;
-            transaction.processedAt = new Date();
-
-            // Verify amount matches (allow small variance for fees)
-            if (Math.abs(transaction.amount - txAmount) > 1000) {
-                transaction.status = 'failed';
-                transaction.failedReason = `Amount mismatch: expected ${transaction.amount}, got ${txAmount}`;
-                await transaction.save();
-                console.error('Amount mismatch for transaction:', userTxCode);
-                return res.status(200).json({
-                    success: false,
-                    message: 'Amount mismatch'
+                // Save unmatched transaction for manual review
+                const unmatchedTx = new Transaction({
+                    userId: null,
+                    amount: amount,
+                    credits: getCreditsForAmount(amount),
+                    status: 'pending',
+                    transactionCode: `UNMATCHED_${bankTxId}`,
+                    paymentMethod: 'bank_transfer',
+                    bankTransactionId: bankTxId,
+                    webhookData: txData,
+                    description: `Unmatched: ${description} from ${corresponsiveName}`
                 });
+                await unmatchedTx.save();
+                continue;
             }
 
+            // Verify amount matches (allow 0 variance for exact match)
+            if (transaction.amount !== amount) {
+                console.error(`Amount mismatch: expected ${transaction.amount}, got ${amount}`);
+                transaction.status = 'failed';
+                transaction.failedReason = `Amount mismatch: expected ${transaction.amount}, got ${amount}`;
+                transaction.webhookData = txData;
+                await transaction.save();
+                continue;
+            }
+
+            // Update transaction to completed
+            transaction.status = 'completed';
+            transaction.webhookData = txData;
+            transaction.bankTransactionId = bankTxId;
+            transaction.processedAt = new Date();
+            transaction.description = `Nạp ${transaction.credits} credits từ ${corresponsiveName || 'Unknown'}`;
             await transaction.save();
 
-            // Update user balance
-            await User.findByIdAndUpdate(
-                transaction.userId,
-                { $inc: { balance: txAmount } },
-                { new: true }
-            );
+            // Add credits to user balance
+            if (transaction.userId) {
+                const updatedUser = await User.findByIdAndUpdate(
+                    transaction.userId,
+                    { $inc: { balance: transaction.credits } },
+                    { new: true }
+                );
+                console.log(`User ${transaction.userId} balance updated: +${transaction.credits} credits. New balance: ${updatedUser?.balance}`);
+            }
 
-            console.log(`Transaction ${userTxCode} completed. User balance updated by ${txAmount}`);
-        } else {
-            // Log unmatched webhook (might be manual transfer without prior request)
-            console.log(`No pending transaction found for code: ${userTxCode}`);
-
-            // Create transaction record anyway for tracking
-            const newTransaction = new Transaction({
-                userId: null, // Unknown user
-                amount: txAmount,
-                status: 'pending', // Needs manual verification
-                transactionCode: userTxCode,
-                paymentMethod: gateway || 'bank_transfer',
-                webhookData: webhookData,
-                description: `Unmatched webhook: ${txDescription}`
-            });
-            await newTransaction.save();
+            console.log(`Transaction ${transferContent} completed successfully`);
         }
 
-        return res.status(200).json({
-            success: true,
-            message: 'Webhook processed'
-        });
+        return res.status(200).json({ success: true, message: 'Webhook processed' });
 
     } catch (error) {
         console.error('Webhook processing error:', error);
-        // Still return 200 to prevent retries
-        return res.status(200).json({
+        return res.status(200).json({ success: false, message: 'Processing error' });
+    }
+});
+
+/**
+ * GET /api/payment/pricing
+ * Get available credit packages
+ * PUBLIC
+ */
+router.get('/pricing', (req, res) => {
+    res.json({
+        success: true,
+        data: CREDIT_PACKAGES
+    });
+});
+
+/**
+ * POST /api/payment/create
+ * Create a new topup request
+ * AUTH REQUIRED
+ */
+router.post('/create', authMiddleware, async (req, res) => {
+    try {
+        const { packageId } = req.body;
+
+        // Find package
+        const pkg = CREDIT_PACKAGES.find(p => p.id === packageId);
+        if (!pkg) {
+            return res.status(400).json({
+                success: false,
+                message: 'Invalid package selected'
+            });
+        }
+
+        // Check for existing pending transactions (limit to 3)
+        const pendingCount = await Transaction.countDocuments({
+            userId: req.user._id,
+            status: 'pending'
+        });
+
+        if (pendingCount >= 3) {
+            return res.status(400).json({
+                success: false,
+                message: 'Bạn có quá nhiều giao dịch đang chờ. Vui lòng hoàn thành hoặc hủy trước khi tạo mới.'
+            });
+        }
+
+        // Generate unique transfer content
+        let transactionCode;
+        let attempts = 0;
+        do {
+            transactionCode = generateTransferContent();
+            const exists = await Transaction.findOne({ transactionCode });
+            if (!exists) break;
+            attempts++;
+        } while (attempts < 10);
+
+        if (attempts >= 10) {
+            return res.status(500).json({
+                success: false,
+                message: 'Unable to generate unique transaction code'
+            });
+        }
+
+        // Create transaction with 30 minute expiry
+        const expiresAt = new Date(Date.now() + 30 * 60 * 1000);
+
+        const transaction = new Transaction({
+            userId: req.user._id,
+            amount: pkg.price,
+            credits: pkg.credits,
+            status: 'pending',
+            transactionCode,
+            paymentMethod: 'bank_transfer',
+            description: `Nạp ${pkg.credits} credits - ${pkg.label}`,
+            expiresAt
+        });
+
+        await transaction.save();
+
+        // Generate VietQR URL
+        const qrCodeUrl = `https://img.vietqr.io/image/${BANK_INFO.bankId}-${BANK_INFO.accountNumber}-compact2.png?amount=${pkg.price}&addInfo=${transactionCode}`;
+
+        res.json({
+            success: true,
+            data: {
+                transaction: {
+                    _id: transaction._id,
+                    transactionCode: transaction.transactionCode,
+                    amount: transaction.amount,
+                    credits: transaction.credits,
+                    status: transaction.status,
+                    expiresAt: transaction.expiresAt,
+                    createdAt: transaction.createdAt
+                },
+                bankInfo: BANK_INFO,
+                qrCodeUrl,
+                transferContent: transactionCode
+            }
+        });
+
+    } catch (error) {
+        console.error('Create payment error:', error);
+        res.status(500).json({
             success: false,
-            message: 'Processing error',
-            error: process.env.NODE_ENV === 'development' ? error.message : undefined
+            message: 'Không thể tạo yêu cầu nạp tiền'
+        });
+    }
+});
+
+/**
+ * DELETE /api/payment/cancel/:transactionId
+ * Cancel and delete a pending transaction (not saved in history)
+ * AUTH REQUIRED
+ */
+router.delete('/cancel/:transactionId', authMiddleware, async (req, res) => {
+    try {
+        const result = await Transaction.findOneAndDelete({
+            _id: req.params.transactionId,
+            userId: req.user._id,
+            status: 'pending'
+        });
+
+        if (!result) {
+            return res.status(404).json({
+                success: false,
+                message: 'Không tìm thấy giao dịch hoặc giao dịch đã được xử lý'
+            });
+        }
+
+        res.json({
+            success: true,
+            message: 'Đã hủy giao dịch thành công'
+        });
+
+    } catch (error) {
+        console.error('Cancel transaction error:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Không thể hủy giao dịch'
         });
     }
 });
@@ -190,7 +365,7 @@ router.get('/history', authMiddleware, async (req, res) => {
         const { page = 1, limit = 20, status } = req.query;
         const query = { userId: req.user._id };
 
-        if (status && ['pending', 'completed', 'failed'].includes(status)) {
+        if (status && ['pending', 'completed', 'failed', 'cancelled'].includes(status)) {
             query.status = status;
         }
 
@@ -198,13 +373,20 @@ router.get('/history', authMiddleware, async (req, res) => {
             .sort({ createdAt: -1 })
             .skip((page - 1) * limit)
             .limit(parseInt(limit))
-            .select('-webhookData'); // Don't expose raw webhook data to users
+            .select('-webhookData');
 
         const total = await Transaction.countDocuments(query);
+
+        // Get pending count separately
+        const pendingCount = await Transaction.countDocuments({
+            userId: req.user._id,
+            status: 'pending'
+        });
 
         res.json({
             success: true,
             data: transactions,
+            pendingCount,
             pagination: {
                 total,
                 page: parseInt(page),
@@ -222,65 +404,28 @@ router.get('/history', authMiddleware, async (req, res) => {
 });
 
 /**
- * POST /api/payment/create
- * Create a new payment request (generate transaction code)
+ * GET /api/payment/pending
+ * Get pending transactions for current user
  * AUTH REQUIRED
  */
-router.post('/create', authMiddleware, async (req, res) => {
+router.get('/pending', authMiddleware, async (req, res) => {
     try {
-        const { amount, paymentMethod = 'bank_transfer' } = req.body;
-
-        if (!amount || amount < 10000) {
-            return res.status(400).json({
-                success: false,
-                message: 'Minimum top-up amount is 10,000 VND'
-            });
-        }
-
-        if (amount > 100000000) {
-            return res.status(400).json({
-                success: false,
-                message: 'Maximum top-up amount is 100,000,000 VND'
-            });
-        }
-
-        // Generate unique transaction code
-        const transactionCode = generateTransactionCode(req.user._id);
-
-        // Create pending transaction
-        const transaction = new Transaction({
+        const transactions = await Transaction.find({
             userId: req.user._id,
-            amount,
-            status: 'pending',
-            transactionCode,
-            paymentMethod,
-            description: `Top-up ${amount} VND`
-        });
+            status: 'pending'
+        })
+        .sort({ createdAt: -1 })
+        .select('-webhookData');
 
-        await transaction.save();
-
-        // Return bank transfer info
         res.json({
             success: true,
-            data: {
-                transaction: {
-                    _id: transaction._id,
-                    transactionCode: transaction.transactionCode,
-                    amount: transaction.amount,
-                    status: transaction.status,
-                    paymentMethod: transaction.paymentMethod,
-                    createdAt: transaction.createdAt
-                },
-                bankInfo: BANK_INFO,
-                transferContent: transactionCode, // Content user should include in transfer
-                expiresIn: '24 hours' // Transaction will expire if not completed
-            }
+            data: transactions
         });
     } catch (error) {
-        console.error('Create payment error:', error);
+        console.error('Get pending transactions error:', error);
         res.status(500).json({
             success: false,
-            message: 'Failed to create payment request'
+            message: 'Failed to get pending transactions'
         });
     }
 });
@@ -315,6 +460,18 @@ router.get('/status/:transactionId', authMiddleware, async (req, res) => {
             message: 'Failed to check transaction status'
         });
     }
+});
+
+/**
+ * GET /api/payment/bank-info
+ * Get bank account information
+ * PUBLIC
+ */
+router.get('/bank-info', (req, res) => {
+    res.json({
+        success: true,
+        data: BANK_INFO
+    });
 });
 
 /**
@@ -360,11 +517,11 @@ router.post('/verify', authMiddleware, adminOnly, async (req, res) => {
             transaction.status = 'completed';
             transaction.processedAt = new Date();
 
-            // Update user balance
+            // Update user balance with credits
             if (transaction.userId) {
                 await User.findByIdAndUpdate(
                     transaction.userId,
-                    { $inc: { balance: transaction.amount } },
+                    { $inc: { balance: transaction.credits } },
                     { new: true }
                 );
             }
@@ -399,7 +556,7 @@ router.get('/admin/transactions', authMiddleware, adminOnly, async (req, res) =>
         const { page = 1, limit = 50, status, userId } = req.query;
         const query = {};
 
-        if (status && ['pending', 'completed', 'failed'].includes(status)) {
+        if (status && ['pending', 'completed', 'failed', 'cancelled'].includes(status)) {
             query.status = status;
         }
         if (userId) {
@@ -431,18 +588,6 @@ router.get('/admin/transactions', authMiddleware, adminOnly, async (req, res) =>
             message: 'Failed to get transactions'
         });
     }
-});
-
-/**
- * GET /api/payment/bank-info
- * Get bank account information for transfer
- * AUTH REQUIRED
- */
-router.get('/bank-info', authMiddleware, (req, res) => {
-    res.json({
-        success: true,
-        data: BANK_INFO
-    });
 });
 
 export default router;
