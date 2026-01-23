@@ -9,6 +9,9 @@ import partnerRoutes from './routes/partners.js';
 import jobRoutes from './routes/jobs.js';
 import paymentRoutes from './routes/payment.js';
 import adminRoutes from './routes/admin.js';
+import promptRoutes from './routes/prompts.js';
+import resourceRoutes from './routes/resources.js';
+import commentRoutes from './routes/comments.js';
 
 // Load env variables
 dotenv.config();
@@ -71,6 +74,9 @@ app.use('/api/partners', partnerRoutes);
 app.use('/api/jobs', jobRoutes);
 app.use('/api/payment', paymentRoutes);
 app.use('/api/admin', adminRoutes);
+app.use('/api/prompts', promptRoutes);
+app.use('/api/resources', resourceRoutes);
+app.use('/api/comments', commentRoutes);
 
 // Health check
 app.get('/api/health', (req, res) => {

@@ -1,5 +1,5 @@
 # Project Summary
-**Last Updated:** 2026-01-22 (Payment System with Casso Webhook V2)
+**Last Updated:** 2026-01-23 (Share Prompts & Resource Hub APIs)
 **Updated By:** Claude Code
 
 ---
@@ -36,7 +36,10 @@ alpha-studio-backend/
 │   │   ├── Job.js                 # Job listings with multilingual support
 │   │   ├── Partner.js             # Partner profiles with skills array
 │   │   ├── Transaction.js         # Payment transactions (topup, spend, etc.)
-│   │   └── WebhookLog.js          # Casso webhook logging
+│   │   ├── WebhookLog.js          # Casso webhook logging
+│   │   ├── Prompt.js              # Shared prompts with multiple contents, ratings
+│   │   ├── Resource.js            # Resource hub with file upload (50MB)
+│   │   └── Comment.js             # Comments for prompts/resources
 │   ├── middleware/
 │   │   └── auth.js                # JWT auth + adminOnly middleware
 │   └── routes/
@@ -45,7 +48,10 @@ alpha-studio-backend/
 │       ├── jobs.js                # Job CRUD + publish/close routes
 │       ├── partners.js            # Partner CRUD + publish/unpublish routes
 │       ├── payment.js             # Payment API (create, confirm, cancel, webhook)
-│       └── admin.js               # Admin API (users, transactions, webhook management)
+│       ├── admin.js               # Admin API (users, transactions, webhook management)
+│       ├── prompts.js             # Prompts API (CRUD, like, bookmark, rate, download)
+│       ├── resources.js           # Resources API (CRUD, like, bookmark, rate, download)
+│       └── comments.js            # Comments API for prompts/resources
 ├── .claude/                       # Documentation
 │   ├── PROJECT_SUMMARY.md
 │   ├── CONVENTIONS.md
@@ -121,6 +127,44 @@ alpha-studio-backend/
 │   ├── POST   /webhook-logs/:id/assign-user  # Assign user to webhook
 │   ├── POST   /webhook-logs/:id/ignore  # Ignore webhook
 │   └── GET    /stats             # Dashboard statistics
+├── /prompts
+│   ├── GET    /                  # List prompts (pagination, filters, search)
+│   ├── GET    /featured          # Get featured prompts
+│   ├── GET    /my/created        # Get user's created prompts (auth)
+│   ├── GET    /my/bookmarked     # Get user's bookmarked prompts (auth)
+│   ├── GET    /:slug             # Get single prompt by slug
+│   ├── POST   /                  # Create prompt (auth)
+│   ├── PUT    /:id               # Update prompt (auth, owner)
+│   ├── DELETE /:id               # Delete prompt (auth, owner)
+│   ├── POST   /:id/like          # Toggle like (auth)
+│   ├── POST   /:id/bookmark      # Toggle bookmark (auth)
+│   ├── POST   /:id/download      # Track download (auth)
+│   ├── POST   /:id/rate          # Rate 1-5 stars (auth)
+│   ├── PATCH  /:id/hide          # Hide content (mod/admin)
+│   ├── PATCH  /:id/unhide        # Restore content (mod/admin)
+│   └── PATCH  /:id/feature       # Toggle featured (admin)
+├── /resources
+│   ├── GET    /                  # List resources (pagination, filters, search)
+│   ├── GET    /featured          # Get featured resources
+│   ├── GET    /my/created        # Get user's created resources (auth)
+│   ├── GET    /my/bookmarked     # Get user's bookmarked resources (auth)
+│   ├── GET    /:slug             # Get single resource by slug
+│   ├── POST   /                  # Create resource (auth)
+│   ├── PUT    /:id               # Update resource (auth, owner)
+│   ├── DELETE /:id               # Delete resource (auth, owner)
+│   ├── POST   /:id/like          # Toggle like (auth)
+│   ├── POST   /:id/bookmark      # Toggle bookmark (auth)
+│   ├── POST   /:id/download      # Track download + get file URL (auth)
+│   ├── POST   /:id/rate          # Rate 1-5 stars (auth)
+│   ├── PATCH  /:id/hide          # Hide content (mod/admin)
+│   ├── PATCH  /:id/unhide        # Restore content (mod/admin)
+│   └── PATCH  /:id/feature       # Toggle featured (admin)
+├── /comments
+│   ├── GET    /                  # Get comments for target (prompt/resource)
+│   ├── POST   /                  # Create comment (auth)
+│   ├── PUT    /:id               # Update comment (auth, owner)
+│   ├── DELETE /:id               # Delete comment (auth, owner/mod)
+│   └── POST   /:id/like          # Toggle like on comment (auth)
 └── /health               # Health check endpoint
 ```
 
@@ -137,7 +181,7 @@ alpha-studio-backend/
 ### Database Architecture (MongoDB Atlas)
 - **Connection:** MongoDB Atlas Cloud (Cluster0)
 - **Database Name:** `alpha-studio`
-- **Collections:** 10 collections
+- **Collections:** 13 collections
   - `users` - User accounts with hashed passwords + balance
   - `courses` - Course information
   - `students` - Student profiles
@@ -148,6 +192,9 @@ alpha-studio-backend/
   - `api_usage` - API usage tracking
   - `transactions` - Payment transactions (topup, spend, refund, manual_topup, bonus)
   - `webhooklogs` - Casso webhook logs for debugging/reprocessing
+  - `prompts` - Shared prompts with multiple contents, ratings, engagement
+  - `resources` - Resource hub files with metadata and engagement
+  - `comments` - Comments for prompts and resources
 - **Documentation:** See DATABASE.md for detailed schema
 
 ### CORS Configuration
@@ -203,6 +250,9 @@ alpha-studio-backend/
 | Manual Top-up | ✅ Complete | routes/admin.js | Admin can top-up users manually |
 | Webhook Assignment | ✅ Complete | routes/admin.js | Admin can assign unmatched webhooks to users |
 | Transaction Timeout | ✅ Complete | routes/admin.js | Auto-timeout after 5 min without webhook match |
+| Share Prompts API | ✅ Complete | routes/prompts.js, models/Prompt.js | CRUD, like, bookmark, rate, download, featured, moderation |
+| Resource Hub API | ✅ Complete | routes/resources.js, models/Resource.js | CRUD, file upload (50MB), like, bookmark, rate, download |
+| Comments API | ✅ Complete | routes/comments.js, models/Comment.js | Comments for prompts/resources with likes |
 
 ---
 
@@ -262,7 +312,33 @@ CASSO_WEBHOOK_SECRET=your_secret    # Casso webhook verification secret
 
 ## 7. Recent Changes (Last 3 Sessions)
 
-1. **2026-01-22** - Payment System with Casso Webhook V2
+1. **2026-01-23** - Share Prompts & Resource Hub APIs
+   - Created Prompt model with:
+     - Bilingual title/description (vi/en)
+     - Multiple prompt contents (promptContents array with label + content)
+     - Legacy single promptContent support for backward compatibility
+     - Notes field (max 5000 chars)
+     - Categories: image-generation, text-generation, code, workflow, other
+     - Platforms: midjourney, stable-diffusion, dalle, comfyui, chatgpt, claude, other
+     - Example images with input/output types
+     - Engagement: likes, bookmarks, downloads, views, comments count
+     - Rating system (1-5 stars with average calculation)
+     - Status: published, hidden, archived
+     - Featured flag, moderation fields
+   - Created Resource model with:
+     - Bilingual title/description
+     - Resource types: template, dataset, design-asset, project-file, 3d-model, font, other
+     - File upload (url, publicId, filename, format, size up to 50MB, mimeType)
+     - Thumbnail and preview images
+     - Compatible software array
+     - Same engagement/rating system as Prompts
+   - Created Comment model for both prompts and resources
+   - Full API routes for prompts: CRUD, like, bookmark, download, rate, hide/unhide, feature
+   - Full API routes for resources: same as prompts + file download tracking
+   - Search support: regex search in title, description, content, tags, promptContents
+   - Bugfix: Added promptContents support in POST/PUT routes (was only checking legacy promptContent)
+
+2. **2026-01-22** - Payment System with Casso Webhook V2
    - Created Transaction model with statuses: pending, completed, failed, cancelled, timeout
    - Created WebhookLog model for storing incoming Casso webhooks
    - Implemented payment routes: create, confirm, cancel, history, pending, status, webhook
