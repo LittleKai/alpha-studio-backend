@@ -1,5 +1,5 @@
 # Project Summary
-**Last Updated:** 2026-01-23 (Share Prompts & Resource Hub APIs)
+**Last Updated:** 2026-01-24 (Course Enrollment & Reviews APIs)
 **Updated By:** Claude Code
 
 ---
@@ -32,7 +32,9 @@ alpha-studio-backend/
 │   │   └── migrate-passwords.js   # Password hashing migration
 │   ├── models/
 │   │   ├── User.js                # User model with bcrypt + balance field
-│   │   ├── Course.js              # Course model with multilingual support
+│   │   ├── Course.js              # Course model with multilingual support + lesson videoUrl/documents
+│   │   ├── Enrollment.js          # Course enrollment with progress tracking
+│   │   ├── Review.js              # Course reviews with ratings
 │   │   ├── Job.js                 # Job listings with multilingual support
 │   │   ├── Partner.js             # Partner profiles with skills array
 │   │   ├── Transaction.js         # Payment transactions (topup, spend, etc.)
@@ -51,7 +53,9 @@ alpha-studio-backend/
 │       ├── admin.js               # Admin API (users, transactions, webhook management)
 │       ├── prompts.js             # Prompts API (CRUD, like, bookmark, rate, download)
 │       ├── resources.js           # Resources API (CRUD, like, bookmark, rate, download)
-│       └── comments.js            # Comments API for prompts/resources
+│       ├── comments.js            # Comments API for prompts/resources
+│       ├── enrollments.js         # Course enrollment API (enroll, progress, check)
+│       └── reviews.js             # Course reviews API (CRUD, like, helpful, rating distribution)
 ├── .claude/                       # Documentation
 │   ├── PROJECT_SUMMARY.md
 │   ├── CONVENTIONS.md
@@ -165,6 +169,21 @@ alpha-studio-backend/
 │   ├── PUT    /:id               # Update comment (auth, owner)
 │   ├── DELETE /:id               # Delete comment (auth, owner/mod)
 │   └── POST   /:id/like          # Toggle like on comment (auth)
+├── /enrollments (auth required)
+│   ├── GET    /my-courses        # Get user's enrolled courses
+│   ├── GET    /check/:courseId   # Check enrollment status
+│   ├── POST   /:courseId         # Enroll in course
+│   ├── GET    /:courseId/progress    # Get enrollment progress
+│   ├── PUT    /:courseId/progress    # Update lesson progress
+│   └── DELETE /:courseId         # Unenroll from course
+├── /reviews
+│   ├── GET    /course/:courseId  # Get reviews for course (with rating distribution)
+│   ├── GET    /my-review/:courseId   # Get user's review (auth)
+│   ├── POST   /:courseId         # Create review (auth)
+│   ├── PUT    /:reviewId         # Update review (auth, owner)
+│   ├── DELETE /:reviewId         # Delete review (auth, owner/admin)
+│   ├── POST   /:reviewId/helpful # Toggle helpful mark (auth)
+│   └── POST   /:reviewId/reply   # Admin reply to review (admin)
 └── /health               # Health check endpoint
 ```
 
@@ -253,6 +272,9 @@ alpha-studio-backend/
 | Share Prompts API | ✅ Complete | routes/prompts.js, models/Prompt.js | CRUD, like, bookmark, rate, download, featured, moderation |
 | Resource Hub API | ✅ Complete | routes/resources.js, models/Resource.js | CRUD, file upload (50MB), like, bookmark, rate, download |
 | Comments API | ✅ Complete | routes/comments.js, models/Comment.js | Comments for prompts/resources with likes |
+| Course Enrollment API | ✅ Complete | routes/enrollments.js, models/Enrollment.js | Enroll, progress tracking, lesson completion |
+| Course Reviews API | ✅ Complete | routes/reviews.js, models/Review.js | CRUD, rating distribution, helpful votes, admin reply |
+| Lesson Video/Documents | ✅ Complete | models/Course.js | videoUrl and documents array per lesson |
 
 ---
 
@@ -312,7 +334,40 @@ CASSO_WEBHOOK_SECRET=your_secret    # Casso webhook verification secret
 
 ## 7. Recent Changes (Last 3 Sessions)
 
-1. **2026-01-23** - Share Prompts & Resource Hub APIs
+1. **2026-01-24** - Course Enrollment & Reviews APIs
+   - Updated Course model (models/Course.js):
+     - Added `videoUrl` field to lesson schema for video URL input
+     - Added `documents` array to lesson schema with name, url, type, size
+   - Created Enrollment model (models/Enrollment.js):
+     - Tracks user enrollment in courses
+     - Progress tracking (completedLessons array with watchedDuration, lastPosition)
+     - Current lesson tracking (moduleId, lessonId)
+     - Status: active, completed, cancelled
+   - Created Review model (models/Review.js):
+     - Rating 1-5 stars with comment
+     - Helpful count with users array
+     - Admin reply support
+     - Status: approved, pending, rejected
+     - Verified purchase flag
+   - Created Enrollments API (routes/enrollments.js):
+     - GET /my-courses - list enrolled courses with course details
+     - GET /check/:courseId - check enrollment status
+     - POST /:courseId - enroll in course
+     - GET /:courseId/progress - get enrollment progress
+     - PUT /:courseId/progress - update lesson progress (completed, watchedDuration)
+     - DELETE /:courseId - unenroll
+   - Created Reviews API (routes/reviews.js):
+     - GET /course/:courseId - get reviews with rating distribution
+     - GET /my-review/:courseId - get user's review
+     - POST /:courseId - create review
+     - PUT /:reviewId - update review
+     - DELETE /:reviewId - delete review
+     - POST /:reviewId/helpful - toggle helpful
+     - POST /:reviewId/reply - admin reply
+   - Fixed rating distribution aggregation: proper mongoose.Types.ObjectId conversion
+   - Updated server/index.js to register new routes
+
+2. **2026-01-23** - Share Prompts & Resource Hub APIs
    - Created Prompt model with:
      - Bilingual title/description (vi/en)
      - Multiple prompt contents (promptContents array with label + content)
@@ -338,7 +393,7 @@ CASSO_WEBHOOK_SECRET=your_secret    # Casso webhook verification secret
    - Search support: regex search in title, description, content, tags, promptContents
    - Bugfix: Added promptContents support in POST/PUT routes (was only checking legacy promptContent)
 
-2. **2026-01-22** - Payment System with Casso Webhook V2
+3. **2026-01-22** - Payment System with Casso Webhook V2
    - Created Transaction model with statuses: pending, completed, failed, cancelled, timeout
    - Created WebhookLog model for storing incoming Casso webhooks
    - Implemented payment routes: create, confirm, cancel, history, pending, status, webhook
@@ -349,22 +404,6 @@ CASSO_WEBHOOK_SECRET=your_secret    # Casso webhook verification secret
    - Admin management: users, transactions, webhook logs
    - Admin can assign users to unmatched webhooks (auto-credits)
    - Transaction timeout: confirmed transactions timeout after 5 min without webhook match
-
-2. **2026-01-19** - Partner Skills, Index Cleanup
-   - Added `skills` field to Partner model (array of strings)
-   - Added `cleanupStaleIndexes()` function in `db/connection.js`
-   - Auto-drops stale `userId_1` index from partners collection on startup
-   - Fixed duplicate key error when creating partners
-   - Partner model now supports text search on company name and descriptions
-
-3. **2026-01-18** - Course Management API
-   - Created Course model with multilingual support (VI/EN)
-   - Implemented full CRUD API for courses (admin only)
-   - Added publish/unpublish/archive endpoints (PATCH)
-   - Added course statistics endpoint
-   - Created adminOnly middleware for authorization
-   - Fixed CORS to include PATCH method
-   - Nested schema for modules and lessons with virtual fields
 
 ---
 

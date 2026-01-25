@@ -12,6 +12,8 @@ import adminRoutes from './routes/admin.js';
 import promptRoutes from './routes/prompts.js';
 import resourceRoutes from './routes/resources.js';
 import commentRoutes from './routes/comments.js';
+import enrollmentRoutes from './routes/enrollments.js';
+import reviewRoutes from './routes/reviews.js';
 
 // Load env variables
 dotenv.config();
@@ -77,6 +79,8 @@ app.use('/api/admin', adminRoutes);
 app.use('/api/prompts', promptRoutes);
 app.use('/api/resources', resourceRoutes);
 app.use('/api/comments', commentRoutes);
+app.use('/api/enrollments', enrollmentRoutes);
+app.use('/api/reviews', reviewRoutes);
 
 // Health check
 app.get('/api/health', (req, res) => {

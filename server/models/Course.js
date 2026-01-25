@@ -1,6 +1,13 @@
 import mongoose from 'mongoose';
 import { slugify, generateUniqueSlugForModel } from '../utils/slugify.js';
 
+const documentSchema = new mongoose.Schema({
+    name: { type: String, required: true },
+    url: { type: String, required: true },
+    type: { type: String, default: 'pdf' }, // pdf, doc, ppt, etc.
+    size: { type: Number, default: 0 } // in bytes
+}, { _id: false });
+
 const lessonSchema = new mongoose.Schema({
     lessonId: {
         type: String,
@@ -23,6 +30,11 @@ const lessonSchema = new mongoose.Schema({
         type: String,
         default: ''
     },
+    videoUrl: {
+        type: String,
+        default: ''
+    },
+    documents: [documentSchema],
     order: {
         type: Number,
         default: 0
