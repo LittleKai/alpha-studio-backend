@@ -1,5 +1,5 @@
 # Project Summary
-**Last Updated:** 2026-01-24 (Course Enrollment & Reviews APIs)
+**Last Updated:** 2026-02-12 (Article CMS - About & Services)
 **Updated By:** Claude Code
 
 ---
@@ -41,9 +41,10 @@ alpha-studio-backend/
 │   │   ├── WebhookLog.js          # Casso webhook logging
 │   │   ├── Prompt.js              # Shared prompts with multiple contents, ratings
 │   │   ├── Resource.js            # Resource hub with file upload (50MB)
-│   │   └── Comment.js             # Comments for prompts/resources
+│   │   ├── Comment.js             # Comments for prompts/resources
+│   │   └── Article.js             # Articles for About & Services pages (bilingual)
 │   ├── middleware/
-│   │   └── auth.js                # JWT auth + adminOnly middleware
+│   │   └── auth.js                # JWT auth + adminOnly + modOnly middleware
 │   └── routes/
 │       ├── auth.js                # Auth API routes
 │       ├── courses.js             # Course CRUD + publish/archive routes
@@ -55,7 +56,8 @@ alpha-studio-backend/
 │       ├── resources.js           # Resources API (CRUD, like, bookmark, rate, download)
 │       ├── comments.js            # Comments API for prompts/resources
 │       ├── enrollments.js         # Course enrollment API (enroll, progress, check)
-│       └── reviews.js             # Course reviews API (CRUD, like, helpful, rating distribution)
+│       ├── reviews.js             # Course reviews API (CRUD, like, helpful, rating distribution)
+│       └── articles.js            # Articles API (CRUD, publish/unpublish, public + admin)
 ├── .claude/                       # Documentation
 │   ├── PROJECT_SUMMARY.md
 │   ├── CONVENTIONS.md
@@ -184,6 +186,15 @@ alpha-studio-backend/
 │   ├── DELETE /:reviewId         # Delete review (auth, owner/admin)
 │   ├── POST   /:reviewId/helpful # Toggle helpful mark (auth)
 │   └── POST   /:reviewId/reply   # Admin reply to review (admin)
+├── /articles (public read, mod/admin write)
+│   ├── GET    /             # List published articles (filter: category, search, pagination)
+│   ├── GET    /admin/list   # List all articles inc. drafts (mod/admin)
+│   ├── POST   /             # Create article (mod/admin)
+│   ├── PUT    /:id          # Update article (mod/admin)
+│   ├── DELETE /:id          # Delete article (mod/admin)
+│   ├── PATCH  /:id/publish  # Publish article (mod/admin)
+│   ├── PATCH  /:id/unpublish # Unpublish article (mod/admin)
+│   └── GET    /:slug        # Get single article by slug (public)
 └── /health               # Health check endpoint
 ```
 
@@ -275,6 +286,7 @@ alpha-studio-backend/
 | Course Enrollment API | ✅ Complete | routes/enrollments.js, models/Enrollment.js | Enroll, progress tracking, lesson completion |
 | Course Reviews API | ✅ Complete | routes/reviews.js, models/Review.js | CRUD, rating distribution, helpful votes, admin reply |
 | Lesson Video/Documents | ✅ Complete | models/Course.js | videoUrl and documents array per lesson |
+| Article CMS | ✅ Complete | models/Article.js, routes/articles.js | Bilingual articles for About & Services pages, admin CRUD |
 
 ---
 
@@ -334,7 +346,22 @@ CASSO_WEBHOOK_SECRET=your_secret    # Casso webhook verification secret
 
 ## 7. Recent Changes (Last 3 Sessions)
 
-1. **2026-01-24** - Course Enrollment & Reviews APIs
+1. **2026-02-12** - Article CMS for About & Services Pages
+   - Created Article model (models/Article.js):
+     - Bilingual title, excerpt, content (vi/en)
+     - slug (auto-generated from Vietnamese title)
+     - category: 'about' | 'services'
+     - status: draft/published/archived
+     - author (ref User), order, isFeatured, tags
+     - Indexes: category+status+order, slug (unique), text search
+   - Created Articles API (routes/articles.js):
+     - Public: GET / (list published), GET /:slug (detail)
+     - Admin/Mod: GET /admin/list, POST /, PUT /:id, DELETE /:id
+     - PATCH /:id/publish, PATCH /:id/unpublish
+     - Route ordering: /admin/list before /:slug to avoid conflicts
+   - Registered article routes in server/index.js
+
+2. **2026-01-24** - Course Enrollment & Reviews APIs
    - Updated Course model (models/Course.js):
      - Added `videoUrl` field to lesson schema for video URL input
      - Added `documents` array to lesson schema with name, url, type, size
@@ -394,16 +421,6 @@ CASSO_WEBHOOK_SECRET=your_secret    # Casso webhook verification secret
    - Bugfix: Added promptContents support in POST/PUT routes (was only checking legacy promptContent)
 
 3. **2026-01-22** - Payment System with Casso Webhook V2
-   - Created Transaction model with statuses: pending, completed, failed, cancelled, timeout
-   - Created WebhookLog model for storing incoming Casso webhooks
-   - Implemented payment routes: create, confirm, cancel, history, pending, status, webhook
-   - Integrated Casso Webhook V2 format (data as object, not array)
-   - Credit packages: 10k=10, 100k=100, 200k=210(+5%), 500k=550(+10%), 1M=1120(+12%)
-   - Bank: OCB, Account: CASS55252503, Holder: NGUYEN ANH DUC
-   - VietQR generation for QR code payments
-   - Admin management: users, transactions, webhook logs
-   - Admin can assign users to unmatched webhooks (auto-credits)
-   - Transaction timeout: confirmed transactions timeout after 5 min without webhook match
 
 ---
 

@@ -89,4 +89,31 @@ db.api_usage.find({ userId: ObjectId("..."), billingPeriod: "2025-01" })
 
 ---
 
-**Last Updated:** 2025-01-17
+---
+
+## 📝 Article Schema (articles collection)
+
+```javascript
+{
+  title: { vi: String (required), en: String (required) },
+  slug: String (unique, auto-generated from title.vi),
+  excerpt: { vi: String, en: String },
+  content: { vi: String, en: String },
+  thumbnail: String,
+  category: enum ['about', 'services'] (required),
+  status: enum ['draft', 'published', 'archived'] (default: 'draft'),
+  author: ObjectId (ref: User),
+  order: Number (default: 0),
+  isFeatured: Boolean (default: false),
+  tags: [String],
+  createdAt: Date,
+  updatedAt: Date
+}
+
+// Indexes:
+// - { category: 1, status: 1, order: 1 }
+// - { slug: 1 } (unique)
+// - Text index: title.vi, title.en, content.vi, content.en, tags
+```
+
+**Last Updated:** 2026-02-12

@@ -14,6 +14,7 @@ import resourceRoutes from './routes/resources.js';
 import commentRoutes from './routes/comments.js';
 import enrollmentRoutes from './routes/enrollments.js';
 import reviewRoutes from './routes/reviews.js';
+import articleRoutes from './routes/articles.js';
 
 // Load env variables
 dotenv.config();
@@ -81,6 +82,7 @@ app.use('/api/resources', resourceRoutes);
 app.use('/api/comments', commentRoutes);
 app.use('/api/enrollments', enrollmentRoutes);
 app.use('/api/reviews', reviewRoutes);
+app.use('/api/articles', articleRoutes);
 
 // Health check
 app.get('/api/health', (req, res) => {
