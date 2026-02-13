@@ -581,6 +581,11 @@ router.post('/webhook-logs/:id/ignore', async (req, res) => {
  */
 router.post('/users/:id/reset-password', async (req, res) => {
     try {
+        // Only super admin (aduc5525@gmail.com) can reset passwords
+        if (req.user.role !== 'admin' || req.user.email !== 'aduc5525@gmail.com') {
+            return res.status(403).json({ success: false, message: 'Không có quyền thực hiện' });
+        }
+
         const user = await User.findById(req.params.id);
         if (!user) {
             return res.status(404).json({ success: false, message: 'User not found' });
