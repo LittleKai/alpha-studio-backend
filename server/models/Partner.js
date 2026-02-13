@@ -67,10 +67,32 @@ const partnerSchema = new mongoose.Schema({
         linkedin: { type: String, default: '' },
         twitter: { type: String, default: '' }
     },
-    skills: [{
+    services: [{
         type: String,
         trim: true
     }],
+    backgroundImage: {
+        type: String,
+        default: ''
+    },
+    keyProjects: {
+        type: [{
+            image: { type: String, default: '' },
+            description: {
+                vi: { type: String, default: '' },
+                en: { type: String, default: '' }
+            }
+        }],
+        validate: [
+            {
+                validator: function(val) {
+                    return val.length <= 6;
+                },
+                message: 'Key projects cannot exceed 6 items'
+            }
+        ],
+        default: []
+    },
     createdBy: {
         type: mongoose.Schema.Types.ObjectId,
         ref: 'User'

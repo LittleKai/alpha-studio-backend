@@ -28,6 +28,7 @@ router.get('/', async (req, res) => {
             limit = 10,
             partnerType,
             status,
+            featured,
             search,
             sort = '-createdAt'
         } = req.query;
@@ -44,6 +45,10 @@ router.get('/', async (req, res) => {
             query.status = status;
         } else if (!isMod) {
             query.status = 'published';
+        }
+
+        if (featured !== undefined) {
+            query.featured = featured === 'true';
         }
 
         if (partnerType) {
@@ -220,7 +225,9 @@ router.post('/', authMiddleware, modOnly, async (req, res) => {
             featured,
             order,
             socialLinks,
-            skills
+            services,
+            backgroundImage,
+            keyProjects
         } = req.body;
 
         if (!companyName) {
@@ -243,7 +250,9 @@ router.post('/', authMiddleware, modOnly, async (req, res) => {
             featured: featured || false,
             order: order || 0,
             socialLinks: socialLinks || {},
-            skills: skills || [],
+            services: services || [],
+            backgroundImage: backgroundImage || '',
+            keyProjects: keyProjects || [],
             createdBy: req.user._id
         });
 
@@ -294,7 +303,9 @@ router.put('/:idOrSlug', authMiddleware, modOnly, async (req, res) => {
             featured,
             order,
             socialLinks,
-            skills
+            services,
+            backgroundImage,
+            keyProjects
         } = req.body;
 
         const partner = await findPartnerByIdOrSlug(req.params.idOrSlug);
@@ -317,7 +328,9 @@ router.put('/:idOrSlug', authMiddleware, modOnly, async (req, res) => {
         if (featured !== undefined) partner.featured = featured;
         if (order !== undefined) partner.order = order;
         if (socialLinks) partner.socialLinks = socialLinks;
-        if (skills !== undefined) partner.skills = skills;
+        if (services !== undefined) partner.services = services;
+        if (backgroundImage !== undefined) partner.backgroundImage = backgroundImage;
+        if (keyProjects !== undefined) partner.keyProjects = keyProjects;
 
         if (status && status !== partner.status) {
             partner.status = status;
