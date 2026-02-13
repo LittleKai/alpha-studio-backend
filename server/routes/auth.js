@@ -288,16 +288,16 @@ router.post('/send-password-code', authMiddleware, async (req, res) => {
 });
 
 // @route   PUT /api/auth/password
-// @desc    Change password with verification code
+// @desc    Change password (current password + new password)
 // @access  Private
 router.put('/password', authMiddleware, async (req, res) => {
     try {
-        const { currentPassword, newPassword, code } = req.body;
+        const { currentPassword, newPassword } = req.body;
 
-        if (!currentPassword || !newPassword || !code) {
+        if (!currentPassword || !newPassword) {
             return res.status(400).json({
                 success: false,
-                message: 'Please provide current password, new password and verification code'
+                message: 'Please provide current password and new password'
             });
         }
 
@@ -310,21 +310,6 @@ router.put('/password', authMiddleware, async (req, res) => {
 
         const user = await User.findById(req.user._id);
 
-        // Verify code
-        if (!user.passwordResetCode || user.passwordResetCode !== code) {
-            return res.status(400).json({
-                success: false,
-                message: 'Invalid verification code'
-            });
-        }
-
-        if (!user.passwordResetExpires || user.passwordResetExpires < new Date()) {
-            return res.status(400).json({
-                success: false,
-                message: 'Verification code has expired'
-            });
-        }
-
         // Verify current password
         const isMatch = await user.comparePassword(currentPassword);
         if (!isMatch) {
@@ -334,10 +319,8 @@ router.put('/password', authMiddleware, async (req, res) => {
             });
         }
 
-        // Change password and clear code
+        // Change password
         user.password = newPassword;
-        user.passwordResetCode = null;
-        user.passwordResetExpires = null;
         await user.save();
 
         res.json({

@@ -1,5 +1,6 @@
 import express from 'express';
 import mongoose from 'mongoose';
+import bcrypt from 'bcryptjs';
 import User from '../models/User.js';
 import Transaction from '../models/Transaction.js';
 import WebhookLog from '../models/WebhookLog.js';
@@ -570,6 +571,36 @@ router.post('/webhook-logs/:id/ignore', async (req, res) => {
         });
     } catch (error) {
         console.error('Admin ignore webhook error:', error);
+        res.status(500).json({ success: false, message: 'Lỗi server' });
+    }
+});
+
+/**
+ * POST /api/admin/users/:id/reset-password
+ * Reset user's password to a random 8-digit number
+ */
+router.post('/users/:id/reset-password', async (req, res) => {
+    try {
+        const user = await User.findById(req.params.id);
+        if (!user) {
+            return res.status(404).json({ success: false, message: 'User not found' });
+        }
+
+        // Generate random 8-digit password
+        const newPassword = Math.floor(10000000 + Math.random() * 90000000).toString();
+
+        // Hash and update
+        const salt = await bcrypt.genSalt(12);
+        const hashedPassword = await bcrypt.hash(newPassword, salt);
+        await User.updateOne({ _id: user._id }, { password: hashedPassword });
+
+        res.json({
+            success: true,
+            message: `Đã reset mật khẩu cho ${user.name}`,
+            data: { newPassword }
+        });
+    } catch (error) {
+        console.error('Admin reset password error:', error);
         res.status(500).json({ success: false, message: 'Lỗi server' });
     }
 });

@@ -1,5 +1,5 @@
 # Project Summary
-**Last Updated:** 2026-02-13 (Email Verification for Password Change)
+**Last Updated:** 2026-02-13 (Admin Reset Password + Simplified Password Change)
 **Updated By:** Claude Code
 
 ---
@@ -346,13 +346,10 @@ CASSO_WEBHOOK_SECRET=your_secret    # Casso webhook verification secret
 
 ## 7. Recent Changes (Last 3 Sessions)
 
-1. **2026-02-13** - Email Verification for Password Change
-   - Installed nodemailer package
-   - Created server/utils/email.js: Gmail SMTP transporter + sendPasswordVerificationCode()
-   - Added passwordResetCode and passwordResetExpires fields to User model
-   - Added POST /api/auth/send-password-code route (60s rate limit, 10min expiry)
-   - Modified PUT /api/auth/password to require verification code parameter
-   - Added EMAIL_USER and EMAIL_PASS env variables
+1. **2026-02-13** - Admin Reset Password + Simplified Password Change
+   - Added POST /api/admin/users/:id/reset-password: generates random 8-digit password, hashes with bcrypt, returns plain-text
+   - Simplified PUT /api/auth/password: removed verification code requirement, now only requires currentPassword + newPassword
+   - Previous: Added nodemailer, email utility, send-password-code route, verification code fields
 
 2. **2026-02-12** - Article CMS for About & Services Pages
    - Created Article model (models/Article.js):
