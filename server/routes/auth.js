@@ -185,6 +185,7 @@ router.put('/profile', authMiddleware, async (req, res) => {
         const {
             name,
             avatar,
+            backgroundImage,
             bio,
             skills,
             phone,
@@ -199,6 +200,7 @@ router.put('/profile', authMiddleware, async (req, res) => {
         const updateData = {};
         if (name) updateData.name = name;
         if (avatar !== undefined) updateData.avatar = avatar;
+        if (backgroundImage !== undefined) updateData.backgroundImage = backgroundImage;
         if (bio !== undefined) updateData.bio = bio;
         if (skills !== undefined) updateData.skills = skills;
         if (phone !== undefined) updateData.phone = phone;
