@@ -60,9 +60,13 @@ const userSchema = new mongoose.Schema({
         default: false
     },
     socials: {
+        facebook: { type: String, default: '' },
         linkedin: { type: String, default: '' },
-        behance: { type: String, default: '' },
-        github: { type: String, default: '' }
+        github: { type: String, default: '' },
+        custom: [{
+            label: { type: String, required: true },
+            url: { type: String, required: true }
+        }]
     },
     featuredWorks: [{
         image: { type: String, required: true },
@@ -102,6 +106,14 @@ const userSchema = new mongoose.Schema({
         type: Number,
         default: 0,
         min: [0, 'Balance cannot be negative']
+    },
+    passwordResetCode: {
+        type: String,
+        default: null
+    },
+    passwordResetExpires: {
+        type: Date,
+        default: null
     }
 }, {
     timestamps: true

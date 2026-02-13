@@ -1,6 +1,8 @@
 import express from 'express';
+import crypto from 'crypto';
 import User from '../models/User.js';
 import { generateToken, authMiddleware } from '../middleware/auth.js';
+import { sendPasswordVerificationCode } from '../utils/email.js';
 
 const router = express.Router();
 
@@ -237,17 +239,65 @@ router.put('/profile', authMiddleware, async (req, res) => {
     }
 });
 
+// @route   POST /api/auth/send-password-code
+// @desc    Send verification code to email for password change
+// @access  Private
+router.post('/send-password-code', authMiddleware, async (req, res) => {
+    try {
+        const user = await User.findById(req.user._id);
+        if (!user) {
+            return res.status(404).json({ success: false, message: 'User not found' });
+        }
+
+        // Rate limit: don't send if code was sent less than 60s ago
+        if (user.passwordResetExpires && user.passwordResetCode) {
+            const timeSinceIssued = Date.now() - (user.passwordResetExpires.getTime() - 10 * 60 * 1000);
+            if (timeSinceIssued < 60 * 1000) {
+                return res.status(429).json({
+                    success: false,
+                    message: 'Please wait before requesting a new code'
+                });
+            }
+        }
+
+        // Generate 6-digit code
+        const code = crypto.randomInt(100000, 999999).toString();
+        user.passwordResetCode = code;
+        user.passwordResetExpires = new Date(Date.now() + 10 * 60 * 1000); // 10 minutes
+        await user.save();
+
+        // Send email
+        await sendPasswordVerificationCode(user.email, code, user.name);
+
+        // Mask email for display
+        const parts = user.email.split('@');
+        const masked = parts[0].slice(0, 2) + '***@' + parts[1];
+
+        res.json({
+            success: true,
+            message: 'Verification code sent',
+            data: { email: masked }
+        });
+    } catch (error) {
+        console.error('Send password code error:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Failed to send verification code'
+        });
+    }
+});
+
 // @route   PUT /api/auth/password
-// @desc    Change password
+// @desc    Change password with verification code
 // @access  Private
 router.put('/password', authMiddleware, async (req, res) => {
     try {
-        const { currentPassword, newPassword } = req.body;
+        const { currentPassword, newPassword, code } = req.body;
 
-        if (!currentPassword || !newPassword) {
+        if (!currentPassword || !newPassword || !code) {
             return res.status(400).json({
                 success: false,
-                message: 'Please provide current and new password'
+                message: 'Please provide current password, new password and verification code'
             });
         }
 
@@ -260,6 +310,22 @@ router.put('/password', authMiddleware, async (req, res) => {
 
         const user = await User.findById(req.user._id);
 
+        // Verify code
+        if (!user.passwordResetCode || user.passwordResetCode !== code) {
+            return res.status(400).json({
+                success: false,
+                message: 'Invalid verification code'
+            });
+        }
+
+        if (!user.passwordResetExpires || user.passwordResetExpires < new Date()) {
+            return res.status(400).json({
+                success: false,
+                message: 'Verification code has expired'
+            });
+        }
+
+        // Verify current password
         const isMatch = await user.comparePassword(currentPassword);
         if (!isMatch) {
             return res.status(400).json({
@@ -268,7 +334,10 @@ router.put('/password', authMiddleware, async (req, res) => {
             });
         }
 
+        // Change password and clear code
         user.password = newPassword;
+        user.passwordResetCode = null;
+        user.passwordResetExpires = null;
         await user.save();
 
         res.json({
