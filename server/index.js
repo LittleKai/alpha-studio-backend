@@ -15,6 +15,11 @@ import commentRoutes from './routes/comments.js';
 import enrollmentRoutes from './routes/enrollments.js';
 import reviewRoutes from './routes/reviews.js';
 import articleRoutes from './routes/articles.js';
+import cloudRoutes from './routes/cloud.js';
+import uploadRoutes from './routes/upload.js';
+import cron from 'node-cron';
+import HostMachine from './models/HostMachine.js';
+import CloudSession from './models/CloudSession.js';
 
 // Load env variables
 dotenv.config();
@@ -83,6 +88,8 @@ app.use('/api/comments', commentRoutes);
 app.use('/api/enrollments', enrollmentRoutes);
 app.use('/api/reviews', reviewRoutes);
 app.use('/api/articles', articleRoutes);
+app.use('/api/cloud', cloudRoutes);
+app.use('/api/upload', uploadRoutes);
 
 // Health check
 app.get('/api/health', (req, res) => {
@@ -108,6 +115,46 @@ app.use((err, req, res, next) => {
         success: false,
         message: 'Internal server error'
     });
+});
+
+// Cron: check host machines heartbeat every 60 seconds
+cron.schedule('* * * * *', async () => {
+    try {
+        const twoMinutesAgo = new Date(Date.now() - 2 * 60 * 1000);
+
+        // Find machines that haven't pinged in 2 minutes
+        const staleMachines = await HostMachine.find({
+            status: { $ne: 'offline' },
+            lastPingAt: { $lt: twoMinutesAgo }
+        });
+
+        for (const machine of staleMachines) {
+            console.log(`[Cron] Machine "${machine.name}" (${machine.machineId}) went offline`);
+            machine.status = 'offline';
+            await machine.save();
+
+            // End active sessions on this machine
+            const activeSessions = await CloudSession.find({
+                hostMachineId: machine._id,
+                status: 'active'
+            });
+
+            for (const session of activeSessions) {
+                session.status = 'ended';
+                session.endedAt = new Date();
+                session.endReason = 'machine_offline';
+                await session.save();
+            }
+
+            if (activeSessions.length > 0) {
+                machine.currentContainers = 0;
+                await machine.save();
+                console.log(`[Cron] Ended ${activeSessions.length} sessions on offline machine "${machine.name}"`);
+            }
+        }
+    } catch (error) {
+        console.error('[Cron] Heartbeat check error:', error);
+    }
 });
 
 // Start server

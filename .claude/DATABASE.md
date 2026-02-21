@@ -14,7 +14,7 @@ MONGODB_URI=mongodb+srv://aduc5525:<password>@cluster0.c1mdcyv.mongodb.net/alpha
 
 ---
 
-## 🗂️ Collections (8 total)
+## 🗂️ Collections (10 total)
 
 | Collection | Purpose | Key Fields |
 |------------|---------|------------|
@@ -26,6 +26,8 @@ MONGODB_URI=mongodb+srv://aduc5525:<password>@cluster0.c1mdcyv.mongodb.net/alpha
 | **studio_sessions** | AI editing sessions | userId, sessionId, originalImage |
 | **transformations** | Image edits history | sessionId, type, prompt, outputImage |
 | **api_usage** | API tracking | userId, endpoint, usage, billingPeriod |
+| **hostmachines** | Cloud host machines | name, machineId, agentUrl, secret, status, specs |
+| **cloudsessions** | Cloud desktop sessions | userId, hostMachineId, containerId, noVncUrl, status |
 
 ---
 
@@ -116,4 +118,51 @@ db.api_usage.find({ userId: ObjectId("..."), billingPeriod: "2025-01" })
 // - Text index: title.vi, title.en, content.vi, content.en, tags
 ```
 
-**Last Updated:** 2026-02-12
+### 9. HostMachine Collection (hostmachines)
+```javascript
+{
+  name: String (required),
+  machineId: String (required, unique),
+  agentUrl: String (required),
+  secret: String (required),
+  status: enum ['available', 'busy', 'offline'] (default: 'offline'),
+  specs: {
+    cpu: String,
+    ram: String,
+    gpu: String
+  },
+  maxContainers: Number (default: 5),
+  currentContainers: Number (default: 0),
+  lastPingAt: Date,
+  enabled: Boolean (default: true),
+  createdAt: Date,
+  updatedAt: Date
+}
+
+// Indexes:
+// - { status: 1, enabled: 1 }
+// - { machineId: 1 } (unique)
+```
+
+### 10. CloudSession Collection (cloudsessions)
+```javascript
+{
+  userId: ObjectId (ref: User, required),
+  hostMachineId: ObjectId (ref: HostMachine, required),
+  containerId: String (required),
+  noVncUrl: String (required),
+  status: enum ['active', 'ended'] (default: 'active'),
+  startedAt: Date,
+  endedAt: Date,
+  endReason: enum ['user_disconnect', 'admin_force', 'machine_offline', 'error', null],
+  createdAt: Date,
+  updatedAt: Date
+}
+
+// Indexes:
+// - { userId: 1, status: 1 }
+// - { hostMachineId: 1, status: 1 }
+// - { status: 1, startedAt: 1 }
+```
+
+**Last Updated:** 2026-02-18

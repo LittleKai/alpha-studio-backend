@@ -1,5 +1,5 @@
 # Project Summary
-**Last Updated:** 2026-02-13 (Admin Reset Password + Simplified Password Change)
+**Last Updated:** 2026-02-21 (Backblaze B2 - presigned upload URL endpoint, b2Storage util, upload route)
 **Updated By:** Claude Code
 
 ---
@@ -42,7 +42,9 @@ alpha-studio-backend/
 │   │   ├── Prompt.js              # Shared prompts with multiple contents, ratings
 │   │   ├── Resource.js            # Resource hub with file upload (50MB)
 │   │   ├── Comment.js             # Comments for prompts/resources
-│   │   └── Article.js             # Articles for About & Services pages (bilingual)
+│   │   ├── Article.js             # Articles for About & Services pages (bilingual)
+│   │   ├── HostMachine.js         # Cloud host machine registry
+│   │   └── CloudSession.js        # Cloud desktop sessions
 │   ├── middleware/
 │   │   └── auth.js                # JWT auth + adminOnly + modOnly middleware
 │   └── routes/
@@ -57,7 +59,11 @@ alpha-studio-backend/
 │       ├── comments.js            # Comments API for prompts/resources
 │       ├── enrollments.js         # Course enrollment API (enroll, progress, check)
 │       ├── reviews.js             # Course reviews API (CRUD, like, helpful, rating distribution)
-│       └── articles.js            # Articles API (CRUD, publish/unpublish, public + admin)
+│       ├── articles.js            # Articles API (CRUD, publish/unpublish, public + admin)
+│       ├── cloud.js              # Cloud desktop API (connect, disconnect, admin machines/sessions, heartbeat)
+│       └── upload.js             # B2 presigned URL endpoint (POST /presign, DELETE /file)
+│   └── utils/
+│       └── b2Storage.js          # B2 S3 client + generatePresignedUploadUrl + deleteFile
 ├── .claude/                       # Documentation
 │   ├── PROJECT_SUMMARY.md
 │   ├── CONVENTIONS.md
@@ -195,6 +201,20 @@ alpha-studio-backend/
 │   ├── PATCH  /:id/publish  # Publish article (mod/admin)
 │   ├── PATCH  /:id/unpublish # Unpublish article (mod/admin)
 │   └── GET    /:slug        # Get single article by slug (public)
+├── /cloud
+│   ├── POST   /connect           # Connect to cloud desktop (auth)
+│   ├── POST   /disconnect        # Disconnect from cloud desktop (auth)
+│   ├── GET    /session           # Get active session (auth)
+│   ├── POST   /heartbeat         # Agent heartbeat (secret-based)
+│   ├── GET    /admin/machines    # List machines (admin)
+│   ├── POST   /admin/machines    # Register machine (admin)
+│   ├── PUT    /admin/machines/:id    # Update machine (admin)
+│   ├── PATCH  /admin/machines/:id/toggle  # Toggle machine (admin)
+│   ├── GET    /admin/sessions    # List sessions (admin)
+│   └── POST   /admin/sessions/:id/force-end  # Force end session (admin)
+├── /upload
+│   ├── POST   /presign           # Generate B2 presigned upload URL (auth)
+│   └── DELETE /file              # Delete file from B2 (admin)
 └── /health               # Health check endpoint
 ```
 
@@ -287,6 +307,8 @@ alpha-studio-backend/
 | Course Reviews API | ✅ Complete | routes/reviews.js, models/Review.js | CRUD, rating distribution, helpful votes, admin reply |
 | Lesson Video/Documents | ✅ Complete | models/Course.js | videoUrl and documents array per lesson |
 | Article CMS | ✅ Complete | models/Article.js, routes/articles.js | Bilingual articles for About & Services pages, admin CRUD |
+| Cloud Desktop API | ✅ Complete | models/HostMachine.js, models/CloudSession.js, routes/cloud.js | User connect/disconnect, admin machine/session management, agent heartbeat, cron cleanup |
+| B2 Presigned Upload | ✅ Complete | routes/upload.js, utils/b2Storage.js | Generate presigned PUT URL for browser-direct upload to Backblaze B2 |
 
 ---
 
@@ -340,18 +362,38 @@ PORT=3001                           # Server port (default: 3001)
 NODE_ENV=development                # Environment mode
 FRONTEND_URL=https://...            # Frontend URL for CORS
 CASSO_WEBHOOK_SECRET=your_secret    # Casso webhook verification secret
+# Backblaze B2
+B2_ENDPOINT=https://s3.us-west-004.backblazeb2.com
+B2_REGION=us-west-004
+B2_ACCESS_KEY_ID=your_key_id
+B2_SECRET_ACCESS_KEY=your_app_key
+B2_BUCKET_NAME=your_bucket_name
+CDN_BASE_URL=https://f004.backblazeb2.com/file/your_bucket_name
 ```
 
 ---
 
 ## 7. Recent Changes (Last 3 Sessions)
 
-1. **2026-02-13** - Admin Reset Password + Simplified Password Change
-   - Added POST /api/admin/users/:id/reset-password: generates random 8-digit password, hashes with bcrypt, returns plain-text
-   - Simplified PUT /api/auth/password: removed verification code requirement, now only requires currentPassword + newPassword
-   - Previous: Added nodemailer, email utility, send-password-code route, verification code fields
+1. **2026-02-21** - Backblaze B2 File Storage
+   - Installed `@aws-sdk/client-s3` + `@aws-sdk/s3-request-presigner`
+   - Created `server/utils/b2Storage.js`: S3Client (forcePathStyle for B2) + `generatePresignedUploadUrl` + `deleteFile`
+   - Created `server/routes/upload.js`: POST /presign (auth), DELETE /file (admin)
+   - Mounted `/api/upload` in server/index.js
+   - Added B2 env vars to .env: B2_ENDPOINT, B2_REGION, B2_ACCESS_KEY_ID, B2_SECRET_ACCESS_KEY, B2_BUCKET_NAME, CDN_BASE_URL
 
-2. **2026-02-12** - Article CMS for About & Services Pages
+2. **2026-02-18** - Cloud Desktop Feature
+   - Created HostMachine model (name, machineId, agentUrl, secret, status, specs, maxContainers, currentContainers, lastPingAt, enabled)
+   - Created CloudSession model (userId, hostMachineId, containerId, noVncUrl, status, startedAt, endedAt, endReason)
+   - Created cloud routes: user connect/disconnect/session, agent heartbeat, admin machines CRUD + sessions management
+   - Added node-cron dependency for 60s heartbeat check (marks offline machines, ends their sessions)
+   - Mounted at /api/cloud in index.js
+
+2. **2026-02-13** - Admin Reset Password + Simplified Password Change
+   - Added POST /api/admin/users/:id/reset-password: generates random 8-digit password, hashes with bcrypt, returns plain-text
+   - Simplified PUT /api/auth/password: removed verification code requirement
+
+3. **2026-02-12** - Article CMS for About & Services Pages
    - Created Article model (models/Article.js):
      - Bilingual title, excerpt, content (vi/en)
      - slug (auto-generated from Vietnamese title)

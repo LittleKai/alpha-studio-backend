@@ -1,8 +1,22 @@
 import express from 'express';
 import Resource from '../models/Resource.js';
 import { authMiddleware, modOnly, adminOnly } from '../middleware/auth.js';
-
+import { generatePresignedDownloadUrl } from '../utils/b2Storage.js';
 const router = express.Router();
+
+/** Extract B2 object key from CDN or direct backblazeb2.com URL. Returns null if not a B2 URL. */
+function extractB2Key(url) {
+    if (!url) return null;
+    const bucket = process.env.B2_BUCKET_NAME;
+    const cdnBase = process.env.CDN_BASE_URL;
+    if (cdnBase && url.startsWith(cdnBase)) {
+        return url.slice(cdnBase.endsWith('/') ? cdnBase.length : cdnBase.length + 1);
+    }
+    const b2Pattern = `.backblazeb2.com/file/${bucket}/`;
+    const idx = url.indexOf(b2Pattern);
+    if (idx !== -1) return url.slice(idx + b2Pattern.length);
+    return null;
+}
 
 // Helper function to check if user is mod/admin from token
 async function checkIsMod(authHeader) {
@@ -592,12 +606,20 @@ router.post('/:id/download', authMiddleware, async (req, res) => {
             });
         }
 
+        const fileData = { ...resource.file.toObject() };
+
+        // Auto-sign B2 file URLs (handles both CDN_BASE_URL and direct backblazeb2.com URLs)
+        const b2Key = extractB2Key(fileData.url);
+        if (b2Key) {
+            fileData.url = await generatePresignedDownloadUrl(b2Key, 3600); // 1-hour download link
+        }
+
         res.json({
             success: true,
             message: 'Download tracked',
             data: {
                 downloadsCount: resource.downloadsCount,
-                file: resource.file
+                file: fileData
             }
         });
     } catch (error) {
