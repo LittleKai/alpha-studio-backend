@@ -1,4 +1,4 @@
-import { S3Client, DeleteObjectCommand, PutObjectCommand, GetObjectCommand, PutBucketCorsCommand } from '@aws-sdk/client-s3';
+import { S3Client, DeleteObjectCommand, PutObjectCommand, GetObjectCommand } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 
 // Lazy-initialized: dotenv.config() in index.js runs before any request,
@@ -31,7 +31,7 @@ function getS3() {
 }
 
 /**
- * Configure CORS on the B2 bucket to allow browser direct upload from known origins.
+ * Configure CORS on the B2 bucket via B2 native API (not S3 compat layer).
  * Called once at server startup — idempotent, errors are non-fatal.
  */
 export async function configureBucketCors() {
@@ -42,26 +42,59 @@ export async function configureBucketCors() {
             'http://localhost:5174',
             'http://localhost:3000',
         ];
-        // Add production frontend URL from env
         if (process.env.FRONTEND_URL && !origins.includes(process.env.FRONTEND_URL)) {
             origins.push(process.env.FRONTEND_URL);
         }
-        await getS3().send(new PutBucketCorsCommand({
-            Bucket: process.env.B2_BUCKET_NAME,
-            CORSConfiguration: {
-                CORSRules: [{
-                    AllowedOrigins: origins,
-                    AllowedMethods: ['PUT', 'GET', 'HEAD'],
-                    AllowedHeaders: ['*'],
-                    ExposeHeaders: ['ETag'],
-                    MaxAgeSeconds: 3600,
-                }],
+
+        // Step 1: Authorize with B2 native API
+        const authRes = await fetch('https://api.backblazeb2.com/b2api/v3/b2_authorize_account', {
+            headers: {
+                Authorization: 'Basic ' + Buffer.from(
+                    `${process.env.B2_ACCESS_KEY_ID}:${process.env.B2_SECRET_ACCESS_KEY}`
+                ).toString('base64'),
             },
-        }));
+        });
+        if (!authRes.ok) throw new Error(`B2 auth failed: ${authRes.status}`);
+        const auth = await authRes.json();
+
+        // Step 2: Get bucketId by name
+        const bucketsRes = await fetch(
+            `${auth.apiUrl}/b2api/v3/b2_list_buckets?accountId=${auth.accountId}&bucketName=${encodeURIComponent(process.env.B2_BUCKET_NAME)}`,
+            { headers: { Authorization: auth.authorizationToken } }
+        );
+        if (!bucketsRes.ok) throw new Error(`B2 list buckets failed: ${bucketsRes.status}`);
+        const { buckets } = await bucketsRes.json();
+        if (!buckets || buckets.length === 0) throw new Error(`Bucket "${process.env.B2_BUCKET_NAME}" not found`);
+
+        // Step 3: Update bucket CORS rules
+        const updateRes = await fetch(`${auth.apiUrl}/b2api/v3/b2_update_bucket`, {
+            method: 'POST',
+            headers: {
+                Authorization: auth.authorizationToken,
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+                accountId: auth.accountId,
+                bucketId: buckets[0].bucketId,
+                corsRules: [{
+                    corsRuleName: 'allowDirectUpload',
+                    allowedOrigins: origins,
+                    allowedOperations: ['s3_put', 's3_get', 's3_head'],
+                    allowedHeaders: ['*'],
+                    exposeHeaders: ['ETag'],
+                    maxAgeSeconds: 3600,
+                }],
+            }),
+        });
+        if (!updateRes.ok) {
+            const errBody = await updateRes.text();
+            throw new Error(`B2 update bucket failed: ${updateRes.status} ${errBody}`);
+        }
+
         _corsConfigured = true;
         console.log('[B2] CORS configured for origins:', origins);
     } catch (err) {
-        // Non-fatal: log warning, upload will still work if CORS was set manually
+        // Non-fatal: log warning, upload will still work if CORS was set manually in B2 console
         console.warn('[B2] CORS auto-config failed (set CORS manually in B2 console):', err.message);
     }
 }
