@@ -170,10 +170,11 @@ router.get('/users/search', authMiddleware, async (req, res) => {
             return res.json({ success: true, data: [] });
         }
         const regex = new RegExp(q, 'i');
-        const users = await User.find({
-            $or: [{ name: regex }, { email: regex }],
-            _id: { $ne: req.user._id } // exclude self
-        })
+        const filter = { $or: [{ name: regex }, { email: regex }] };
+        if (req.query.includeSelf !== 'true') {
+            filter._id = { $ne: req.user._id };
+        }
+        const users = await User.find(filter)
             .select('_id name avatar role email')
             .limit(10)
             .lean();
@@ -200,7 +201,7 @@ router.get('/users/search', authMiddleware, async (req, res) => {
 router.get('/users/:id', authMiddleware, async (req, res) => {
     try {
         const user = await User.findById(req.params.id)
-            .select('_id name avatar role email phone bio skills location socials')
+            .select('_id name avatar backgroundImage role email phone bio skills location socials')
             .lean();
 
         if (!user) {
@@ -213,6 +214,7 @@ router.get('/users/:id', authMiddleware, async (req, res) => {
                 id: user._id.toString(),
                 name: user.name,
                 avatar: user.avatar || null,
+                backgroundImage: user.backgroundImage || null,
                 role: user.role,
                 email: user.email,
                 phone: user.phone || '',

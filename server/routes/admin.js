@@ -757,23 +757,27 @@ router.get('/storage/orphaned', async (req, res) => {
             }
         }
 
-        // 4. Find orphaned: in B2 but not in usedKeys
-        const orphaned = b2Files
-            .filter(f => !usedKeys.has(f.key))
-            .map(f => ({
-                key: f.key,
-                filename: f.key.split('/').pop(),
-                folder: f.key.includes('/') ? f.key.split('/')[0] : '',
-                size: f.size,
-                lastModified: f.lastModified,
-                uploader: 'Unknown',
-                uploadedAt: null,
-            }));
+        // 4. Build orphaned + referenced lists
+        const toFileObj = (f, referenced) => ({
+            key: f.key,
+            filename: f.key.split('/').pop(),
+            folder: f.key.includes('/') ? f.key.split('/')[0] : '',
+            size: f.size,
+            lastModified: f.lastModified,
+            uploader: docKeyMap.get(f.key)?.uploader || 'Unknown',
+            uploadedAt: docKeyMap.get(f.key)?.uploadedAt || null,
+            source: docKeyMap.get(f.key)?.source || null,
+            referenced,
+        });
+
+        const orphaned = b2Files.filter(f => !usedKeys.has(f.key)).map(f => toFileObj(f, false));
+        const referenced = b2Files.filter(f => usedKeys.has(f.key)).map(f => toFileObj(f, true));
 
         res.json({
             success: true,
             data: orphaned,
-            meta: { orphaned: orphaned.length, totalB2: b2Files.length, referenced: usedKeys.size }
+            referencedFiles: referenced,
+            meta: { orphaned: orphaned.length, totalB2: b2Files.length, referenced: referenced.length }
         });
     } catch (error) {
         console.error('List orphaned files error:', error);

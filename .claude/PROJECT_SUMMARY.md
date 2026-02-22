@@ -1,5 +1,5 @@
 # Project Summary
-**Last Updated:** 2026-02-22 (workflow.js: GET /users/:id; admin.js: storage cleanup (orphaned B2 files); b2Storage.js: listAllFiles)
+**Last Updated:** 2026-02-23 (FeaturedStudent model + /api/featured-students routes: public list, admin CRUD, reorder)
 **Updated By:** Claude Code
 
 ---
@@ -46,7 +46,8 @@ alpha-studio-backend/
 │   │   ├── HostMachine.js         # Cloud host machine registry
 │   │   ├── CloudSession.js        # Cloud desktop sessions
 │   │   ├── WorkflowProject.js     # Workflow projects (team, tasks, chatHistory, expenseLog)
-│   │   └── WorkflowDocument.js    # Workflow documents (file metadata, status, comments)
+│   │   ├── WorkflowDocument.js    # Workflow documents (file metadata, status, comments)
+│   │   └── FeaturedStudent.js     # Featured students (userId ref, order, label, hired)
 │   ├── middleware/
 │   │   └── auth.js                # JWT auth + adminOnly + modOnly middleware
 │   └── routes/
@@ -64,7 +65,8 @@ alpha-studio-backend/
 │       ├── articles.js            # Articles API (CRUD, publish/unpublish, public + admin)
 │       ├── cloud.js              # Cloud desktop API (connect, disconnect, admin machines/sessions, heartbeat)
 │       ├── upload.js             # B2 presigned URL endpoint (POST /presign, DELETE /file)
-│       └── workflow.js           # Workflow API (CRUD projects + documents, auth required)
+│       ├── workflow.js           # Workflow API (CRUD projects + documents, auth required)
+│       └── featuredStudents.js   # Featured students API (public GET, admin CRUD + reorder)
 │   └── utils/
 │       └── b2Storage.js          # B2 S3 client + generatePresignedUploadUrl + deleteFile + listAllFiles (paginated)
 
@@ -329,7 +331,7 @@ alpha-studio-backend/
 | Workflow Projects API | ✅ Complete | models/WorkflowProject.js, routes/workflow.js | CRUD projects with team, tasks, chatHistory, expenseLog — auth required; GET /projects shows all non-completed for users |
 | Workflow Documents API | ✅ Complete | models/WorkflowDocument.js, routes/workflow.js | CRUD document records with status, comments, note — auth required; GET ?projectId returns all project docs to members |
 | Workflow User Profile API | ✅ Complete | routes/workflow.js | GET /users/:id returns public profile (name, avatar, role, email, phone, bio, skills, location, socials) — auth required |
-| Storage Cleanup API | ✅ Complete | routes/admin.js, utils/b2Storage.js | Lists all B2 files; cross-references with WorkflowDocument/Resource/Course; returns orphaned files; DELETE by key — super admin (aduc5525@gmail.com) only |
+| Storage Cleanup API | ✅ Complete | routes/admin.js, utils/b2Storage.js | Lists all B2 files; cross-references WorkflowDocument/Resource (file+previewImages)/Course (videoUrl+documents)/Prompt (exampleImages); returns `data` (orphaned) + `referencedFiles` each with `source`, `uploader`, `referenced` — super admin only |
 
 ---
 
@@ -395,6 +397,15 @@ CDN_BASE_URL=https://f004.backblazeb2.com/file/your_bucket_name
 ---
 
 ## 7. Recent Changes (Last 3 Sessions)
+
+1. **2026-02-23** - Storage Cleanup orphaned checker fixes + referencedFiles response
+   - `admin.js` — GET /storage/orphaned:
+     - Fixed Resource query: `createdBy` → `author` (correct field name in Resource model)
+     - Added `Prompt` import; added scan of `Prompt.exampleImages[].publicId / url`
+     - Added scan of `Resource.previewImages[].publicId / url` (was only checking `file`)
+     - Fixed Course scan: added `lesson.videoUrl` extraction (was only scanning `lesson.documents[]`)
+     - Refactored: `toFileObj(f, referenced)` helper builds both lists with `uploader`, `uploadedAt`, `source`, `referenced` fields
+     - Response now includes `referencedFiles: [...]` alongside `data` (orphaned); both carry `source` and `referenced` flags
 
 1. **2026-02-22** - Storage Cleanup API, User Public Profile, B2 listAllFiles
    - `b2Storage.js`: Added `ListObjectsV2Command` import; added `listAllFiles()` with pagination loop (handles large buckets via `ContinuationToken`)
