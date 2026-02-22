@@ -37,6 +37,8 @@ const commentSchema = new mongoose.Schema({
 const workflowProjectSchema = new mongoose.Schema({
     name: { type: String, required: true },
     client: { type: String, default: '' },
+    tagline: { type: String, default: '' },
+    requirements: { type: String, default: '' },
     description: { type: String, default: '' },
     department: { type: String, default: 'event_planner' },
     status: { type: String, default: 'planning' },

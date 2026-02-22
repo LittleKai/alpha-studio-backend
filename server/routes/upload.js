@@ -1,25 +1,15 @@
 import express from 'express';
 import { authMiddleware, adminOnly } from '../middleware/auth.js';
-import { generatePresignedUploadUrl, generatePresignedDownloadUrl, deleteFile } from '../utils/b2Storage.js';
+import {
+    generatePresignedUploadUrl, generatePresignedDownloadUrl, deleteFile,
+    initMultipartUpload, generatePresignedPartUrl, finishMultipartUpload,
+} from '../utils/b2Storage.js';
 
 const router = express.Router();
 
-// Allowed content type prefixes
-const ALLOWED_CONTENT_TYPES = [
-    'video/',
-    'application/pdf',
-    'application/msword',
-    'application/vnd.openxmlformats-officedocument',
-    'application/vnd.ms-',
-    'application/zip',
-    'application/x-rar-compressed',
-    'application/octet-stream',
-    'application/x-zip-compressed',
-    'multipart/x-zip',
-];
-
-function isAllowedContentType(contentType) {
-    return ALLOWED_CONTENT_TYPES.some(prefix => contentType.startsWith(prefix));
+// Normalise content type: fall back to octet-stream for empty or unknown types
+function normaliseContentType(contentType) {
+    return (contentType && contentType.trim()) ? contentType.trim() : 'application/octet-stream';
 }
 
 function sanitizeFilename(filename) {
@@ -59,24 +49,18 @@ router.post('/presign', authMiddleware, async (req, res) => {
     try {
         const { filename, contentType, folder } = req.body;
 
-        if (!filename || !contentType || !folder) {
+        if (!filename || !folder) {
             return res.status(400).json({
                 success: false,
-                message: 'filename, contentType, và folder là bắt buộc'
+                message: 'filename và folder là bắt buộc'
             });
         }
 
-        if (!isAllowedContentType(contentType)) {
-            return res.status(400).json({
-                success: false,
-                message: 'Loại file không được hỗ trợ'
-            });
-        }
-
+        const resolvedType = normaliseContentType(contentType);
         const sanitized = sanitizeFilename(filename);
         const key = `${folder}/${Date.now()}-${sanitized}`;
 
-        const { presignedUrl, publicUrl } = await generatePresignedUploadUrl(key, contentType);
+        const { presignedUrl, publicUrl } = await generatePresignedUploadUrl(key, resolvedType);
 
         res.json({
             success: true,
@@ -149,6 +133,60 @@ router.delete('/file', authMiddleware, adminOnly, async (req, res) => {
             success: false,
             message: 'Không thể xóa file'
         });
+    }
+});
+
+// POST /api/upload/multipart-init — start a multipart upload, get per-part presigned PUT URLs
+router.post('/multipart-init', authMiddleware, async (req, res) => {
+    try {
+        const { filename, contentType, folder, numParts } = req.body;
+        if (!filename || !folder || !numParts) {
+            return res.status(400).json({ success: false, message: 'Thiếu thông tin bắt buộc' });
+        }
+        if (numParts < 1 || numParts > 10000) {
+            return res.status(400).json({ success: false, message: 'Số lượng phần không hợp lệ' });
+        }
+
+        const resolvedType = normaliseContentType(contentType);
+        const sanitized = sanitizeFilename(filename);
+        const key = `${folder}/${Date.now()}-${sanitized}`;
+
+        const uploadId = await initMultipartUpload(key, resolvedType);
+
+        // Generate one presigned URL per part (1-hour expiry each)
+        const partUrls = await Promise.all(
+            Array.from({ length: numParts }, (_, i) =>
+                generatePresignedPartUrl(key, uploadId, i + 1, 3600)
+            )
+        );
+
+        res.json({
+            success: true,
+            data: { uploadId, key, partUrls, publicUrl: `${process.env.CDN_BASE_URL}/${key}` },
+        });
+    } catch (error) {
+        console.error('Multipart init error:', error);
+        res.status(500).json({ success: false, message: 'Không thể khởi tạo upload' });
+    }
+});
+
+// POST /api/upload/multipart-complete — assemble parts and finalise the upload
+router.post('/multipart-complete', authMiddleware, async (req, res) => {
+    try {
+        const { key, uploadId, parts } = req.body;
+        if (!key || !uploadId || !Array.isArray(parts) || parts.length === 0) {
+            return res.status(400).json({ success: false, message: 'Thiếu thông tin bắt buộc' });
+        }
+
+        await finishMultipartUpload(key, uploadId, parts);
+
+        res.json({
+            success: true,
+            data: { publicUrl: `${process.env.CDN_BASE_URL}/${key}` },
+        });
+    } catch (error) {
+        console.error('Multipart complete error:', error);
+        res.status(500).json({ success: false, message: 'Không thể hoàn thành upload' });
     }
 });
 

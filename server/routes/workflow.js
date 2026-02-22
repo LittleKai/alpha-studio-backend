@@ -22,16 +22,10 @@ router.get('/projects', authMiddleware, async (req, res) => {
 
         let query;
         if (isAdmin) {
-            query = {}; // admin sees all projects
+            query = {}; // admin sees all projects (including completed)
         } else {
-            // All non-completed projects + own/member completed projects
-            query = {
-                $or: [
-                    { status: { $ne: 'completed' } },
-                    { createdBy: req.user._id },
-                    { 'team.id': userId }
-                ]
-            };
+            // Regular users see all non-completed projects
+            query = { status: { $ne: 'completed' } };
         }
 
         const projects = await WorkflowProject.find(query).sort({ createdAt: -1 });
@@ -48,7 +42,7 @@ router.get('/projects', authMiddleware, async (req, res) => {
 router.post('/projects', authMiddleware, modOnly, async (req, res) => {
     try {
         const {
-            name, client, description, department, status,
+            name, client, tagline, requirements, description, department, status,
             startDate, deadline, budget, expenses, expenseLog,
             team, progress, chatHistory, tasks
         } = req.body;
@@ -60,11 +54,13 @@ router.post('/projects', authMiddleware, modOnly, async (req, res) => {
         const project = new WorkflowProject({
             name,
             client: client || '',
+            tagline: tagline || '',
+            requirements: requirements || '',
             description: description || '',
             department: department || 'event_planner',
             status: status || 'planning',
             startDate: startDate || new Date().toISOString().split('T')[0],
-            deadline: deadline || 'TBD',
+            deadline: deadline || '',
             budget: budget || 0,
             expenses: expenses || 0,
             expenseLog: expenseLog || [],
@@ -88,7 +84,7 @@ router.post('/projects', authMiddleware, modOnly, async (req, res) => {
 });
 
 // @route   PUT /api/workflow/projects/:id
-// @desc    Update a project (creator or admin)
+// @desc    Update a project (creator or admin); team members may update chatHistory only
 // @access  Auth
 router.put('/projects/:id', authMiddleware, async (req, res) => {
     try {
@@ -96,15 +92,24 @@ router.put('/projects/:id', authMiddleware, async (req, res) => {
         if (!project) {
             return res.status(404).json({ success: false, message: 'Không tìm thấy dự án' });
         }
+
+        const userId = req.user._id.toString();
+        const isTeamMember = project.team.some(m => m.id?.toString() === userId);
+        const requestedFields = Object.keys(req.body);
+        const isChatHistoryOnly = requestedFields.length === 1 && requestedFields[0] === 'chatHistory';
+
         if (!isOwnerOrAdmin(project, req.user)) {
-            return res.status(403).json({ success: false, message: 'Không có quyền chỉnh sửa' });
+            // Team members may only append to chatHistory
+            if (!(isTeamMember && isChatHistoryOnly)) {
+                return res.status(403).json({ success: false, message: 'Không có quyền chỉnh sửa' });
+            }
         }
 
-        const allowedFields = [
-            'name', 'client', 'description', 'department', 'status',
-            'startDate', 'deadline', 'budget', 'expenses', 'expenseLog',
-            'team', 'progress', 'chatHistory', 'tasks', 'avatar'
-        ];
+        const allowedFields = isOwnerOrAdmin(project, req.user)
+            ? ['name', 'client', 'tagline', 'requirements', 'description', 'department', 'status',
+               'startDate', 'deadline', 'budget', 'expenses', 'expenseLog',
+               'team', 'progress', 'chatHistory', 'tasks', 'avatar']
+            : ['chatHistory']; // team members restricted to chatHistory only
 
         for (const field of allowedFields) {
             if (req.body[field] !== undefined) {
@@ -205,8 +210,8 @@ router.get('/documents', authMiddleware, async (req, res) => {
             if (!canAccess) {
                 const project = await WorkflowProject.findById(req.query.projectId).lean();
                 if (project) {
-                    canAccess = project.createdBy.toString() === userId ||
-                        project.team.some(m => m.id === userId);
+                    canAccess = project.createdBy?.toString() === userId ||
+                        project.team.some(m => m.id?.toString() === userId);
                 }
             }
 

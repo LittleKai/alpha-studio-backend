@@ -1,4 +1,7 @@
-import { S3Client, DeleteObjectCommand, PutObjectCommand, GetObjectCommand } from '@aws-sdk/client-s3';
+import {
+    S3Client, DeleteObjectCommand, PutObjectCommand, GetObjectCommand,
+    CreateMultipartUploadCommand, UploadPartCommand, CompleteMultipartUploadCommand,
+} from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 
 // Lazy-initialized: dotenv.config() in index.js runs before any request,
@@ -57,9 +60,13 @@ export async function configureBucketCors() {
         if (!authRes.ok) throw new Error(`B2 auth failed: ${authRes.status}`);
         const auth = await authRes.json();
 
+        // B2 API v3: apiUrl may be nested inside apiInfo.storageApi (newer format) or at top level (older)
+        const apiUrl = auth.apiInfo?.storageApi?.apiUrl || auth.apiUrl;
+        if (!apiUrl) throw new Error('B2 auth response missing apiUrl');
+
         // Step 2: Get bucketId by name
         const bucketsRes = await fetch(
-            `${auth.apiUrl}/b2api/v3/b2_list_buckets?accountId=${auth.accountId}&bucketName=${encodeURIComponent(process.env.B2_BUCKET_NAME)}`,
+            `${apiUrl}/b2api/v3/b2_list_buckets?accountId=${auth.accountId}&bucketName=${encodeURIComponent(process.env.B2_BUCKET_NAME)}`,
             { headers: { Authorization: auth.authorizationToken } }
         );
         if (!bucketsRes.ok) throw new Error(`B2 list buckets failed: ${bucketsRes.status}`);
@@ -67,7 +74,7 @@ export async function configureBucketCors() {
         if (!buckets || buckets.length === 0) throw new Error(`Bucket "${process.env.B2_BUCKET_NAME}" not found`);
 
         // Step 3: Update bucket CORS rules
-        const updateRes = await fetch(`${auth.apiUrl}/b2api/v3/b2_update_bucket`, {
+        const updateRes = await fetch(`${apiUrl}/b2api/v3/b2_update_bucket`, {
             method: 'POST',
             headers: {
                 Authorization: auth.authorizationToken,
@@ -141,5 +148,36 @@ export async function deleteFile(key) {
     await getS3().send(new DeleteObjectCommand({
         Bucket: process.env.B2_BUCKET_NAME,
         Key: key,
+    }));
+}
+
+// ─── Multipart Upload ────────────────────────────────────────────────────────
+
+export async function initMultipartUpload(key, contentType) {
+    const { UploadId } = await getS3().send(new CreateMultipartUploadCommand({
+        Bucket: process.env.B2_BUCKET_NAME,
+        Key: key,
+        ContentType: contentType,
+    }));
+    return UploadId;
+}
+
+export async function generatePresignedPartUrl(key, uploadId, partNumber, expiresIn = 3600) {
+    return getSignedUrl(getS3(), new UploadPartCommand({
+        Bucket: process.env.B2_BUCKET_NAME,
+        Key: key,
+        UploadId: uploadId,
+        PartNumber: partNumber,
+    }), { expiresIn });
+}
+
+export async function finishMultipartUpload(key, uploadId, parts) {
+    await getS3().send(new CompleteMultipartUploadCommand({
+        Bucket: process.env.B2_BUCKET_NAME,
+        Key: key,
+        UploadId: uploadId,
+        MultipartUpload: {
+            Parts: parts.map(p => ({ PartNumber: p.PartNumber, ETag: p.ETag })),
+        },
     }));
 }
