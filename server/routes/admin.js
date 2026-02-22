@@ -4,7 +4,12 @@ import bcrypt from 'bcryptjs';
 import User from '../models/User.js';
 import Transaction from '../models/Transaction.js';
 import WebhookLog from '../models/WebhookLog.js';
+import WorkflowDocument from '../models/WorkflowDocument.js';
+import Resource from '../models/Resource.js';
+import Course from '../models/Course.js';
+import Prompt from '../models/Prompt.js';
 import { authMiddleware, adminOnly } from '../middleware/auth.js';
+import { listAllFiles, deleteFile as deleteB2File } from '../utils/b2Storage.js';
 
 const router = express.Router();
 
@@ -650,6 +655,150 @@ router.get('/stats', async (req, res) => {
         });
     } catch (error) {
         console.error('Admin get stats error:', error);
+        res.status(500).json({ success: false, message: 'Lỗi server' });
+    }
+});
+
+// ─── STORAGE CLEANUP (super admin only) ─────────────────────────────────────
+
+const SUPER_ADMIN_EMAIL = 'aduc5525@gmail.com';
+
+/** Extract B2 object key from a CDN or direct B2 URL */
+function extractB2Key(url) {
+    if (!url) return null;
+    const cdnBase = process.env.CDN_BASE_URL;
+    if (cdnBase && url.startsWith(cdnBase)) {
+        const base = cdnBase.endsWith('/') ? cdnBase : cdnBase + '/';
+        return url.slice(base.length);
+    }
+    const bucket = process.env.B2_BUCKET_NAME;
+    const pattern = `.backblazeb2.com/file/${bucket}/`;
+    const idx = url.indexOf(pattern);
+    if (idx !== -1) return url.slice(idx + pattern.length);
+    return null;
+}
+
+/**
+ * GET /api/admin/storage/orphaned
+ * List B2 files that have no reference in any MongoDB collection.
+ * Enriched with uploader info where a WorkflowDocument record exists.
+ * Super-admin only (aduc5525@gmail.com).
+ */
+router.get('/storage/orphaned', async (req, res) => {
+    if (req.user.email !== SUPER_ADMIN_EMAIL) {
+        return res.status(403).json({ success: false, message: 'Không có quyền' });
+    }
+    try {
+        // 1. List all files in B2
+        const b2Files = await listAllFiles();
+
+        // 2. Build map: key → { uploader, uploadedAt } from WorkflowDocument
+        const docKeyMap = new Map(); // key → { uploader, uploadedAt, id }
+        const wfDocs = await WorkflowDocument.find({}, 'fileKey url uploader uploadDate createdAt').lean();
+        for (const doc of wfDocs) {
+            const key = doc.fileKey || extractB2Key(doc.url);
+            if (key) {
+                docKeyMap.set(key, {
+                    uploader: doc.uploader || 'Unknown',
+                    uploadedAt: doc.createdAt || doc.uploadDate,
+                    source: 'workflow'
+                });
+            }
+        }
+
+        // 3. Collect all used keys from all collections
+        const usedKeys = new Set(docKeyMap.keys());
+
+        // Resources: main file + preview images
+        const resources = await Resource.find({}, 'file previewImages author').populate('author', 'name').lean();
+        for (const r of resources) {
+            // Main file
+            const fileKey = r.file?.publicId || extractB2Key(r.file?.url);
+            if (fileKey) {
+                usedKeys.add(fileKey);
+                if (!docKeyMap.has(fileKey)) {
+                    docKeyMap.set(fileKey, {
+                        uploader: r.author?.name || 'Unknown',
+                        uploadedAt: null,
+                        source: 'resource'
+                    });
+                }
+            }
+            // Preview images (stored in B2)
+            for (const img of (r.previewImages || [])) {
+                const imgKey = img.publicId || extractB2Key(img.url);
+                if (imgKey) usedKeys.add(imgKey);
+            }
+        }
+
+        // Prompts: example images
+        const prompts = await Prompt.find({}, 'exampleImages').lean();
+        for (const p of prompts) {
+            for (const img of (p.exampleImages || [])) {
+                const imgKey = img.publicId || extractB2Key(img.url);
+                if (imgKey) usedKeys.add(imgKey);
+            }
+        }
+
+        // Course lesson videos + documents
+        const courses = await Course.find({}, 'modules').lean();
+        for (const course of courses) {
+            for (const mod of (course.modules || [])) {
+                for (const lesson of (mod.lessons || [])) {
+                    // Video URL
+                    const videoKey = extractB2Key(lesson.videoUrl);
+                    if (videoKey) usedKeys.add(videoKey);
+                    // Lesson documents (PDF, etc.)
+                    for (const doc of (lesson.documents || [])) {
+                        const key = extractB2Key(doc.url);
+                        if (key) usedKeys.add(key);
+                    }
+                }
+            }
+        }
+
+        // 4. Find orphaned: in B2 but not in usedKeys
+        const orphaned = b2Files
+            .filter(f => !usedKeys.has(f.key))
+            .map(f => ({
+                key: f.key,
+                filename: f.key.split('/').pop(),
+                folder: f.key.includes('/') ? f.key.split('/')[0] : '',
+                size: f.size,
+                lastModified: f.lastModified,
+                uploader: 'Unknown',
+                uploadedAt: null,
+            }));
+
+        res.json({
+            success: true,
+            data: orphaned,
+            meta: { orphaned: orphaned.length, totalB2: b2Files.length, referenced: usedKeys.size }
+        });
+    } catch (error) {
+        console.error('List orphaned files error:', error);
+        res.status(500).json({ success: false, message: 'Lỗi server: ' + error.message });
+    }
+});
+
+/**
+ * DELETE /api/admin/storage/orphaned
+ * Delete a specific orphaned file from B2 by its key.
+ * Super-admin only.
+ */
+router.delete('/storage/orphaned', async (req, res) => {
+    if (req.user.email !== SUPER_ADMIN_EMAIL) {
+        return res.status(403).json({ success: false, message: 'Không có quyền' });
+    }
+    const { key } = req.body;
+    if (!key) {
+        return res.status(400).json({ success: false, message: 'key là bắt buộc' });
+    }
+    try {
+        await deleteB2File(key);
+        res.json({ success: true, message: 'Đã xóa file khỏi B2' });
+    } catch (error) {
+        console.error('Delete orphaned file error:', error);
         res.status(500).json({ success: false, message: 'Lỗi server' });
     }
 });

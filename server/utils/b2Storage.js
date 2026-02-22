@@ -1,6 +1,7 @@
 import {
     S3Client, DeleteObjectCommand, PutObjectCommand, GetObjectCommand,
     CreateMultipartUploadCommand, UploadPartCommand, CompleteMultipartUploadCommand,
+    ListObjectsV2Command,
 } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 
@@ -180,4 +181,34 @@ export async function finishMultipartUpload(key, uploadId, parts) {
             Parts: parts.map(p => ({ PartNumber: p.PartNumber, ETag: p.ETag })),
         },
     }));
+}
+
+/**
+ * List all objects in the B2 bucket (handles pagination automatically).
+ * @returns {Promise<Array<{ key: string, size: number, lastModified: Date }>>}
+ */
+export async function listAllFiles() {
+    const s3 = getS3();
+    const bucket = process.env.B2_BUCKET_NAME;
+    const files = [];
+    let continuationToken;
+
+    do {
+        const response = await s3.send(new ListObjectsV2Command({
+            Bucket: bucket,
+            ...(continuationToken && { ContinuationToken: continuationToken }),
+        }));
+
+        for (const obj of (response.Contents || [])) {
+            files.push({
+                key: obj.Key,
+                size: obj.Size,
+                lastModified: obj.LastModified,
+            });
+        }
+
+        continuationToken = response.IsTruncated ? response.NextContinuationToken : undefined;
+    } while (continuationToken);
+
+    return files;
 }

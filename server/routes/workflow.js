@@ -194,6 +194,43 @@ router.get('/users/search', authMiddleware, async (req, res) => {
     }
 });
 
+// @route   GET /api/workflow/users/:id
+// @desc    Get public profile of a user by ID
+// @access  Auth
+router.get('/users/:id', authMiddleware, async (req, res) => {
+    try {
+        const user = await User.findById(req.params.id)
+            .select('_id name avatar role email phone bio skills location socials')
+            .lean();
+
+        if (!user) {
+            return res.status(404).json({ success: false, message: 'Không tìm thấy người dùng' });
+        }
+
+        res.json({
+            success: true,
+            data: {
+                id: user._id.toString(),
+                name: user.name,
+                avatar: user.avatar || null,
+                role: user.role,
+                email: user.email,
+                phone: user.phone || '',
+                bio: user.bio || '',
+                skills: user.skills || [],
+                location: user.location || '',
+                socials: user.socials || {}
+            }
+        });
+    } catch (error) {
+        console.error('Get user profile error:', error);
+        if (error.name === 'CastError') {
+            return res.status(400).json({ success: false, message: 'ID không hợp lệ' });
+        }
+        res.status(500).json({ success: false, message: 'Lỗi server' });
+    }
+});
+
 // ─── DOCUMENTS ─────────────────────────────────────────────────────────────
 
 // @route   GET /api/workflow/documents

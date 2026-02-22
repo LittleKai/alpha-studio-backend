@@ -1,5 +1,5 @@
 # Project Summary
-**Last Updated:** 2026-02-22 (WorkflowDocument: note field; workflow.js: project visibility, admin delete, member doc access, note update)
+**Last Updated:** 2026-02-22 (workflow.js: GET /users/:id; admin.js: storage cleanup (orphaned B2 files); b2Storage.js: listAllFiles)
 **Updated By:** Claude Code
 
 ---
@@ -66,7 +66,7 @@ alpha-studio-backend/
 │       ├── upload.js             # B2 presigned URL endpoint (POST /presign, DELETE /file)
 │       └── workflow.js           # Workflow API (CRUD projects + documents, auth required)
 │   └── utils/
-│       └── b2Storage.js          # B2 S3 client + generatePresignedUploadUrl + deleteFile
+│       └── b2Storage.js          # B2 S3 client + generatePresignedUploadUrl + deleteFile + listAllFiles (paginated)
 
 ├── .claude/                       # Documentation
 │   ├── PROJECT_SUMMARY.md
@@ -142,7 +142,9 @@ alpha-studio-backend/
 │   ├── POST   /webhook-logs/:id/reprocess  # Reprocess webhook
 │   ├── POST   /webhook-logs/:id/assign-user  # Assign user to webhook
 │   ├── POST   /webhook-logs/:id/ignore  # Ignore webhook
-│   └── GET    /stats             # Dashboard statistics
+│   ├── GET    /stats             # Dashboard statistics
+│   ├── GET    /storage/orphaned  # List B2 files not referenced in MongoDB (super admin only)
+│   └── DELETE /storage/orphaned  # Delete orphaned B2 file by key (super admin only)
 ├── /prompts
 │   ├── GET    /                  # List prompts (pagination, filters, search)
 │   ├── GET    /featured          # Get featured prompts
@@ -224,6 +226,8 @@ alpha-studio-backend/
 │   │   ├── POST   /projects          # Create project (auth)
 │   │   ├── PUT    /projects/:id      # Update project (auth, creator/admin)
 │   │   ├── DELETE /projects/:id      # Delete project + docs (auth, creator/admin)
+│   │   ├── GET    /users/search      # Search users by name (auth)
+│   │   ├── GET    /users/:id         # Get user public profile (auth)
 │   │   ├── GET    /documents         # List user's docs, ?projectId=xxx (auth)
 │   │   ├── POST   /documents         # Create document record (auth)
 │   │   ├── PUT    /documents/:id     # Update document (auth, creator/admin)
@@ -321,9 +325,11 @@ alpha-studio-backend/
 | Lesson Video/Documents | ✅ Complete | models/Course.js | videoUrl and documents array per lesson |
 | Article CMS | ✅ Complete | models/Article.js, routes/articles.js | Bilingual articles for About & Services pages, admin CRUD |
 | Cloud Desktop API | ✅ Complete | models/HostMachine.js, models/CloudSession.js, routes/cloud.js | User connect/disconnect, admin machine/session management, agent heartbeat, cron cleanup |
-| B2 Presigned Upload | ✅ Complete | routes/upload.js, utils/b2Storage.js | Generate presigned PUT URL for browser-direct upload to Backblaze B2 |
-| Workflow Projects API | ✅ Complete | models/WorkflowProject.js, routes/workflow.js | CRUD projects with team, tasks, chatHistory, expenseLog — auth required |
+| B2 Presigned Upload | ✅ Complete | routes/upload.js, utils/b2Storage.js | Generate presigned PUT URL for browser-direct upload to Backblaze B2; `listAllFiles()` for bucket enumeration |
+| Workflow Projects API | ✅ Complete | models/WorkflowProject.js, routes/workflow.js | CRUD projects with team, tasks, chatHistory, expenseLog — auth required; GET /projects shows all non-completed for users |
 | Workflow Documents API | ✅ Complete | models/WorkflowDocument.js, routes/workflow.js | CRUD document records with status, comments, note — auth required; GET ?projectId returns all project docs to members |
+| Workflow User Profile API | ✅ Complete | routes/workflow.js | GET /users/:id returns public profile (name, avatar, role, email, phone, bio, skills, location, socials) — auth required |
+| Storage Cleanup API | ✅ Complete | routes/admin.js, utils/b2Storage.js | Lists all B2 files; cross-references with WorkflowDocument/Resource/Course; returns orphaned files; DELETE by key — super admin (aduc5525@gmail.com) only |
 
 ---
 
@@ -390,6 +396,14 @@ CDN_BASE_URL=https://f004.backblazeb2.com/file/your_bucket_name
 
 ## 7. Recent Changes (Last 3 Sessions)
 
+1. **2026-02-22** - Storage Cleanup API, User Public Profile, B2 listAllFiles
+   - `b2Storage.js`: Added `ListObjectsV2Command` import; added `listAllFiles()` with pagination loop (handles large buckets via `ContinuationToken`)
+   - `workflow.js` — GET /projects: Restored `{ status: { $ne: 'completed' } }` for regular users (all non-completed visible to everyone)
+   - `workflow.js` — GET /users/:id: New endpoint returning user public profile (`name, avatar, role, email, phone, bio, skills, location, socials`); placed after `/users/search` to avoid route conflict
+   - `admin.js` — Added `SUPER_ADMIN_EMAIL = 'aduc5525@gmail.com'`; added `extractB2Key(url)` helper; added imports for `WorkflowDocument`, `Resource`, `Course`, `listAllFiles`, `deleteFile`
+   - `admin.js` — GET /storage/orphaned: Lists all B2 files via `listAllFiles()`, builds `usedKeys` Set from 3 collections (WorkflowDocument.fileKey, Resource.file.publicId, Course lesson documents), returns array of orphaned files with uploader info
+   - `admin.js` — DELETE /storage/orphaned: Takes `{ key }` from request body, calls `deleteFile(key)` — both endpoints 403 if not super admin
+
 1. **2026-02-22** - Workflow API: Project Visibility, Note Field, Member Doc Access (2nd pass)
    - `WorkflowDocument.js`: Added `note: { type: String, default: '' }` field
    - `workflow.js` — GET /projects: Admin sees all; others see all non-completed + own/member completed (`$or: [status≠completed, createdBy, team.id]`)
@@ -402,24 +416,6 @@ CDN_BASE_URL=https://f004.backblazeb2.com/file/your_bucket_name
    - Created `server/models/WorkflowDocument.js`: file metadata (name, type, size, uploadDate, uploader, status, url, projectId, comments) + `toJSON: { virtuals: true }`
    - Created `server/routes/workflow.js`: 8 endpoints (4 projects + 4 documents), all `authMiddleware`-protected, creator-or-admin authorization
    - Mounted `/api/workflow` in server/index.js
-
-2. **2026-02-21** - Backblaze B2 File Storage
-   - Installed `@aws-sdk/client-s3` + `@aws-sdk/s3-request-presigner`
-   - Created `server/utils/b2Storage.js`: S3Client (forcePathStyle for B2) + `generatePresignedUploadUrl` + `deleteFile`
-   - Created `server/routes/upload.js`: POST /presign (auth), DELETE /file (admin)
-   - Mounted `/api/upload` in server/index.js
-   - Added B2 env vars to .env: B2_ENDPOINT, B2_REGION, B2_ACCESS_KEY_ID, B2_SECRET_ACCESS_KEY, B2_BUCKET_NAME, CDN_BASE_URL
-
-2. **2026-02-18** - Cloud Desktop Feature
-   - Created HostMachine model (name, machineId, agentUrl, secret, status, specs, maxContainers, currentContainers, lastPingAt, enabled)
-   - Created CloudSession model (userId, hostMachineId, containerId, noVncUrl, status, startedAt, endedAt, endReason)
-   - Created cloud routes: user connect/disconnect/session, agent heartbeat, admin machines CRUD + sessions management
-   - Added node-cron dependency for 60s heartbeat check (marks offline machines, ends their sessions)
-   - Mounted at /api/cloud in index.js
-
-2. **2026-02-13** - Admin Reset Password + Simplified Password Change
-   - Added POST /api/admin/users/:id/reset-password: generates random 8-digit password, hashes with bcrypt, returns plain-text
-   - Simplified PUT /api/auth/password: removed verification code requirement
 
 3. **2026-02-12** - Article CMS for About & Services Pages
    - Created Article model (models/Article.js):
