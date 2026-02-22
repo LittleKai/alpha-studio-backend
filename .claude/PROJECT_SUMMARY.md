@@ -1,5 +1,5 @@
 # Project Summary
-**Last Updated:** 2026-02-21 (Backblaze B2 - presigned upload URL endpoint, b2Storage util, upload route)
+**Last Updated:** 2026-02-22 (WorkflowDocument: note field; workflow.js: project visibility, admin delete, member doc access, note update)
 **Updated By:** Claude Code
 
 ---
@@ -44,7 +44,9 @@ alpha-studio-backend/
 │   │   ├── Comment.js             # Comments for prompts/resources
 │   │   ├── Article.js             # Articles for About & Services pages (bilingual)
 │   │   ├── HostMachine.js         # Cloud host machine registry
-│   │   └── CloudSession.js        # Cloud desktop sessions
+│   │   ├── CloudSession.js        # Cloud desktop sessions
+│   │   ├── WorkflowProject.js     # Workflow projects (team, tasks, chatHistory, expenseLog)
+│   │   └── WorkflowDocument.js    # Workflow documents (file metadata, status, comments)
 │   ├── middleware/
 │   │   └── auth.js                # JWT auth + adminOnly + modOnly middleware
 │   └── routes/
@@ -61,9 +63,11 @@ alpha-studio-backend/
 │       ├── reviews.js             # Course reviews API (CRUD, like, helpful, rating distribution)
 │       ├── articles.js            # Articles API (CRUD, publish/unpublish, public + admin)
 │       ├── cloud.js              # Cloud desktop API (connect, disconnect, admin machines/sessions, heartbeat)
-│       └── upload.js             # B2 presigned URL endpoint (POST /presign, DELETE /file)
+│       ├── upload.js             # B2 presigned URL endpoint (POST /presign, DELETE /file)
+│       └── workflow.js           # Workflow API (CRUD projects + documents, auth required)
 │   └── utils/
 │       └── b2Storage.js          # B2 S3 client + generatePresignedUploadUrl + deleteFile
+
 ├── .claude/                       # Documentation
 │   ├── PROJECT_SUMMARY.md
 │   ├── CONVENTIONS.md
@@ -215,6 +219,15 @@ alpha-studio-backend/
 ├── /upload
 │   ├── POST   /presign           # Generate B2 presigned upload URL (auth)
 │   └── DELETE /file              # Delete file from B2 (admin)
+├── /workflow
+│   │   ├── GET    /projects          # List user's projects (auth)
+│   │   ├── POST   /projects          # Create project (auth)
+│   │   ├── PUT    /projects/:id      # Update project (auth, creator/admin)
+│   │   ├── DELETE /projects/:id      # Delete project + docs (auth, creator/admin)
+│   │   ├── GET    /documents         # List user's docs, ?projectId=xxx (auth)
+│   │   ├── POST   /documents         # Create document record (auth)
+│   │   ├── PUT    /documents/:id     # Update document (auth, creator/admin)
+│   │   └── DELETE /documents/:id     # Delete document (auth, creator/admin)
 └── /health               # Health check endpoint
 ```
 
@@ -309,6 +322,8 @@ alpha-studio-backend/
 | Article CMS | ✅ Complete | models/Article.js, routes/articles.js | Bilingual articles for About & Services pages, admin CRUD |
 | Cloud Desktop API | ✅ Complete | models/HostMachine.js, models/CloudSession.js, routes/cloud.js | User connect/disconnect, admin machine/session management, agent heartbeat, cron cleanup |
 | B2 Presigned Upload | ✅ Complete | routes/upload.js, utils/b2Storage.js | Generate presigned PUT URL for browser-direct upload to Backblaze B2 |
+| Workflow Projects API | ✅ Complete | models/WorkflowProject.js, routes/workflow.js | CRUD projects with team, tasks, chatHistory, expenseLog — auth required |
+| Workflow Documents API | ✅ Complete | models/WorkflowDocument.js, routes/workflow.js | CRUD document records with status, comments, note — auth required; GET ?projectId returns all project docs to members |
 
 ---
 
@@ -375,7 +390,20 @@ CDN_BASE_URL=https://f004.backblazeb2.com/file/your_bucket_name
 
 ## 7. Recent Changes (Last 3 Sessions)
 
-1. **2026-02-21** - Backblaze B2 File Storage
+1. **2026-02-22** - Workflow API: Project Visibility, Note Field, Member Doc Access (2nd pass)
+   - `WorkflowDocument.js`: Added `note: { type: String, default: '' }` field
+   - `workflow.js` — GET /projects: Admin sees all; others see all non-completed + own/member completed (`$or: [status≠completed, createdBy, team.id]`)
+   - `workflow.js` — DELETE /projects: Admin-only (403 otherwise) + `status === 'completed'` required (400 if planning/active)
+   - `workflow.js` — GET /documents with `?projectId`: Checks team membership (team.id / createdBy / admin/mod), returns ALL project docs (was filtering by createdBy)
+   - `workflow.js` — PUT /documents: Added `note` to allowed update fields; auth updated to also allow project creator/manager
+
+2. **2026-02-22** - Workflow Projects & Documents API
+   - Created `server/models/WorkflowProject.js`: subdocuments (expenseLog, tasks, team, chatHistory, tasks) with `_id: false` + `toJSON: { virtuals: true }`
+   - Created `server/models/WorkflowDocument.js`: file metadata (name, type, size, uploadDate, uploader, status, url, projectId, comments) + `toJSON: { virtuals: true }`
+   - Created `server/routes/workflow.js`: 8 endpoints (4 projects + 4 documents), all `authMiddleware`-protected, creator-or-admin authorization
+   - Mounted `/api/workflow` in server/index.js
+
+2. **2026-02-21** - Backblaze B2 File Storage
    - Installed `@aws-sdk/client-s3` + `@aws-sdk/s3-request-presigner`
    - Created `server/utils/b2Storage.js`: S3Client (forcePathStyle for B2) + `generatePresignedUploadUrl` + `deleteFile`
    - Created `server/routes/upload.js`: POST /presign (auth), DELETE /file (admin)
