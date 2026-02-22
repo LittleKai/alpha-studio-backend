@@ -18,6 +18,7 @@ import articleRoutes from './routes/articles.js';
 import cloudRoutes from './routes/cloud.js';
 import uploadRoutes from './routes/upload.js';
 import workflowRoutes from './routes/workflow.js';
+import { configureBucketCors } from './utils/b2Storage.js';
 import cron from 'node-cron';
 import HostMachine from './models/HostMachine.js';
 import CloudSession from './models/CloudSession.js';
@@ -30,6 +31,9 @@ const PORT = process.env.PORT || 3001;
 
 // Connect to MongoDB
 connectDB();
+
+// Configure B2 bucket CORS for browser direct upload
+configureBucketCors();
 
 // CORS configuration
 const allowedOrigins = [

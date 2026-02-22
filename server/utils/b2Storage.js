@@ -1,9 +1,10 @@
-import { S3Client, DeleteObjectCommand, PutObjectCommand, GetObjectCommand } from '@aws-sdk/client-s3';
+import { S3Client, DeleteObjectCommand, PutObjectCommand, GetObjectCommand, PutBucketCorsCommand } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 
 // Lazy-initialized: dotenv.config() in index.js runs before any request,
 // but AFTER ES module imports — so we must NOT read process.env at module level.
 let _s3 = null;
+let _corsConfigured = false;
 
 function getS3() {
     if (!_s3) {
@@ -27,6 +28,42 @@ function getS3() {
         });
     }
     return _s3;
+}
+
+/**
+ * Configure CORS on the B2 bucket to allow browser direct upload from known origins.
+ * Called once at server startup — idempotent, errors are non-fatal.
+ */
+export async function configureBucketCors() {
+    if (_corsConfigured) return;
+    try {
+        const origins = [
+            'http://localhost:5173',
+            'http://localhost:5174',
+            'http://localhost:3000',
+        ];
+        // Add production frontend URL from env
+        if (process.env.FRONTEND_URL && !origins.includes(process.env.FRONTEND_URL)) {
+            origins.push(process.env.FRONTEND_URL);
+        }
+        await getS3().send(new PutBucketCorsCommand({
+            Bucket: process.env.B2_BUCKET_NAME,
+            CORSConfiguration: {
+                CORSRules: [{
+                    AllowedOrigins: origins,
+                    AllowedMethods: ['PUT', 'GET', 'HEAD'],
+                    AllowedHeaders: ['*'],
+                    ExposeHeaders: ['ETag'],
+                    MaxAgeSeconds: 3600,
+                }],
+            },
+        }));
+        _corsConfigured = true;
+        console.log('[B2] CORS configured for origins:', origins);
+    } catch (err) {
+        // Non-fatal: log warning, upload will still work if CORS was set manually
+        console.warn('[B2] CORS auto-config failed (set CORS manually in B2 console):', err.message);
+    }
 }
 
 /**
