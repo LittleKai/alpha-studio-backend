@@ -1,6 +1,8 @@
 import express from 'express';
 import Enrollment from '../models/Enrollment.js';
 import Course from '../models/Course.js';
+import User from '../models/User.js';
+import Transaction from '../models/Transaction.js';
 import { authMiddleware } from '../middleware/auth.js';
 
 const router = express.Router();
@@ -92,16 +94,42 @@ router.post('/:courseId', authMiddleware, async (req, res) => {
         }
 
         // Determine payment status based on course price
-        const paymentStatus = course.finalPrice > 0 ? 'pending' : 'free';
+        const finalPrice = course.finalPrice;
+        const paymentStatus = finalPrice > 0 ? 'paid' : 'free';
 
-        // For free courses or already paid, enroll directly
-        // For paid courses, this would normally go through a payment flow
-        if (paymentStatus === 'pending') {
-            return res.status(400).json({
-                success: false,
-                message: 'This is a paid course. Payment integration not implemented yet.',
-                requiresPayment: true,
-                price: course.finalPrice
+        // For paid courses: check and deduct credits
+        if (finalPrice > 0) {
+            const user = await User.findById(req.user._id);
+            if (!user) {
+                return res.status(404).json({ success: false, message: 'User not found' });
+            }
+            if (user.balance < finalPrice) {
+                return res.status(400).json({
+                    success: false,
+                    message: 'Không đủ Credits. Vui lòng nạp thêm.',
+                    requiresTopup: true,
+                    required: finalPrice,
+                    current: user.balance
+                });
+            }
+
+            // Deduct balance
+            user.balance -= finalPrice;
+            await user.save();
+
+            // Record transaction
+            const txCode = `COURSE-${course._id}-${req.user._id}-${Date.now()}`;
+            await Transaction.create({
+                userId: req.user._id,
+                type: 'spend',
+                amount: 0,
+                credits: -finalPrice,
+                status: 'completed',
+                transactionCode: txCode,
+                paymentMethod: 'system',
+                serviceType: 'course',
+                serviceDetails: { courseId: course._id, courseTitle: course.title?.vi || course.title?.en },
+                description: `Mua khóa học: ${course.title?.vi || course.title?.en}`
             });
         }
 
