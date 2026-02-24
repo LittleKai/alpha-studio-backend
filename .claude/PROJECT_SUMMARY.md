@@ -1,5 +1,5 @@
 # Project Summary
-**Last Updated:** 2026-02-23 (FeaturedStudent model + /api/featured-students routes: public list, admin CRUD, reorder)
+**Last Updated:** 2026-02-24 (Course purchase with credit deduction; User.role enum fix for mod; Course.instructor.bio localized)
 **Updated By:** Claude Code
 
 ---
@@ -322,7 +322,7 @@ alpha-studio-backend/
 | Share Prompts API | ✅ Complete | routes/prompts.js, models/Prompt.js | CRUD, like, bookmark, rate, download, featured, moderation |
 | Resource Hub API | ✅ Complete | routes/resources.js, models/Resource.js | CRUD, file upload (50MB), like, bookmark, rate, download |
 | Comments API | ✅ Complete | routes/comments.js, models/Comment.js | Comments for prompts/resources with likes |
-| Course Enrollment API | ✅ Complete | routes/enrollments.js, models/Enrollment.js | Enroll, progress tracking, lesson completion |
+| Course Enrollment API | ✅ Complete | routes/enrollments.js, models/Enrollment.js | Enroll with credit deduction for paid courses; Transaction recorded; progress tracking |
 | Course Reviews API | ✅ Complete | routes/reviews.js, models/Review.js | CRUD, rating distribution, helpful votes, admin reply |
 | Lesson Video/Documents | ✅ Complete | models/Course.js | videoUrl and documents array per lesson |
 | Article CMS | ✅ Complete | models/Article.js, routes/articles.js | Bilingual articles for About & Services pages, admin CRUD |
@@ -397,6 +397,11 @@ CDN_BASE_URL=https://f004.backblazeb2.com/file/your_bucket_name
 ---
 
 ## 7. Recent Changes (Last 3 Sessions)
+
+1. **2026-02-24** - Course purchase; User role enum fix; Localized instructor.bio
+   - `models/User.js`: Added `'mod'` to `role` enum (`['student', 'partner', 'mod', 'admin']`); fixes 500 error when saving any mod-role user (topup, password change, balance deduction, etc.)
+   - `models/Course.js`: Changed `instructor.bio` from `type: String` → `{ vi: String, en: String }` to match frontend LocalizedString format
+   - `routes/enrollments.js`: Import `User` + `Transaction`; paid course enrollment now checks `user.balance >= finalPrice`, deducts balance, creates `Transaction` (`type: 'spend'`, `serviceType: 'course'`, `paymentMethod: 'system'`, `status: 'completed'`); insufficient balance returns `{ requiresTopup: true, required, current }`
 
 1. **2026-02-23** - Storage Cleanup orphaned checker fixes + referencedFiles response
    - `admin.js` — GET /storage/orphaned:

@@ -20,7 +20,7 @@ const BANK_INFO = {
 
 // Credit packages configuration
 const CREDIT_PACKAGES = [
-    { id: 'pkg0', credits: 10, price: 10000, label: '10 Credits' },
+    { id: 'pkg0', credits: 500, price: 50000, label: '500 Credits' },
     { id: 'pkg1', credits: 100, price: 100000, label: '100 Credits' },
     { id: 'pkg2', credits: 210, price: 200000, label: '210 Credits', bonus: '+5%' },
     { id: 'pkg3', credits: 550, price: 500000, label: '550 Credits', bonus: '+10%', popular: true },
@@ -432,6 +432,9 @@ router.get('/history', authMiddleware, async (req, res) => {
 
         if (status && ['pending', 'completed', 'failed', 'cancelled', 'timeout'].includes(status)) {
             query.status = status;
+        } else {
+            // By default, exclude pending and cancelled from history
+            query.status = { $in: ['completed', 'failed', 'timeout'] };
         }
 
         const transactions = await Transaction.find(query)
