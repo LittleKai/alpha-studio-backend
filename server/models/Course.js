@@ -126,8 +126,8 @@ const courseSchema = new mongoose.Schema({
             default: ''
         },
         bio: {
-            type: String,
-            default: ''
+            vi: { type: String, default: '' },
+            en: { type: String, default: '' }
         }
     },
     modules: [moduleSchema],
