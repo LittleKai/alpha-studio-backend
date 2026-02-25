@@ -197,8 +197,8 @@ router.get('/users/search', authMiddleware, async (req, res) => {
 
 // @route   GET /api/workflow/users/:id
 // @desc    Get public profile of a user by ID
-// @access  Auth
-router.get('/users/:id', authMiddleware, async (req, res) => {
+// @access  Public
+router.get('/users/:id', async (req, res) => {
     try {
         const user = await User.findById(req.params.id)
             .select('_id name avatar backgroundImage role email phone bio skills location socials')
