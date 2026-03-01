@@ -1,5 +1,5 @@
 # Project Summary
-**Last Updated:** 2026-02-24 (Course purchase with credit deduction; User.role enum fix for mod; Course.instructor.bio localized)
+**Last Updated:** 2026-02-28 (Studio usage tracking: studioUsage field on User; routes/studio.js with usage check/consume endpoints; 3 free uses/day, admin/mod unlimited)
 **Updated By:** Claude Code
 
 ---
@@ -332,6 +332,7 @@ alpha-studio-backend/
 | Workflow Documents API | ✅ Complete | models/WorkflowDocument.js, routes/workflow.js | CRUD document records with status, comments, note — auth required; GET ?projectId returns all project docs to members |
 | Workflow User Profile API | ✅ Complete | routes/workflow.js | GET /users/:id returns public profile (name, avatar, role, email, phone, bio, skills, location, socials) — auth required |
 | Storage Cleanup API | ✅ Complete | routes/admin.js, utils/b2Storage.js | Lists all B2 files; cross-references WorkflowDocument/Resource (file+previewImages)/Course (videoUrl+documents)/Prompt (exampleImages); returns `data` (orphaned) + `referencedFiles` each with `source`, `uploader`, `referenced` — super admin only |
+| Studio Usage Tracking | ✅ Complete | models/User.js, routes/studio.js | `studioUsage: {date, count}` on User; GET /studio/usage + POST /studio/use; 3 free uses/day; admin/mod unlimited |
 
 ---
 

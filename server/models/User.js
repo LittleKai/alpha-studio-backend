@@ -114,6 +114,10 @@ const userSchema = new mongoose.Schema({
     passwordResetExpires: {
         type: Date,
         default: null
+    },
+    studioUsage: {
+        date: { type: String, default: '' },  // 'YYYY-MM-DD'
+        count: { type: Number, default: 0 }
     }
 }, {
     timestamps: true
