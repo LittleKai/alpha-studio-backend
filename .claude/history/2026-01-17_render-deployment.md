@@ -18,7 +18,7 @@ https://alpha-studio-backend.onrender.com
 | `MONGODB_URI` | `mongodb+srv://aduc5525:***@cluster0.c1mdcyv.mongodb.net/alpha-studio?retryWrites=true&w=majority&appName=Cluster0` |
 | `JWT_SECRET` | `alpha_studio_jwt_***` |
 | `FRONTEND_URL` | `https://alphastudio.vercel.app` |
-| `GEMINI_API_KEY` | `AIzaSyC3SCrar3EW92GIwQGjUd13Ebcn22swQoM` |
+| `GEMINI_API_KEY` | `AIzaSy***` |
 
 ### Start Command
 ```

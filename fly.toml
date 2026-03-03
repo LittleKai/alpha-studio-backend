@@ -1,0 +1,30 @@
+# fly.toml - Fly.io deployment config for Alpha Studio Backend
+# Docs: https://fly.io/docs/reference/configuration/
+
+app = "alpha-studio-backend"
+primary_region = "sin"
+
+[build]
+
+[env]
+  NODE_ENV = "production"
+  PORT = "3001"
+
+[http_service]
+  internal_port = 3001
+  force_https = true
+  auto_stop_machines = "stop"
+  auto_start_machines = true
+  # 0 = free (cold start ~2-3s khi idle)
+  # 1 = luôn chạy (~$3/tháng, không cold start)
+  min_machines_running = 0
+
+  [http_service.concurrency]
+    type = "connections"
+    hard_limit = 25
+    soft_limit = 20
+
+[[vm]]
+  memory = "256mb"
+  cpu_kind = "shared"
+  cpus = 1
