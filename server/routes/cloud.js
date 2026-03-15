@@ -30,7 +30,7 @@ router.post('/connect', authMiddleware, async (req, res) => {
 
         // Pick a random available host with capacity
         const availableHosts = await HostMachine.find({
-            status: 'available',
+            status: { $ne: 'offline' },
             enabled: true,
             $expr: { $lt: ['$currentContainers', '$maxContainers'] }
         });
