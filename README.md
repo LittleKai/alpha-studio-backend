@@ -2,7 +2,7 @@
 
 Express.js REST API with MongoDB and JWT authentication for the Alpha Studio AI Academy Platform.
 
-**Production:** https://alpha-studio-backend.onrender.com
+**Production:** https://alpha-studio-backend.fly.dev
 
 ## Tech Stack
 

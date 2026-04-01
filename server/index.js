@@ -20,6 +20,7 @@ import uploadRoutes from './routes/upload.js';
 import workflowRoutes from './routes/workflow.js';
 import featuredStudentsRoutes from './routes/featuredStudents.js';
 import studioRoutes from './routes/studio.js';
+import sitemapRoutes from './routes/sitemap.js';
 import { configureBucketCors } from './utils/b2Storage.js';
 import cron from 'node-cron';
 import HostMachine from './models/HostMachine.js';
@@ -100,6 +101,9 @@ app.use('/api/upload', uploadRoutes);
 app.use('/api/workflow', workflowRoutes);
 app.use('/api/featured-students', featuredStudentsRoutes);
 app.use('/api/studio', studioRoutes);
+
+// Sitemap (no /api prefix — served at root)
+app.use('/sitemap.xml', sitemapRoutes);
 
 // Health check
 app.get('/api/health', (req, res) => {
