@@ -2,6 +2,7 @@ import express from 'express';
 import { authMiddleware, adminOnly } from '../middleware/auth.js';
 import HostMachine from '../models/HostMachine.js';
 import CloudSession from '../models/CloudSession.js';
+import FlowServer from '../models/FlowServer.js';
 
 const router = express.Router();
 
@@ -228,6 +229,142 @@ router.post('/heartbeat', async (req, res) => {
             success: false,
             message: 'Heartbeat failed'
         });
+    }
+});
+
+// ==================== FLOW AGENT HEARTBEAT ====================
+
+// POST /api/cloud/flow-heartbeat — Flow agent heartbeat (secret-based auth)
+router.post('/flow-heartbeat', async (req, res) => {
+    try {
+        const agentSecret = req.headers['x-agent-secret'];
+        const { machineId, status, tokenValid, tokenExpiresAt, projectId } = req.body;
+
+        if (!agentSecret || !machineId) {
+            return res.status(400).json({
+                success: false,
+                message: 'Missing machineId or x-agent-secret header'
+            });
+        }
+
+        const server = await FlowServer.findOne({ machineId });
+        if (!server) {
+            return res.status(404).json({ success: false, message: 'Flow server not found' });
+        }
+        if (server.secret !== agentSecret) {
+            return res.status(403).json({ success: false, message: 'Invalid secret' });
+        }
+
+        server.lastPingAt = new Date();
+        if (status === 'available' || status === 'degraded') server.status = status;
+        if (typeof tokenValid === 'boolean') server.tokenValid = tokenValid;
+        if (tokenExpiresAt) server.tokenExpiresAt = new Date(tokenExpiresAt);
+        if (projectId) server.projectId = projectId;
+        await server.save();
+
+        res.json({ success: true, message: 'Flow heartbeat received' });
+    } catch (error) {
+        console.error('Flow heartbeat error:', error);
+        res.status(500).json({ success: false, message: 'Heartbeat failed' });
+    }
+});
+
+// ==================== FLOW SERVER ADMIN ROUTES ====================
+
+// GET /api/cloud/admin/flow-servers
+router.get('/admin/flow-servers', authMiddleware, adminOnly, async (req, res) => {
+    try {
+        const servers = await FlowServer.find().sort({ createdAt: -1 });
+        res.json({ success: true, data: servers });
+    } catch (error) {
+        console.error('List flow servers error:', error);
+        res.status(500).json({ success: false, message: 'Failed to list flow servers' });
+    }
+});
+
+// POST /api/cloud/admin/flow-servers — Register a new flow server
+router.post('/admin/flow-servers', authMiddleware, adminOnly, async (req, res) => {
+    try {
+        const { name, machineId, agentUrl, secret, projectId } = req.body;
+
+        if (!name || !machineId || !agentUrl || !secret) {
+            return res.status(400).json({
+                success: false,
+                message: 'name, machineId, agentUrl, and secret are required'
+            });
+        }
+
+        const existing = await FlowServer.findOne({ machineId });
+        if (existing) {
+            return res.status(409).json({ success: false, message: 'machineId already exists' });
+        }
+
+        const server = await FlowServer.create({
+            name,
+            machineId,
+            agentUrl,
+            secret,
+            projectId: projectId || ''
+        });
+
+        res.status(201).json({
+            success: true,
+            message: 'Flow server registered successfully',
+            data: server
+        });
+    } catch (error) {
+        console.error('Register flow server error:', error);
+        res.status(500).json({ success: false, message: 'Failed to register flow server' });
+    }
+});
+
+// PUT /api/cloud/admin/flow-servers/:id
+router.put('/admin/flow-servers/:id', authMiddleware, adminOnly, async (req, res) => {
+    try {
+        const { name, agentUrl, secret, projectId } = req.body;
+        const server = await FlowServer.findById(req.params.id);
+        if (!server) return res.status(404).json({ success: false, message: 'Flow server not found' });
+
+        if (name) server.name = name;
+        if (agentUrl) server.agentUrl = agentUrl;
+        if (secret) server.secret = secret;
+        if (projectId !== undefined) server.projectId = projectId;
+        await server.save();
+
+        res.json({ success: true, message: 'Flow server updated', data: server });
+    } catch (error) {
+        console.error('Update flow server error:', error);
+        res.status(500).json({ success: false, message: 'Failed to update flow server' });
+    }
+});
+
+// PATCH /api/cloud/admin/flow-servers/:id/toggle
+router.patch('/admin/flow-servers/:id/toggle', authMiddleware, adminOnly, async (req, res) => {
+    try {
+        const server = await FlowServer.findById(req.params.id);
+        if (!server) return res.status(404).json({ success: false, message: 'Flow server not found' });
+        server.enabled = !server.enabled;
+        await server.save();
+        res.json({
+            success: true,
+            message: `Flow server ${server.enabled ? 'enabled' : 'disabled'}`,
+            data: server
+        });
+    } catch (error) {
+        console.error('Toggle flow server error:', error);
+        res.status(500).json({ success: false, message: 'Failed to toggle flow server' });
+    }
+});
+
+// DELETE /api/cloud/admin/flow-servers/:id
+router.delete('/admin/flow-servers/:id', authMiddleware, adminOnly, async (req, res) => {
+    try {
+        const server = await FlowServer.findByIdAndDelete(req.params.id);
+        if (!server) return res.status(404).json({ success: false, message: 'Flow server not found' });
+        res.json({ success: true, message: 'Flow server deleted' });
+    } catch (error) {
+        console.error('Delete flow server error:', error);
+        res.status(500).json({ success: false, message: 'Failed to delete flow server' });
     }
 });
 

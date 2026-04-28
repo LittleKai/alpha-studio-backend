@@ -25,6 +25,8 @@ import { configureBucketCors } from './utils/b2Storage.js';
 import cron from 'node-cron';
 import HostMachine from './models/HostMachine.js';
 import CloudSession from './models/CloudSession.js';
+import FlowServer from './models/FlowServer.js';
+import StudioGeneration from './models/StudioGeneration.js';
 
 // Load env variables
 dotenv.config();
@@ -72,7 +74,10 @@ app.use(cors({
     methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Authorization']
 }));
-app.use(express.json());
+// 5mb headroom for prompts, settings, and the legacy inline-base64 reference
+// image path. Studio's primary path is now B2 temp upload (FE → B2 → URL),
+// so payloads stay small. Default 100kb is too tight for any base64 image.
+app.use(express.json({ limit: '5mb' }));
 app.use(cookieParser());
 
 // Request logging (development)
@@ -166,8 +171,62 @@ cron.schedule('* * * * *', async () => {
                 console.log(`[Cron] Ended ${activeSessions.length} sessions on offline machine "${machine.name}"`);
             }
         }
+
+        // Flow servers — mark offline if no ping for 2 minutes
+        const staleFlowServers = await FlowServer.find({
+            status: { $ne: 'offline' },
+            lastPingAt: { $lt: twoMinutesAgo }
+        });
+        for (const server of staleFlowServers) {
+            console.log(`[Cron] Flow server "${server.name}" (${server.machineId}) went offline`);
+            server.status = 'offline';
+            server.tokenValid = false;
+            await server.save();
+        }
     } catch (error) {
         console.error('[Cron] Heartbeat check error:', error);
+    }
+});
+
+// Cron: purge expired StudioGeneration (and unsaved items) every 30 minutes
+cron.schedule('*/30 * * * *', async () => {
+    try {
+        const now = new Date();
+        // Only delete gens where EVERY item is unsaved — preserve saved B2 artifacts.
+        const result = await StudioGeneration.deleteMany({
+            expiresAt: { $lt: now },
+            'items.saved': { $ne: true }
+        });
+        if (result.deletedCount > 0) {
+            console.log(`[Cron] Purged ${result.deletedCount} expired studio generations`);
+        }
+    } catch (error) {
+        console.error('[Cron] Studio cleanup error:', error);
+    }
+});
+
+// Cron: orphan-purge B2 reference images older than 1h. Studio temp uploads
+// to studio/refs/ are normally deleted by the FE right after gen completes,
+// but a crash mid-flow or a network glitch can leave files behind. Hourly
+// sweep keeps the bucket tidy.
+cron.schedule('0 * * * *', async () => {
+    try {
+        const { listAllFiles, deleteFile } = await import('./utils/b2Storage.js');
+        const cutoffMs = Date.now() - 60 * 60 * 1000;
+        const all = await listAllFiles();
+        const stale = all.filter((f) =>
+            f.key.startsWith('studio/refs/') &&
+            f.lastModified && new Date(f.lastModified).getTime() < cutoffMs,
+        );
+        for (const f of stale) {
+            try { await deleteFile(f.key); }
+            catch (e) { console.warn(`[Cron] refs purge failed for ${f.key}:`, e?.message); }
+        }
+        if (stale.length > 0) {
+            console.log(`[Cron] Purged ${stale.length} stale studio/refs/ files`);
+        }
+    } catch (error) {
+        console.error('[Cron] Studio refs purge error:', error);
     }
 });
 

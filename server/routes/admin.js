@@ -8,6 +8,7 @@ import WorkflowDocument from '../models/WorkflowDocument.js';
 import Resource from '../models/Resource.js';
 import Course from '../models/Course.js';
 import Prompt from '../models/Prompt.js';
+import StudioGeneration from '../models/StudioGeneration.js';
 import { authMiddleware, adminOnly } from '../middleware/auth.js';
 import { listAllFiles, deleteFile as deleteB2File } from '../utils/b2Storage.js';
 
@@ -737,6 +738,14 @@ router.get('/storage/orphaned', async (req, res) => {
             for (const img of (p.exampleImages || [])) {
                 const imgKey = img.publicId || extractB2Key(img.url);
                 if (imgKey) usedKeys.add(imgKey);
+            }
+        }
+
+        // Studio generations — saved items (items[].b2Key)
+        const studioGens = await StudioGeneration.find({ 'items.saved': true }, 'items').lean();
+        for (const gen of studioGens) {
+            for (const item of (gen.items || [])) {
+                if (item.saved && item.b2Key) usedKeys.add(item.b2Key);
             }
         }
 

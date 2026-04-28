@@ -41,13 +41,33 @@ function getS3() {
 export async function configureBucketCors() {
     if (_corsConfigured) return;
     try {
+        // B2 expects origins of the form scheme://host[:port] with no path
+        // and no trailing slash. Sanitize defensively so a sloppy env value
+        // (e.g. FRONTEND_URL='https://example.com/') doesn't fail the whole
+        // CORS update.
+        const sanitizeOrigin = (raw) => {
+            if (!raw || typeof raw !== 'string') return null;
+            try {
+                const u = new URL(raw.trim());
+                if (!u.protocol || !u.host) return null;
+                return `${u.protocol}//${u.host}`;
+            } catch {
+                return null;
+            }
+        };
+
         const origins = [
             'http://localhost:5173',
             'http://localhost:5174',
             'http://localhost:3000',
         ];
-        if (process.env.FRONTEND_URL && !origins.includes(process.env.FRONTEND_URL)) {
-            origins.push(process.env.FRONTEND_URL);
+        for (const raw of [
+            process.env.FRONTEND_URL,
+            process.env.FRONTEND_URL_PROD,
+            'https://giaiphapsangtao.com',
+        ]) {
+            const ok = sanitizeOrigin(raw);
+            if (ok && !origins.includes(ok)) origins.push(ok);
         }
 
         // Step 1: Authorize with B2 native API
@@ -150,6 +170,25 @@ export async function deleteFile(key) {
         Bucket: process.env.B2_BUCKET_NAME,
         Key: key,
     }));
+}
+
+/**
+ * Upload bytes from the backend directly to B2.
+ * Used when the backend receives a file (e.g. proxied from the flow agent)
+ * and needs to persist it without a browser round trip.
+ * @param {string} key - Object key (path in bucket)
+ * @param {Buffer|Uint8Array} body - File bytes
+ * @param {string} contentType - MIME type
+ * @returns {{ key: string, publicUrl: string }}
+ */
+export async function uploadFile(key, body, contentType) {
+    await getS3().send(new PutObjectCommand({
+        Bucket: process.env.B2_BUCKET_NAME,
+        Key: key,
+        Body: body,
+        ContentType: contentType,
+    }));
+    return { key, publicUrl: `${process.env.CDN_BASE_URL}/${key}` };
 }
 
 // ─── Multipart Upload ────────────────────────────────────────────────────────

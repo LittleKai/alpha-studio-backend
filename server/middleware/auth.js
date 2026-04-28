@@ -72,6 +72,46 @@ export const authMiddleware = async (req, res, next) => {
     }
 };
 
+// Short-lived JWT scoped to a single media item, suitable for embedding in
+// <img>/<video> src attributes (Plan 4 fifeUrl direct delivery). The token is
+// bound to { userId, genId, itemIdx } so leaking one URL only exposes that
+// single item, for TTL seconds.
+export const generateMediaToken = (userId, genId, itemIdx, ttlSeconds = 1800) => {
+    return jwt.sign(
+        { userId: String(userId), scope: 'media', genId: String(genId), itemIdx: Number(itemIdx) },
+        JWT_SECRET,
+        { expiresIn: ttlSeconds }
+    );
+};
+
+// Middleware for /media/:genId/:itemIdx — prefers a ?t=<media-token> query
+// (so the browser can load the URL with <img src> and no Authorization header),
+// but falls through to the normal authMiddleware for Bearer/cookie auth.
+// The token is rejected unless its genId/itemIdx match the URL params.
+export const mediaTokenMiddleware = async (req, res, next) => {
+    const rawToken = typeof req.query?.t === 'string' ? req.query.t : '';
+    if (rawToken) {
+        try {
+            const decoded = jwt.verify(rawToken, JWT_SECRET);
+            const urlIdx = parseInt(req.params.itemIdx, 10);
+            if (
+                decoded?.scope === 'media'
+                && decoded.genId === String(req.params.genId)
+                && Number(decoded.itemIdx) === urlIdx
+            ) {
+                const user = await User.findById(decoded.userId).select('-password');
+                if (user && user.isActive) {
+                    req.user = user;
+                    return next();
+                }
+            }
+        } catch {
+            // invalid / expired → fall through to authMiddleware
+        }
+    }
+    return authMiddleware(req, res, next);
+};
+
 // Admin only middleware
 export const adminOnly = (req, res, next) => {
     if (req.user?.role !== 'admin') {

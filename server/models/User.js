@@ -116,8 +116,10 @@ const userSchema = new mongoose.Schema({
         default: null
     },
     studioUsage: {
-        date: { type: String, default: '' },  // 'YYYY-MM-DD'
-        count: { type: Number, default: 0 }
+        date: { type: String, default: '' },  // 'YYYY-MM-DD' UTC
+        count: { type: Number, default: 0 },         // legacy (POST /studio/use)
+        imageCount: { type: Number, default: 0 },    // Phase 2: Flow image quota
+        videoCount: { type: Number, default: 0 }     // Phase 2: Flow video quota
     }
 }, {
     timestamps: true
