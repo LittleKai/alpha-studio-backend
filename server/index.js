@@ -9,6 +9,7 @@ import partnerRoutes from './routes/partners.js';
 import jobRoutes from './routes/jobs.js';
 import paymentRoutes from './routes/payment.js';
 import adminRoutes from './routes/admin.js';
+import settingsRoutes from './routes/settings.js';
 import promptRoutes from './routes/prompts.js';
 import resourceRoutes from './routes/resources.js';
 import commentRoutes from './routes/comments.js';
@@ -21,6 +22,7 @@ import workflowRoutes from './routes/workflow.js';
 import featuredStudentsRoutes from './routes/featuredStudents.js';
 import studioRoutes from './routes/studio.js';
 import sitemapRoutes from './routes/sitemap.js';
+import geminiRoutes from './routes/gemini.js';
 import { configureBucketCors } from './utils/b2Storage.js';
 import cron from 'node-cron';
 import HostMachine from './models/HostMachine.js';
@@ -95,6 +97,7 @@ app.use('/api/partners', partnerRoutes);
 app.use('/api/jobs', jobRoutes);
 app.use('/api/payment', paymentRoutes);
 app.use('/api/admin', adminRoutes);
+app.use('/api/settings', settingsRoutes);
 app.use('/api/prompts', promptRoutes);
 app.use('/api/resources', resourceRoutes);
 app.use('/api/comments', commentRoutes);
@@ -106,11 +109,13 @@ app.use('/api/upload', uploadRoutes);
 app.use('/api/workflow', workflowRoutes);
 app.use('/api/featured-students', featuredStudentsRoutes);
 app.use('/api/studio', studioRoutes);
+app.use('/api/gemini', geminiRoutes);
 
 // Sitemap (no /api prefix — served at root)
 app.use('/sitemap.xml', sitemapRoutes);
 
 // Health check
+app.get('/api/health2', (req, res) => res.json({ hello: 'new logic' }));
 app.get('/api/health', (req, res) => {
     res.json({
         success: true,

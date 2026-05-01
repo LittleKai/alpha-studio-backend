@@ -1,9 +1,11 @@
 import express from 'express';
 import crypto from 'crypto';
+import { GoogleGenAI, Modality } from '@google/genai';
 import { authMiddleware, generateMediaToken, mediaTokenMiddleware } from '../middleware/auth.js';
 import User from '../models/User.js';
 import FlowServer from '../models/FlowServer.js';
 import StudioGeneration from '../models/StudioGeneration.js';
+import SystemSetting from '../models/SystemSetting.js';
 import { uploadFile, deleteFile, generatePresignedDownloadUrl } from '../utils/b2Storage.js';
 
 const router = express.Router();
@@ -650,9 +652,22 @@ router.get('/media/:genId/:itemIdx', mediaTokenMiddleware, async (req, res) => {
         const item = gen.items[idx];
         if (!item) return res.status(404).json({ success: false, message: 'Item not found' });
 
-        // Saved path — user has persisted to B2. Public CDN, no re-sign needed.
-        if (item.saved && item.b2Url) {
-            return res.redirect(302, item.b2Url);
+        // Saved path — user has persisted to B2. B2 is private, so we generate a presigned download URL.
+        if (item.saved) {
+            const key = item.b2Key || extractB2KeyFromUrl(item.b2Url);
+            if (key) {
+                try {
+                    const presignedUrl = await generatePresignedDownloadUrl(key, 14400); // 4 hours
+                    res.setHeader('Cache-Control', 'no-store, private');
+                    return res.redirect(302, presignedUrl);
+                } catch (err) {
+                    console.error('Failed to presign B2 URL:', err);
+                }
+            }
+            // Fallback to CDN if signing fails or key is missing
+            if (item.b2Url) {
+                return res.redirect(302, item.b2Url);
+            }
         }
 
         if (!item.mediaName) {
