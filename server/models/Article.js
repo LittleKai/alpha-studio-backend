@@ -23,7 +23,7 @@ const articleSchema = new mongoose.Schema({
     },
     category: {
         type: String,
-        enum: ['about', 'services'],
+        enum: ['about', 'services', 'news'],
         required: [true, 'Category is required']
     },
     status: {
