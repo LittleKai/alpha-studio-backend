@@ -34,9 +34,13 @@ const flowServerSchema = new mongoose.Schema({
         type: Date,
         default: null
     },
-    projectId: {
-        type: String,
-        default: ''
+    projectIds: {
+        type: [String],
+        default: []
+    },
+    targetProjectCount: {
+        type: Number,
+        default: 3
     },
     lastPingAt: {
         type: Date,

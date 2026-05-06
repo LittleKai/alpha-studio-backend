@@ -259,7 +259,7 @@ router.post('/flow-heartbeat', async (req, res) => {
         if (status === 'available' || status === 'degraded') server.status = status;
         if (typeof tokenValid === 'boolean') server.tokenValid = tokenValid;
         if (tokenExpiresAt) server.tokenExpiresAt = new Date(tokenExpiresAt);
-        if (projectId) server.projectId = projectId;
+        // Removed legacy projectId overwrite from heartbeat
         await server.save();
 
         res.json({ success: true, message: 'Flow heartbeat received' });
@@ -285,7 +285,7 @@ router.get('/admin/flow-servers', authMiddleware, adminOnly, async (req, res) =>
 // POST /api/cloud/admin/flow-servers — Register a new flow server
 router.post('/admin/flow-servers', authMiddleware, adminOnly, async (req, res) => {
     try {
-        const { name, machineId, agentUrl, secret, projectId } = req.body;
+        const { name, machineId, agentUrl, secret, targetProjectCount } = req.body;
 
         if (!name || !machineId || !agentUrl || !secret) {
             return res.status(400).json({
@@ -299,13 +299,39 @@ router.post('/admin/flow-servers', authMiddleware, adminOnly, async (req, res) =
             return res.status(409).json({ success: false, message: 'machineId already exists' });
         }
 
+        const count = targetProjectCount !== undefined ? Number(targetProjectCount) : 3;
+
         const server = await FlowServer.create({
             name,
             machineId,
             agentUrl,
             secret,
-            projectId: projectId || ''
+            targetProjectCount: count
         });
+
+        // Fire auto-fill in background
+        if (count > 0) {
+            fetch(`${agentUrl}/api/admin/projects/auto-fill`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'x-agent-secret': secret
+                },
+                body: JSON.stringify({ target: count })
+            })
+            .then(r => r.json())
+            .then(async data => {
+                if (data.success && data.data && data.data.created) {
+                    const newIds = data.data.created.map(c => c.projectId);
+                    if (newIds.length > 0) {
+                        await FlowServer.findByIdAndUpdate(server._id, {
+                            $push: { projectIds: { $each: newIds } }
+                        });
+                    }
+                }
+            })
+            .catch(err => console.error('Agent auto-fill failed after create:', err));
+        }
 
         res.status(201).json({
             success: true,
@@ -321,15 +347,47 @@ router.post('/admin/flow-servers', authMiddleware, adminOnly, async (req, res) =
 // PUT /api/cloud/admin/flow-servers/:id
 router.put('/admin/flow-servers/:id', authMiddleware, adminOnly, async (req, res) => {
     try {
-        const { name, agentUrl, secret, projectId } = req.body;
+        const { name, agentUrl, secret, targetProjectCount } = req.body;
         const server = await FlowServer.findById(req.params.id);
         if (!server) return res.status(404).json({ success: false, message: 'Flow server not found' });
 
         if (name) server.name = name;
         if (agentUrl) server.agentUrl = agentUrl;
         if (secret) server.secret = secret;
-        if (projectId !== undefined) server.projectId = projectId;
+
+        let needsSync = false;
+        if (targetProjectCount !== undefined) {
+            const newCount = Number(targetProjectCount);
+            if (newCount > server.targetProjectCount) {
+                needsSync = true;
+            }
+            server.targetProjectCount = newCount;
+        }
+
         await server.save();
+
+        if (needsSync) {
+            fetch(`${server.agentUrl}/api/admin/projects/auto-fill`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'x-agent-secret': server.secret
+                },
+                body: JSON.stringify({ target: server.targetProjectCount })
+            })
+            .then(r => r.json())
+            .then(async data => {
+                if (data.success && data.data && data.data.created) {
+                    const newIds = data.data.created.map(c => c.projectId);
+                    if (newIds.length > 0) {
+                        await FlowServer.findByIdAndUpdate(server._id, {
+                            $push: { projectIds: { $each: newIds } }
+                        });
+                    }
+                }
+            })
+            .catch(err => console.error('Agent auto-fill failed after update:', err));
+        }
 
         res.json({ success: true, message: 'Flow server updated', data: server });
     } catch (error) {
@@ -337,6 +395,92 @@ router.put('/admin/flow-servers/:id', authMiddleware, adminOnly, async (req, res
         res.status(500).json({ success: false, message: 'Failed to update flow server' });
     }
 });
+
+// POST /api/cloud/admin/flow-servers/:id/sync
+router.post('/admin/flow-servers/:id/sync', authMiddleware, adminOnly, async (req, res) => {
+    try {
+        const server = await FlowServer.findById(req.params.id);
+        if (!server) return res.status(404).json({ success: false, message: 'Flow server not found' });
+
+        const agentRes = await fetch(`${server.agentUrl}/api/admin/projects/auto-fill`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'x-agent-secret': server.secret
+            },
+            body: JSON.stringify({ target: server.targetProjectCount })
+        });
+        const data = await agentRes.json();
+
+        if (!agentRes.ok) {
+            return res.status(agentRes.status).json({
+                success: false,
+                message: data.detail || 'Agent sync failed'
+            });
+        }
+
+        let addedCount = 0;
+        if (data.success && data.data && data.data.created) {
+            const newIds = data.data.created.map(c => c.projectId);
+            if (newIds.length > 0) {
+                // Avoid duplicates by adding only those not already in the array
+                const currentSet = new Set(server.projectIds);
+                const toAdd = newIds.filter(id => !currentSet.has(id));
+                if (toAdd.length > 0) {
+                    server.projectIds.push(...toAdd);
+                    await server.save();
+                    addedCount = toAdd.length;
+                }
+            }
+        }
+
+        res.json({
+            success: true,
+            message: `Sync complete. Added ${addedCount} new projects.`,
+            data: server
+        });
+    } catch (error) {
+        console.error('Sync flow server error:', error);
+        res.status(500).json({ success: false, message: 'Failed to sync flow server' });
+    }
+});
+
+// DELETE /api/cloud/admin/flow-servers/:id/projects/:projectId
+router.delete('/admin/flow-servers/:id/projects/:projectId', authMiddleware, adminOnly, async (req, res) => {
+    try {
+        const server = await FlowServer.findById(req.params.id);
+        if (!server) return res.status(404).json({ success: false, message: 'Flow server not found' });
+
+        const { projectId } = req.params;
+
+        // Remove from agent
+        try {
+            const agentRes = await fetch(`${server.agentUrl}/api/admin/projects/${projectId}`, {
+                method: 'DELETE',
+                headers: {
+                    'x-agent-secret': server.secret
+                }
+            });
+            // We ignore agentRes errors. If it fails on agent, we still drop it locally.
+        } catch (err) {
+            console.error('Agent project delete failed, proceeding with local delete', err);
+        }
+
+        // Remove from local DB
+        server.projectIds = server.projectIds.filter(id => id !== projectId);
+        await server.save();
+
+        res.json({
+            success: true,
+            message: 'Project removed from pool',
+            data: server
+        });
+    } catch (error) {
+        console.error('Delete project from pool error:', error);
+        res.status(500).json({ success: false, message: 'Failed to delete project from pool' });
+    }
+});
+
 
 // PATCH /api/cloud/admin/flow-servers/:id/toggle
 router.patch('/admin/flow-servers/:id/toggle', authMiddleware, adminOnly, async (req, res) => {
