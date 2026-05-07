@@ -45,6 +45,16 @@ async function pickFlowServer() {
     return candidates[Math.floor(Math.random() * candidates.length)];
 }
 
+// Defensive fallback: agent runs its own ProjectPool and rotates
+// internally, but if that pool ever gets out of sync (volume reset, fresh
+// container) we forward one of the BE-tracked IDs so preflight can
+// auto-open the project tab instead of returning 412.
+function pickProjectIdFallback(server) {
+    const ids = Array.isArray(server?.projectIds) ? server.projectIds : [];
+    if (ids.length === 0) return '';
+    return ids[Math.floor(Math.random() * ids.length)];
+}
+
 async function agentFetch(server, path, init = {}) {
     const url = `${server.agentUrl.replace(/\/$/, '')}${path}`;
     const headers = {
@@ -329,7 +339,7 @@ router.post('/image/generate', authMiddleware, async (req, res) => {
             ...(seed !== undefined ? { seed: Number(seed) } : {}),
             ...(agentRefUrls.length > 0 ? { referenceImageUrls: agentRefUrls } : {}),
             ...(referenceImage ? { referenceImage } : {}),
-            ...(server.projectId ? { projectId: server.projectId } : {}),
+            ...(pickProjectIdFallback(server) ? { projectId: pickProjectIdFallback(server) } : {}),
         };
 
         // The frontend supplies its own genId so it can start polling
@@ -545,7 +555,7 @@ router.post('/video/generate', authMiddleware, async (req, res) => {
             ...(seed !== undefined ? { seed: Number(seed) } : {}),
             ...(agentRefUrls.length > 0 ? { referenceImageUrls: agentRefUrls } : {}),
             ...(referenceImage ? { referenceImage } : {}),
-            ...(server.projectId ? { projectId: server.projectId } : {}),
+            ...(pickProjectIdFallback(server) ? { projectId: pickProjectIdFallback(server) } : {}),
         };
 
         let agentData;
