@@ -91,14 +91,27 @@ async function resignMediaViaAgent(server, mediaName) {
         });
         const data = await resp.json().catch(() => ({}));
         if (!resp.ok || !data.success) {
-            console.warn(`[studio] resign failed for ${mediaName}: HTTP ${resp.status} ${data.error || data.detail || ''}`);
-            return null;
+            const detail = data.detail || data.error || data.message || `HTTP ${resp.status}`;
+            console.warn(`[studio] resign failed for ${mediaName}: HTTP ${resp.status} ${detail}`);
+            return { ok: false, status: resp.status, detail };
         }
-        return data.data;   // { fifeUrl, expiresAt, keyName, uuid, latencyMs }
+        return { ok: true, ...(data.data || {}) };   // { ok, fifeUrl, expiresAt, keyName, uuid, latencyMs }
     } catch (err) {
         console.warn(`[studio] resign threw for ${mediaName}:`, err.message);
-        return null;
+        return { ok: false, status: 0, detail: err.message };
     }
+}
+
+function resignErrorMessage(signed) {
+    const reason = signed?.detail || 'unknown';
+    const lower = String(reason).toLowerCase();
+    if (lower.includes('session cookie') || lower.includes('reconnect') || signed?.status === 401) {
+        return `Phiên Google trên agent đã hết hạn — cần re-login qua noVNC. Chi tiết: ${reason}`;
+    }
+    if (lower.includes('does not contain a uuid') || signed?.status === 400) {
+        return `Media UUID không hợp lệ: ${reason}`;
+    }
+    return `Flow agent re-sign thất bại: ${reason}`;
 }
 
 function requireBody(res, body, requiredKeys) {
@@ -690,8 +703,12 @@ router.get('/media/:genId/:itemIdx', mediaTokenMiddleware, async (req, res) => {
         }
 
         const signed = await resignMediaViaAgent(server, item.mediaName);
-        if (!signed || !signed.fifeUrl) {
-            return res.status(502).json({ success: false, message: 'Flow agent re-sign thất bại. Hãy thử lại hoặc lưu B2.' });
+        if (!signed || !signed.ok || !signed.fifeUrl) {
+            return res.status(502).json({
+                success: false,
+                message: resignErrorMessage(signed) + ' Hãy thử lại hoặc lưu B2.',
+                detail: signed?.detail,
+            });
         }
 
         // Signed URLs are short-lived (~6h). Tell browser/CDN not to cache the
@@ -731,8 +748,12 @@ router.post('/save/:genId/:itemIdx', authMiddleware, async (req, res) => {
 
         // 1. Resign to get a fresh signed URL.
         const signed = await resignMediaViaAgent(server, item.mediaName);
-        if (!signed || !signed.fifeUrl) {
-            return res.status(502).json({ success: false, message: 'Flow agent re-sign thất bại.' });
+        if (!signed || !signed.ok || !signed.fifeUrl) {
+            return res.status(502).json({
+                success: false,
+                message: resignErrorMessage(signed),
+                detail: signed?.detail,
+            });
         }
 
         // 2. Server-side fetch from Google CDN. Signed URL is public; no auth.
