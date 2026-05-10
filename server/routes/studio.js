@@ -789,6 +789,157 @@ router.post('/save/:genId/:itemIdx', authMiddleware, async (req, res) => {
     }
 });
 
+// ─── HQ Download (with quality choice + WAB fallback) ──────────────────────
+
+// Quality matrix per gen type. Default = the resolution Google's signed CDN
+// URL serves directly (cheap, fast). Higher qualities require WAB to drive
+// Flow's UI download menu, which is slower and (for 4K) costs credits.
+const HQ_QUALITY_PROFILE = {
+    image: {
+        all: ['1k', '2k', '4k'],
+        default: '1k',
+        costs: { '4k': 5 },
+    },
+    video: {
+        all: ['270p', '720p', '1080p', '4k'],
+        default: '720p',
+        costs: { '4k': 50 },
+    },
+};
+
+// GET /api/studio/download/:genId/:itemIdx?quality=4k
+// Returns JSON { url, source, quality, costCharged } so FE can fetch the
+// blob and trigger a browser download with a custom filename.
+router.get('/download/:genId/:itemIdx', authMiddleware, async (req, res) => {
+    try {
+        const { genId, itemIdx } = req.params;
+        const idx = parseInt(itemIdx, 10);
+        const quality = String(req.query.quality || '').toLowerCase().trim();
+
+        const gen = await StudioGeneration.findById(genId);
+        if (!gen) return res.status(404).json({ success: false, message: 'Gen not found' });
+        if (String(gen.userId) !== String(req.user._id)) {
+            return res.status(403).json({ success: false, message: 'Forbidden' });
+        }
+        const item = gen.items[idx];
+        if (!item) return res.status(404).json({ success: false, message: 'Item not found' });
+        if (!item.mediaName) {
+            return res.status(410).json({ success: false, message: 'Item has no mediaName (legacy / corrupted).' });
+        }
+
+        const profile = HQ_QUALITY_PROFILE[gen.type];
+        if (!profile) return res.status(400).json({ success: false, message: `Unknown gen type ${gen.type}` });
+        if (!profile.all.includes(quality)) {
+            return res.status(400).json({
+                success: false,
+                message: `Invalid quality '${quality}' for ${gen.type}; allowed: ${profile.all.join(', ')}`,
+            });
+        }
+
+        const isDefault = (quality === profile.default);
+        const cost = profile.costs[quality] || 0;
+        const needsCharge = cost > 0 && !isUnlimited(req.user.role);
+
+        // ─── Path 1: default quality → resign + return CDN URL (fast) ───
+        if (isDefault) {
+            const server = await FlowServer.findById(gen.flowServerId);
+            if (server) {
+                const signed = await resignMediaViaAgent(server, item.mediaName);
+                if (signed && signed.ok && signed.fifeUrl) {
+                    return res.json({
+                        success: true,
+                        data: { url: signed.fifeUrl, source: 'cdn', quality, costCharged: 0 },
+                    });
+                }
+                console.warn('[studio:hq-dl] URL path failed, falling back to WAB at default quality:',
+                    signed?.detail || 'unknown');
+            }
+            // Fall through to WAB path with the same (default) quality.
+        }
+
+        // ─── Path 2: WAB → upload B2 → return B2 URL ───
+        if (needsCharge) {
+            const user = await User.findById(req.user._id).select('balance');
+            const balance = user?.balance || 0;
+            if (balance < cost) {
+                return res.status(402).json({
+                    success: false,
+                    message: `Cần ${cost} credit để tải ${quality} ${gen.type}, hiện có ${balance}.`,
+                    cost,
+                    balance,
+                });
+            }
+            // Pre-deduct so concurrent requests can't drain below 0. Refund
+            // on any failure path below.
+            await User.findByIdAndUpdate(req.user._id, { $inc: { balance: -cost } });
+        }
+
+        let charged = needsCharge;
+        const refundIfCharged = async () => {
+            if (charged) {
+                charged = false;
+                try { await User.findByIdAndUpdate(req.user._id, { $inc: { balance: cost } }); }
+                catch (e) { console.error('[studio:hq-dl] refund failed:', e); }
+            }
+        };
+
+        try {
+            const server = await FlowServer.findById(gen.flowServerId);
+            if (!server) {
+                await refundIfCharged();
+                return res.status(502).json({ success: false, message: 'Flow server unavailable' });
+            }
+
+            const agentRes = await agentFetch(server, '/api/studio/wab-download', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    mediaName: item.mediaName,
+                    type: gen.type,
+                    quality,
+                    projectId: gen.projectId || pickProjectIdFallback(server) || null,
+                }),
+                signal: AbortSignal.timeout(5 * 60 * 1000),  // 5 min — covers 4K video
+            });
+
+            if (!agentRes.ok) {
+                await refundIfCharged();
+                let detail = '';
+                try {
+                    const j = await agentRes.json();
+                    detail = (j.detail && j.detail.message) || j.detail || j.message || '';
+                } catch { /* non-JSON body */ }
+                return res.status(502).json({
+                    success: false,
+                    message: `WAB download failed (HTTP ${agentRes.status}). ${detail}`,
+                });
+            }
+
+            const buffer = Buffer.from(await agentRes.arrayBuffer());
+            const contentType = agentRes.headers.get('content-type') || guessMime(item.ext);
+
+            const folder = gen.type === 'video' ? 'studio/hq/videos' : 'studio/hq/images';
+            const b2Key = `${folder}/${gen._id}_${idx}_${quality}.${item.ext || 'bin'}`;
+            const { publicUrl } = await uploadFile(b2Key, buffer, contentType);
+
+            return res.json({
+                success: true,
+                data: { url: publicUrl, source: 'wab', quality, costCharged: cost },
+            });
+        } catch (err) {
+            await refundIfCharged();
+            console.error('[studio:hq-dl] error:', err);
+            const msg = err?.name === 'TimeoutError'
+                ? 'WAB download quá thời gian (>5 phút). Hãy thử lại.'
+                : `HQ download error: ${err.message}`;
+            return res.status(500).json({ success: false, message: msg });
+        }
+    } catch (error) {
+        console.error('[studio:hq-dl] outer error:', error);
+        if (!res.headersSent) res.status(500).json({ success: false, message: 'Lỗi server' });
+    }
+});
+
 // ─── History ────────────────────────────────────────────────────────────────
 
 // DELETE /api/studio/refs — remove a temp reference image from B2.

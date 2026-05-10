@@ -238,9 +238,13 @@ cron.schedule('0 * * * *', async () => {
 });
 
 // Start server
-app.listen(PORT, () => {
+const server = app.listen(PORT, () => {
     console.log(`\n🚀 Alpha Studio API Server`);
     console.log(`   Port: ${PORT}`);
     console.log(`   Environment: ${process.env.NODE_ENV || 'development'}`);
     console.log(`   API: http://localhost:${PORT}/api\n`);
 });
+
+// Node http.Server default timeout is 120s up to Node v12 (and some OS/network boundaries still enforce it).
+// Video generation can take 1-3 minutes; increase the timeout to 15 minutes to avoid 502/socket hang up.
+server.setTimeout(15 * 60 * 1000);
