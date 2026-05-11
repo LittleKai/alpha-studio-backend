@@ -24,6 +24,7 @@ import studioRoutes from './routes/studio.js';
 import sitemapRoutes from './routes/sitemap.js';
 import geminiRoutes from './routes/gemini.js';
 import chatRoutes from './routes/chat.js';
+import vocabRoutes from './routes/vocab.js';
 import { configureBucketCors } from './utils/b2Storage.js';
 import cron from 'node-cron';
 import HostMachine from './models/HostMachine.js';
@@ -112,6 +113,7 @@ app.use('/api/featured-students', featuredStudentsRoutes);
 app.use('/api/studio', studioRoutes);
 app.use('/api/gemini', geminiRoutes);
 app.use('/api/chat', chatRoutes);
+app.use('/api/vocab', vocabRoutes);
 
 // Sitemap (no /api prefix — served at root)
 app.use('/sitemap.xml', sitemapRoutes);
