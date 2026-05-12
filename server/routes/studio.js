@@ -114,6 +114,40 @@ function resignErrorMessage(signed) {
     return `Flow agent re-sign thất bại: ${reason}`;
 }
 
+async function pollAgentProgress(server, genId, timeoutSec = 600) {
+    const start = Date.now();
+    let pollErr = null;
+    while (Date.now() - start < timeoutSec * 1000) {
+        await new Promise(r => setTimeout(r, 2000));
+        let pRes;
+        try {
+            pRes = await agentFetch(server, `/api/studio/progress/${genId}`);
+        } catch (e) {
+            continue;
+        }
+        const pData = await pRes.json().catch(() => ({}));
+        if (pRes.ok && pData.success && pData.data) {
+            const status = pData.data.status;
+            if (status === 'done' && pData.data.result) {
+                return pData.data.result;
+            }
+            if (status === 'failed') {
+                pollErr = pData.data.error;
+                break;
+            }
+        }
+    }
+    if (pollErr) {
+        const err = new Error(pollErr.message || 'Flow agent generation error');
+        err.status = pollErr.code || 422;
+        err.detail = pollErr;
+        throw err;
+    }
+    const err = new Error('Timeout waiting for flow agent');
+    err.status = 504;
+    throw err;
+}
+
 function requireBody(res, body, requiredKeys) {
     for (const k of requiredKeys) {
         if (body[k] === undefined || body[k] === null || body[k] === '') {
@@ -377,6 +411,10 @@ router.post('/image/generate', authMiddleware, async (req, res) => {
                 err.detail = agentData.detail;
                 throw err;
             }
+            if (agentRes.status === 202) {
+                const pollResult = await pollAgentProgress(server, genId);
+                agentData = { success: true, data: pollResult };
+            }
         } catch (agentError) {
             console.error('Flow agent error (image):', agentError);
             await refundQuota(req.user._id, 'image', user.role);
@@ -586,6 +624,10 @@ router.post('/video/generate', authMiddleware, async (req, res) => {
                 err.status = agentRes.status;
                 err.detail = agentData.detail;
                 throw err;
+            }
+            if (agentRes.status === 202) {
+                const pollResult = await pollAgentProgress(server, genId);
+                agentData = { success: true, data: pollResult };
             }
         } catch (agentError) {
             console.error('Flow agent error (video):', agentError);
