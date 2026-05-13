@@ -4,12 +4,12 @@ import ChatMessage from '../models/ChatMessage.js';
 
 const router = express.Router();
 
-const OPENCLAW_URL = process.env.OPENCLAW_URL || 'http://localhost:18791/api/chat';
 const HISTORY_DEFAULT_LIMIT = 50;
 const HISTORY_MAX_LIMIT = 200;
 const MAX_USER_MESSAGE_CHARS = 8000;
 
 async function callOpenClaw(content, sessionId) {
+    const OPENCLAW_URL = process.env.OPENCLAW_URL || 'http://localhost:18791/api/chat';
     const proxyResponse = await fetch(OPENCLAW_URL, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
