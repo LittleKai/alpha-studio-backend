@@ -316,14 +316,16 @@ router.post('/admin/flow-servers', authMiddleware, adminOnly, async (req, res) =
         });
 
         // Fire auto-fill in background
-        if (count > 0) {
+        const currentCount = 0; // initially 0 locally
+        const need = count - currentCount;
+        if (need > 0) {
             fetch(`${agentUrl}/api/admin/projects/auto-fill`, {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
                     'x-agent-secret': secret
                 },
-                body: JSON.stringify({ target: count })
+                body: JSON.stringify({ target: need })
             })
             .then(r => r.json())
             .then(async data => {
@@ -378,26 +380,29 @@ router.put('/admin/flow-servers/:id', authMiddleware, adminOnly, async (req, res
         await server.save();
 
         if (needsSync) {
-            fetch(`${server.agentUrl}/api/admin/projects/auto-fill`, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'x-agent-secret': server.secret
-                },
-                body: JSON.stringify({ target: server.targetProjectCount })
-            })
-            .then(r => r.json())
-            .then(async data => {
-                if (data.success && data.data && data.data.created) {
-                    const newIds = data.data.created.map(c => c.projectId);
-                    if (newIds.length > 0) {
-                        await FlowServer.findByIdAndUpdate(server._id, {
-                            $push: { projectIds: { $each: newIds } }
-                        });
+            const need = server.targetProjectCount - (server.projectIds?.length || 0);
+            if (need > 0) {
+                fetch(`${server.agentUrl}/api/admin/projects/auto-fill`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'x-agent-secret': server.secret
+                    },
+                    body: JSON.stringify({ target: need })
+                })
+                .then(r => r.json())
+                .then(async data => {
+                    if (data.success && data.data && data.data.created) {
+                        const newIds = data.data.created.map(c => c.projectId);
+                        if (newIds.length > 0) {
+                            await FlowServer.findByIdAndUpdate(server._id, {
+                                $push: { projectIds: { $each: newIds } }
+                            });
+                        }
                     }
-                }
-            })
-            .catch(err => console.error('Agent auto-fill failed after update:', err));
+                })
+                .catch(err => console.error('Agent auto-fill failed after update:', err));
+            }
         }
 
         res.json({ success: true, message: 'Flow server updated', data: server });
@@ -413,13 +418,22 @@ router.post('/admin/flow-servers/:id/sync', authMiddleware, adminOnly, async (re
         const server = await FlowServer.findById(req.params.id);
         if (!server) return res.status(404).json({ success: false, message: 'Flow server not found' });
 
+        const need = server.targetProjectCount - (server.projectIds?.length || 0);
+        if (need <= 0) {
+            return res.json({
+                success: true,
+                message: `Sync complete. Already at or above target (${server.projectIds.length}/${server.targetProjectCount}).`,
+                data: server
+            });
+        }
+
         const agentRes = await fetch(`${server.agentUrl}/api/admin/projects/auto-fill`, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
                 'x-agent-secret': server.secret
             },
-            body: JSON.stringify({ target: server.targetProjectCount })
+            body: JSON.stringify({ target: need })
         });
         const data = await agentRes.json();
 
