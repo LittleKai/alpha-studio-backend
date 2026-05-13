@@ -285,7 +285,7 @@ router.get('/admin/flow-servers', authMiddleware, adminOnly, async (req, res) =>
 // POST /api/cloud/admin/flow-servers — Register a new flow server
 router.post('/admin/flow-servers', authMiddleware, adminOnly, async (req, res) => {
     try {
-        const { name, machineId, agentUrl, secret, targetProjectCount } = req.body;
+        const { name, machineId, agentUrl, secret, targetProjectCount, initialProjectIds } = req.body;
 
         if (!name || !machineId || !agentUrl || !secret) {
             return res.status(400).json({
@@ -301,12 +301,18 @@ router.post('/admin/flow-servers', authMiddleware, adminOnly, async (req, res) =
 
         const count = targetProjectCount !== undefined ? Number(targetProjectCount) : 3;
 
+        let parsedIds = [];
+        if (initialProjectIds && typeof initialProjectIds === 'string') {
+            parsedIds = initialProjectIds.split(',').map(s => s.trim()).filter(Boolean);
+        }
+
         const server = await FlowServer.create({
             name,
             machineId,
             agentUrl,
             secret,
-            targetProjectCount: count
+            targetProjectCount: count,
+            projectIds: parsedIds
         });
 
         // Fire auto-fill in background
@@ -347,13 +353,18 @@ router.post('/admin/flow-servers', authMiddleware, adminOnly, async (req, res) =
 // PUT /api/cloud/admin/flow-servers/:id
 router.put('/admin/flow-servers/:id', authMiddleware, adminOnly, async (req, res) => {
     try {
-        const { name, agentUrl, secret, targetProjectCount } = req.body;
+        const { name, agentUrl, secret, targetProjectCount, initialProjectIds } = req.body;
         const server = await FlowServer.findById(req.params.id);
         if (!server) return res.status(404).json({ success: false, message: 'Flow server not found' });
 
         if (name) server.name = name;
         if (agentUrl) server.agentUrl = agentUrl;
         if (secret) server.secret = secret;
+
+        if (initialProjectIds !== undefined) {
+            const parsedIds = initialProjectIds.split(',').map(s => s.trim()).filter(Boolean);
+            server.projectIds = parsedIds;
+        }
 
         let needsSync = false;
         if (targetProjectCount !== undefined) {
