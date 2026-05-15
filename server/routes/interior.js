@@ -6,12 +6,12 @@ import User from '../models/User.js';
 import { callGcliDirect } from '../utils/aiProvider.js';
 import { cdnUrlToPresignedDownload } from '../utils/b2Storage.js';
 
-// gcli upstream fetches image URLs server-side. Public CDN URLs (Cloudflare in
-// front of B2) currently 525 due to SNI mismatch, so we replace each CDN URL
-// with a presigned B2 download URL (direct to *.backblazeb2.com) before sending
-// to the AI. Falls back to the original URL if presigning fails or the URL is
-// not from our CDN (e.g. external image).
-async function resolveImageUrlsForAi(urls) {
+// CDN URLs (Cloudflare in front of B2) currently 525 due to SNI mismatch on free
+// plan — both AI upstream fetches and browser <img> tags fail. We replace each
+// CDN URL with a presigned B2 download URL (direct to *.backblazeb2.com) when
+// serializing for AI input AND when serializing project for the frontend.
+// Falls back to the original URL if presigning fails or URL is not from our CDN.
+async function presignImageUrls(urls) {
     if (!Array.isArray(urls) || urls.length === 0) return [];
     return Promise.all(urls.map(async (url) => {
         try {
@@ -100,16 +100,18 @@ function isUnlimited(role) {
     return role === 'admin' || role === 'mod';
 }
 
-function serializeProject(project) {
+async function serializeProject(project) {
     const raw = typeof project.toObject === 'function' ? project.toObject() : project;
+    const versions = await Promise.all((raw.versions || []).map(async (version) => ({
+        ...version,
+        _id: version._id?.toString?.() || version._id,
+        refImageUrls: await presignImageUrls(version.refImageUrls)
+    })));
     return {
         ...raw,
         _id: raw._id?.toString?.() || raw._id,
         userId: raw.userId?.toString?.() || raw.userId,
-        versions: (raw.versions || []).map((version) => ({
-            ...version,
-            _id: version._id?.toString?.() || version._id
-        }))
+        versions
     };
 }
 
@@ -206,12 +208,19 @@ const INTERIOR_DOMAIN_HINTS = [
     '- Tay nắm: dạng âm hoặc thanh ngang. Bánh xe dưới đáy tủ kéo: cao 8-10.'
 ].join('\n');
 
-const INTERIOR_REPLY_FORMAT = [
+const INTERIOR_REPLY_FORMAT_WITH_IMAGE = [
     'reply BẮT BUỘC bắt đầu bằng 3 dòng theo đúng format này (giữ nguyên label tiếng Việt):',
-    '"Quan sát ảnh: <mô tả ngắn những gì thấy trong ảnh — style, màu, vật liệu, bố cục. Nếu không có ảnh ghi "không có ảnh">.',
+    '"Quan sát ảnh: <mô tả ngắn những gì thấy trong ảnh — style, màu, vật liệu, bố cục>.',
     'Hiểu yêu cầu: <diễn giải lại ý đồ user bằng 1-2 câu>.',
     'Đã áp dụng: <liệt kê 2-4 thay đổi cụ thể trên cabinetModel — kích thước/màu/module thêm-sửa-xóa>."',
     'Sau 3 dòng đó có thể thêm chú thích thiết kế nếu cần.'
+].join('\n');
+
+const INTERIOR_REPLY_FORMAT_NO_IMAGE = [
+    'reply BẮT BUỘC bắt đầu bằng 2 dòng theo đúng format này (giữ nguyên label tiếng Việt):',
+    '"Hiểu yêu cầu: <diễn giải lại ý đồ user bằng 1-2 câu>.',
+    'Đã áp dụng: <liệt kê 2-4 thay đổi cụ thể trên cabinetModel — kích thước/màu/module thêm-sửa-xóa>."',
+    'Sau 2 dòng đó có thể thêm chú thích thiết kế nếu cần. KHÔNG bịa nội dung ảnh vì không có ảnh.'
 ].join('\n');
 
 const INTERIOR_FEW_SHOT = [
@@ -220,23 +229,26 @@ const INTERIOR_FEW_SHOT = [
 ].join('\n');
 
 function buildInteriorPrompt({ message, refImageUrls, project, baseModel, proposalContext = '' }) {
+    const hasImages = refImageUrls.length > 0;
     const recent = project.versions
         .slice(-8)
         .filter((version) => version.userPrompt || version.aiReply)
         .map((version) => `V${version.index} USER: ${version.userPrompt || '(rollback)'}\nAI: ${version.aiReply || ''}`)
         .join('\n\n');
 
-    const refImageNote = refImageUrls.length > 0
+    const refImageNote = hasImages
         ? `Người dùng đính kèm ${refImageUrls.length} ảnh tham chiếu (đính kèm cùng prompt này — hãy quan sát kỹ trước khi sinh model).`
-        : 'Không có ảnh tham chiếu trong lần này.';
+        : 'Lần này KHÔNG có ảnh tham chiếu — KHÔNG bịa hay đề cập ảnh trong reply.';
+
+    const replyFormat = hasImages ? INTERIOR_REPLY_FORMAT_WITH_IMAGE : INTERIOR_REPLY_FORMAT_NO_IMAGE;
 
     const askForInfoRule = [
         'Đặt askForInfo=true (giữ nguyên cabinetModel hiện tại, reply là câu hỏi) NẾU:',
-        '- Ảnh quá mờ/không liên quan/không xác định được loại tủ.',
+        hasImages ? '- Ảnh quá mờ/không liên quan/không xác định được loại tủ.' : null,
         '- Yêu cầu user dưới 5 từ và không có ảnh.',
         '- Không xác định được ít nhất 1 trong 3: kích thước, chức năng tủ (áo/bếp/sách...), vật liệu/màu.',
         'Ngược lại askForInfo=false và sinh cabinetModel.'
-    ].join('\n');
+    ].filter(Boolean).join('\n');
 
     const proposalNote = proposalContext
         ? `Đã có proposal user xác nhận từ bước phân tích trước (hãy bám sát):\n${proposalContext}`
@@ -246,7 +258,7 @@ function buildInteriorPrompt({ message, refImageUrls, project, baseModel, propos
         'Bạn là trợ lý thiết kế nội thất cho Alpha Studio (chuyên về tủ và nội thất Việt Nam).',
         'Nhiệm vụ: tạo hoặc chỉnh cabinetModel JSON cho Interior Design Engine.',
         'Chỉ trả về JSON thuần (không markdown, không ```), schema: {"reply": string, "askForInfo": boolean, "cabinetModel": object}.',
-        INTERIOR_REPLY_FORMAT,
+        replyFormat,
         askForInfoRule,
         'cabinetModel bắt buộc: width/height/depth số dương (cm), modules là mảng ≥1 phần tử, mỗi module/detail có x,y,z,width,height,depth là số.',
         INTERIOR_DOMAIN_HINTS,
@@ -260,32 +272,90 @@ function buildInteriorPrompt({ message, refImageUrls, project, baseModel, propos
 }
 
 function buildInteriorProposalPrompt({ message, refImageUrls, project, baseModel }) {
+    const hasImages = refImageUrls.length > 0;
     const recent = project.versions
         .slice(-6)
         .filter((version) => version.userPrompt || version.aiReply)
         .map((version) => `V${version.index} USER: ${version.userPrompt || '(rollback)'}\nAI: ${version.aiReply || ''}`)
         .join('\n\n');
 
-    const refImageNote = refImageUrls.length > 0
+    const refImageNote = hasImages
         ? `Người dùng đính kèm ${refImageUrls.length} ảnh tham chiếu (đính kèm cùng prompt này — hãy quan sát rất kỹ).`
-        : 'Không có ảnh tham chiếu trong lần này.';
+        : 'Lần này KHÔNG có ảnh tham chiếu — bỏ qua phần phân tích ảnh.';
+
+    const observationField = hasImages
+        ? '  "observation": "string — mô tả ảnh: style, vật liệu, màu, bố cục, kích thước ước tính. Tối đa 250 từ.",'
+        : '  "observation": "" (chuỗi rỗng — KHÔNG bịa nội dung ảnh vì không có ảnh),';
 
     return [
         'Bạn là trợ lý thiết kế nội thất cho Alpha Studio.',
-        'Đây là BƯỚC PHÂN TÍCH (chưa tạo JSON). Mục tiêu: giúp user xác nhận bạn hiểu đúng trước khi sinh cabinetModel.',
-        'Trả lời bằng tiếng Việt thuần, KHÔNG JSON, KHÔNG markdown code block. Cấu trúc bắt buộc 4 phần:',
-        '1) Quan sát ảnh: mô tả chi tiết những gì thấy trong ảnh (style, vật liệu, màu, bố cục, kích thước ước tính). Nếu không có ảnh thì ghi "Không có ảnh tham chiếu".',
-        '2) Hiểu yêu cầu: diễn giải lại ý đồ user bằng 2-3 câu.',
-        '3) Đề xuất thay đổi (so với cabinetModel hiện tại):',
-        '   - Liệt kê 3-6 thay đổi cụ thể (kích thước W x H x D, màu HEX, module thêm/sửa/xóa).',
-        '4) Câu hỏi xác nhận: 1-2 câu hỏi ngắn để user clarify nếu có điểm mơ hồ (kích thước cụ thể, vật liệu, vị trí).',
-        'Giữ tổng độ dài dưới 400 từ. Không hứa hẹn output JSON ở bước này.',
+        'Đây là BƯỚC PHÂN TÍCH (chưa tạo cabinetModel). Mục tiêu: giúp user review/chỉnh đề xuất + trả lời câu hỏi clarify trước khi sinh JSON ở bước sau.',
+        'Trả về JSON THUẦN (không markdown ```, không text ngoài JSON) theo schema:',
+        '{',
+        observationField,
+        '  "understanding": "string — diễn giải lại ý đồ user bằng 2-3 câu. Tối đa 100 từ.",',
+        '  "proposedChanges": ["string", ...] — mảng 3-6 thay đổi cụ thể trên cabinetModel hiện tại (kích thước W x H x D, màu HEX, module thêm/sửa/xóa). Mỗi item một câu ngắn.,',
+        '  "questions": [ { "question": "string", "options": ["string", ...] } , ... ]',
+        '}',
+        '- questions: 0-3 câu hỏi để clarify. CHỈ hỏi khi thật sự cần (kích thước cụ thể, vật liệu, vị trí, số ngăn...). Mỗi câu có 2-4 options gợi ý, NÊN có 1 option "Để AI tự quyết" hoặc tương tự. Nếu không cần hỏi → questions: [].',
+        '- Tất cả text phải bằng tiếng Việt.',
+        '- KHÔNG sinh cabinetModel ở bước này.',
         INTERIOR_DOMAIN_HINTS,
         refImageNote,
         recent ? `Lịch sử gần đây:\n${recent}` : 'Chưa có lịch sử chat.',
         `cabinetModel hiện tại:\n${JSON.stringify(baseModel)}`,
         `Yêu cầu mới của người dùng:\n${message}`
     ].join('\n\n');
+}
+
+function validateProposalPayload(raw) {
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
+    const observation = typeof raw.observation === 'string' ? raw.observation.trim().slice(0, 4000) : '';
+    const understanding = typeof raw.understanding === 'string' ? raw.understanding.trim().slice(0, 2000) : '';
+    const proposedChanges = Array.isArray(raw.proposedChanges)
+        ? raw.proposedChanges
+            .filter((s) => typeof s === 'string' && s.trim())
+            .map((s) => s.trim().slice(0, 500))
+            .slice(0, 10)
+        : [];
+    const questions = Array.isArray(raw.questions)
+        ? raw.questions
+            .map((q) => {
+                if (!q || typeof q !== 'object') return null;
+                const question = typeof q.question === 'string' ? q.question.trim().slice(0, 400) : '';
+                if (!question) return null;
+                const options = Array.isArray(q.options)
+                    ? q.options
+                        .filter((o) => typeof o === 'string' && o.trim())
+                        .map((o) => o.trim().slice(0, 200))
+                        .slice(0, 6)
+                    : [];
+                return { question, options };
+            })
+            .filter(Boolean)
+            .slice(0, 5)
+        : [];
+    if (!observation && !understanding && proposedChanges.length === 0) return null;
+    return { observation, understanding, proposedChanges, questions };
+}
+
+function assembleProposalText(structured) {
+    if (!structured) return '';
+    const lines = [];
+    if (structured.observation) lines.push(`Quan sát ảnh: ${structured.observation}`);
+    if (structured.understanding) lines.push(`Hiểu yêu cầu: ${structured.understanding}`);
+    if (structured.proposedChanges?.length) {
+        lines.push('Đề xuất thay đổi:');
+        structured.proposedChanges.forEach((c, i) => lines.push(`${i + 1}. ${c}`));
+    }
+    if (structured.questions?.length) {
+        lines.push('Câu hỏi xác nhận:');
+        structured.questions.forEach((q, i) => {
+            lines.push(`Q${i + 1}: ${q.question}`);
+            if (q.options.length) lines.push(`   Options: ${q.options.join(' / ')}`);
+        });
+    }
+    return lines.join('\n');
 }
 
 async function findOwnedProject(projectId, userId) {
@@ -316,7 +386,7 @@ router.get('/projects', authMiddleware, async (req, res) => {
         return res.json({
             success: true,
             data: {
-                projects: projects.map(serializeProject),
+                projects: await Promise.all(projects.map(serializeProject)),
                 pagination: { page, limit, total, pages: Math.ceil(total / limit) }
             }
         });
@@ -345,7 +415,7 @@ router.post('/projects', authMiddleware, async (req, res) => {
                 askForInfo: false
             }]
         });
-        return res.status(201).json({ success: true, data: { project: serializeProject(project) } });
+        return res.status(201).json({ success: true, data: { project: await serializeProject(project) } });
     } catch (error) {
         console.error('Interior create project error:', error);
         return res.status(500).json({ success: false, message: 'Không thể tạo dự án.' });
@@ -356,7 +426,7 @@ router.get('/projects/:id', authMiddleware, async (req, res) => {
     try {
         const project = await findOwnedProject(req.params.id, req.user._id);
         if (!project) return res.status(404).json({ success: false, message: 'Không tìm thấy dự án.' });
-        return res.json({ success: true, data: { project: serializeProject(project) } });
+        return res.json({ success: true, data: { project: await serializeProject(project) } });
     } catch (error) {
         console.error('Interior get project error:', error);
         return res.status(500).json({ success: false, message: 'Không thể tải dự án.' });
@@ -373,7 +443,7 @@ router.patch('/projects/:id', authMiddleware, async (req, res) => {
             project.name = name.slice(0, 120);
         }
         await project.save();
-        return res.json({ success: true, data: { project: serializeProject(project) } });
+        return res.json({ success: true, data: { project: await serializeProject(project) } });
     } catch (error) {
         console.error('Interior update project error:', error);
         return res.status(500).json({ success: false, message: 'Không thể cập nhật dự án.' });
@@ -439,7 +509,7 @@ router.post('/projects/:id/chat', authMiddleware, async (req, res) => {
             return res.status(409).json({
                 success: false,
                 message: 'Dự án đã có phiên bản mới hơn. Vui lòng tải lại trước khi gửi.',
-                data: { project: serializeProject(project) }
+                data: { project: await serializeProject(project) }
             });
         }
 
@@ -447,11 +517,12 @@ router.post('/projects/:id/chat', authMiddleware, async (req, res) => {
         const baseModel = baseVersion?.modelJson || defaultCabinetModel();
 
         // ─── STAGE: PROPOSAL ──────────────────────────────────────────
-        // Bước phân tích: AI mô tả ảnh + đề xuất, KHÔNG sinh JSON, KHÔNG lưu version.
+        // Bước phân tích: AI trả JSON structured {observation, understanding, proposedChanges[], questions[]}.
+        // Frontend mở dialog cho user review/chỉnh + trả lời câu hỏi.
         // Trừ 1 credit (user đã bật 2-step và biết sẽ tốn 2 credit tổng).
         if (stage === 'proposal') {
-            const aiImageUrls = await resolveImageUrlsForAi(refImageUrls);
-            let proposalText;
+            const aiImageUrls = await presignImageUrls(refImageUrls);
+            let aiText;
             let proposalUsage = null;
             let proposalModel = selectedModel;
             try {
@@ -459,16 +530,28 @@ router.post('/projects/:id/chat', authMiddleware, async (req, res) => {
                     buildInteriorProposalPrompt({ message, refImageUrls, project, baseModel }),
                     { model: selectedModel, images: aiImageUrls }
                 );
-                proposalText = (aiResult.text || '').trim();
+                aiText = (aiResult.text || '').trim();
                 proposalUsage = aiResult.usage;
                 proposalModel = aiResult.model || selectedModel;
             } catch (error) {
                 console.error('Interior AI proposal error:', error.message);
                 return res.status(502).json({ success: false, message: error.message || 'AI tạm thời không phản hồi.' });
             }
-            if (!proposalText) {
+            if (!aiText) {
                 return res.status(502).json({ success: false, message: 'AI không trả về phân tích.' });
             }
+
+            let structured;
+            try {
+                structured = validateProposalPayload(extractJsonObject(aiText));
+            } catch (error) {
+                console.error('Interior proposal JSON parse error:', error.message, aiText);
+                return res.status(502).json({ success: false, message: 'AI không trả về phân tích đúng định dạng.' });
+            }
+            if (!structured) {
+                return res.status(502).json({ success: false, message: 'AI không trả về phân tích đúng định dạng.' });
+            }
+
             const credit = await deductInteriorCredit(req.user);
             if (credit.rejected) {
                 return res.status(402).json({
@@ -481,7 +564,8 @@ router.post('/projects/:id/chat', authMiddleware, async (req, res) => {
                 success: true,
                 data: {
                     stage: 'proposal',
-                    proposalText,
+                    proposalText: assembleProposalText(structured),
+                    structured,
                     refImageUrls,
                     message,
                     aiModel: proposalModel,
@@ -493,7 +577,7 @@ router.post('/projects/:id/chat', authMiddleware, async (req, res) => {
         }
 
         // ─── STAGE: APPLY (default) ───────────────────────────────────
-        const aiImageUrls = await resolveImageUrlsForAi(refImageUrls);
+        const aiImageUrls = await presignImageUrls(refImageUrls);
         let aiText;
         let aiUsage = null;
         let actualModel = selectedModel;
@@ -535,6 +619,12 @@ router.post('/projects/:id/chat', authMiddleware, async (req, res) => {
             });
         }
 
+        // Git-like branching: nếu user đã rollback (currentVersionIndex < max),
+        // thì truncate các version "future" trước khi push để giữ chuỗi linear.
+        const currentIdx = project.currentVersionIndex;
+        if (project.versions.some((v) => v.index > currentIdx)) {
+            project.versions = project.versions.filter((v) => v.index <= currentIdx);
+        }
         const nextIndex = project.versions.length > 0
             ? Math.max(...project.versions.map((version) => version.index)) + 1
             : 0;
@@ -553,7 +643,7 @@ router.post('/projects/:id/chat', authMiddleware, async (req, res) => {
         project.currentVersionIndex = nextIndex;
         await project.save();
 
-        const serialized = serializeProject(project);
+        const serialized = await serializeProject(project);
         return res.json({
             success: true,
             data: {
@@ -574,9 +664,6 @@ router.post('/projects/:id/rollback', authMiddleware, async (req, res) => {
     try {
         const project = await findOwnedProject(req.params.id, req.user._id);
         if (!project) return res.status(404).json({ success: false, message: 'Không tìm thấy dự án.' });
-        if (project.versions.length >= MAX_VERSIONS_PER_PROJECT) {
-            return res.status(409).json({ success: false, message: 'Dự án đã đạt giới hạn phiên bản.' });
-        }
 
         const targetVersionId = typeof req.body?.targetVersionId === 'string' ? req.body.targetVersionId : '';
         const targetVersionIndex = Number.isInteger(req.body?.targetVersionIndex) ? req.body.targetVersionIndex : null;
@@ -586,21 +673,12 @@ router.post('/projects/:id/rollback', authMiddleware, async (req, res) => {
         ));
         if (!target) return res.status(404).json({ success: false, message: 'Không tìm thấy phiên bản cần khôi phục.' });
 
-        const nextIndex = Math.max(...project.versions.map((version) => version.index)) + 1;
-        project.versions.push({
-            index: nextIndex,
-            parentIndex: project.currentVersionIndex,
-            userPrompt: '',
-            refImageUrls: Array.isArray(target.refImageUrls) ? target.refImageUrls : [],
-            modelJson: target.modelJson,
-            aiReply: `Đã khôi phục về phiên bản V${target.index}.`,
-            askForInfo: false,
-            isRollback: true,
-            rollbackTargetIndex: target.index
-        });
-        project.currentVersionIndex = nextIndex;
+        // Git-like rollback: chỉ di chuyển con trỏ currentVersionIndex về target.
+        // Versions sau target vẫn được giữ — frontend filter chat theo currentVersionIndex.
+        // Nếu user gửi prompt mới sau rollback, route /chat sẽ truncate versions > currentVersionIndex.
+        project.currentVersionIndex = target.index;
         await project.save();
-        return res.json({ success: true, data: { project: serializeProject(project) } });
+        return res.json({ success: true, data: { project: await serializeProject(project) } });
     } catch (error) {
         console.error('Interior rollback error:', error);
         return res.status(500).json({ success: false, message: 'Không thể khôi phục phiên bản.' });
