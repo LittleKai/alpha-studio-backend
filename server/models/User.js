@@ -120,6 +120,9 @@ const userSchema = new mongoose.Schema({
         count: { type: Number, default: 0 },         // legacy (POST /studio/use)
         imageCount: { type: Number, default: 0 },    // Phase 2: Flow image quota
         videoCount: { type: Number, default: 0 }     // Phase 2: Flow video quota
+    },
+    preferences: {
+        interiorTwoStepConfirm: { type: Boolean, default: false }
     }
 }, {
     timestamps: true

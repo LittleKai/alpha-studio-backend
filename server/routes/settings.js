@@ -9,8 +9,13 @@ const PUBLIC_KEYS = [
     'useApiForStudio',
     'useApiForImage',
     'useApiForEdit',
-    'useApiForVideo'
+    'useApiForVideo',
+    'useOpenClawForChat',
+    'gcliBotModel'
 ];
+
+const GCLI_BOT_ALLOWED_MODELS = ['gemini-3.1-flash-lite', 'gemini-3-flash-preview'];
+const GCLI_BOT_DEFAULT_MODEL = 'gemini-3.1-flash-lite';
 
 router.get('/public', async (req, res) => {
     try {
@@ -26,6 +31,8 @@ router.get('/public', async (req, res) => {
         if (data.useApiForImage === undefined) data.useApiForImage = false;
         if (data.useApiForEdit === undefined) data.useApiForEdit = false;
         if (data.useApiForVideo === undefined) data.useApiForVideo = false;
+        if (data.useOpenClawForChat === undefined) data.useOpenClawForChat = true;
+        if (!GCLI_BOT_ALLOWED_MODELS.includes(data.gcliBotModel)) data.gcliBotModel = GCLI_BOT_DEFAULT_MODEL;
 
         res.json({ success: true, data });
     } catch (error) {
@@ -47,6 +54,8 @@ router.get('/', authMiddleware, adminOnly, async (req, res) => {
         if (data.useApiForImage === undefined) data.useApiForImage = false;
         if (data.useApiForEdit === undefined) data.useApiForEdit = false;
         if (data.useApiForVideo === undefined) data.useApiForVideo = false;
+        if (data.useOpenClawForChat === undefined) data.useOpenClawForChat = true;
+        if (!GCLI_BOT_ALLOWED_MODELS.includes(data.gcliBotModel)) data.gcliBotModel = GCLI_BOT_DEFAULT_MODEL;
         if (data.geminiApiKey === undefined) data.geminiApiKey = '';
         else if (data.geminiApiKey) data.geminiApiKey = '********';
         if (data.videoApiKey === undefined) data.videoApiKey = '';
@@ -70,6 +79,10 @@ router.post('/', authMiddleware, adminOnly, async (req, res) => {
         for (const [key, value] of Object.entries(settings)) {
             if ((key === 'geminiApiKey' || key === 'videoApiKey') && value === '********') {
                 continue;
+            }
+
+            if (key === 'gcliBotModel' && !GCLI_BOT_ALLOWED_MODELS.includes(value)) {
+                return res.status(400).json({ success: false, message: `gcliBotModel không hợp lệ.` });
             }
 
             let finalValue = value;

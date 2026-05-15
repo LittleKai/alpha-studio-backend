@@ -12,9 +12,10 @@ const router = express.Router();
 router.post('/register', async (req, res) => {
     try {
         const { email, password, name } = req.body;
+        const normalizedEmail = typeof email === 'string' ? email.trim().toLowerCase() : '';
 
         // Validate input
-        if (!email || !password || !name) {
+        if (!normalizedEmail || !password || !name) {
             return res.status(400).json({
                 success: false,
                 message: 'Please provide email, password and name'
@@ -22,7 +23,7 @@ router.post('/register', async (req, res) => {
         }
 
         // Check if user exists
-        const existingUser = await User.findOne({ email: email.toLowerCase() });
+        const existingUser = await User.findOne({ email: normalizedEmail });
         if (existingUser) {
             return res.status(400).json({
                 success: false,
@@ -32,7 +33,7 @@ router.post('/register', async (req, res) => {
 
         // Create user
         const user = new User({
-            email: email.toLowerCase(),
+            email: normalizedEmail,
             password,
             name
         });
@@ -83,9 +84,10 @@ router.post('/register', async (req, res) => {
 router.post('/login', async (req, res) => {
     try {
         const { email, password } = req.body;
+        const normalizedEmail = typeof email === 'string' ? email.trim().toLowerCase() : '';
 
         // Validate input
-        if (!email || !password) {
+        if (!normalizedEmail || !password) {
             return res.status(400).json({
                 success: false,
                 message: 'Please provide email and password'
@@ -93,7 +95,7 @@ router.post('/login', async (req, res) => {
         }
 
         // Find user
-        const user = await User.findOne({ email: email.toLowerCase() });
+        const user = await User.findOne({ email: normalizedEmail });
         if (!user) {
             return res.status(401).json({
                 success: false,
@@ -196,7 +198,8 @@ router.put('/profile', authMiddleware, async (req, res) => {
             showBirthDate,
             socials,
             featuredWorks,
-            attachments
+            attachments,
+            preferences
         } = req.body;
 
         const updateData = {};
@@ -217,6 +220,11 @@ router.put('/profile', authMiddleware, async (req, res) => {
         if (attachments !== undefined) {
             // Limit to 3 attachments
             updateData.attachments = attachments.slice(0, 3);
+        }
+        if (preferences !== undefined && preferences && typeof preferences === 'object') {
+            if (typeof preferences.interiorTwoStepConfirm === 'boolean') {
+                updateData['preferences.interiorTwoStepConfirm'] = preferences.interiorTwoStepConfirm;
+            }
         }
 
         const user = await User.findByIdAndUpdate(

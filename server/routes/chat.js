@@ -1,42 +1,13 @@
 import express from 'express';
 import { authMiddleware } from '../middleware/auth.js';
 import ChatMessage from '../models/ChatMessage.js';
+import { callConfiguredAiProvider } from '../utils/aiProvider.js';
 
 const router = express.Router();
 
 const HISTORY_DEFAULT_LIMIT = 50;
 const HISTORY_MAX_LIMIT = 200;
 const MAX_USER_MESSAGE_CHARS = 8000;
-
-async function callOpenClaw(content, sessionId) {
-    const OPENCLAW_URL = process.env.OPENCLAW_URL || 'http://localhost:18791/api/chat';
-    const proxyResponse = await fetch(OPENCLAW_URL, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-            messages: [{ role: 'user', content }],
-            sessionId
-        })
-    });
-
-    const raw = await proxyResponse.text();
-    let data;
-    try {
-        data = JSON.parse(raw);
-    } catch {
-        throw new Error(`OpenClaw trả về phản hồi không hợp lệ (mã ${proxyResponse.status}).`);
-    }
-
-    if (!proxyResponse.ok || !data.success) {
-        throw new Error(data.message || `OpenClaw lỗi (mã ${proxyResponse.status}).`);
-    }
-
-    const text = data.data?.text || data.choices?.[0]?.message?.content || '';
-    if (!text) {
-        throw new Error('Trợ lý AI trả về phản hồi rỗng.');
-    }
-    return text;
-}
 
 router.get('/history', authMiddleware, async (req, res) => {
     try {
@@ -85,9 +56,10 @@ router.post('/send', authMiddleware, async (req, res) => {
 
         let aiText;
         try {
-            aiText = await callOpenClaw(trimmed, req.user._id.toString());
+            const aiResult = await callConfiguredAiProvider(trimmed, req.user._id.toString());
+            aiText = aiResult.text;
         } catch (err) {
-            console.error('OpenClaw forward error:', err.message);
+            console.error('AI chat forward error:', err.message);
             return res.status(502).json({
                 success: false,
                 message: err.message || 'Trợ lý AI tạm thời không phản hồi.',

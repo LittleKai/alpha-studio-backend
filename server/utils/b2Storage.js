@@ -162,6 +162,26 @@ export async function generatePresignedDownloadUrl(key, expiresIn = 14400) {
 }
 
 /**
+ * Convert a public CDN URL (built with CDN_BASE_URL) to a B2 presigned download URL.
+ * Used when the CDN is unreachable (e.g. Cloudflare 525 SNI mismatch) but the
+ * caller still needs the file served — presigned URL goes direct to B2.
+ * Returns null if the URL does not belong to our CDN, so callers can fall back.
+ * @param {string} url
+ * @param {number} expiresIn
+ * @returns {Promise<string|null>}
+ */
+export async function cdnUrlToPresignedDownload(url, expiresIn = 14400) {
+    if (!url || typeof url !== 'string') return null;
+    const cdnBase = process.env.CDN_BASE_URL;
+    if (!cdnBase) return null;
+    const base = cdnBase.endsWith('/') ? cdnBase : cdnBase + '/';
+    if (!url.startsWith(base)) return null;
+    const key = url.slice(base.length).split('?')[0];
+    if (!key) return null;
+    return generatePresignedDownloadUrl(key, expiresIn);
+}
+
+/**
  * Delete a file from B2
  * @param {string} key - Object key to delete
  */

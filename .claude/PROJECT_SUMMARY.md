@@ -1,5 +1,5 @@
 # Project Summary
-**Last Updated:** 2026-05-12 (Async Studio API Polling fix)
+**Last Updated:** 2026-05-15 (Interior AI prompt v2, 2-step confirm, B2 presigned bypass for gcli)
 **Updated By:** Claude Code
 
 ---
@@ -340,8 +340,10 @@ alpha-studio-backend/
 | Storage Cleanup API | ✅ Complete | routes/admin.js, utils/b2Storage.js | Lists all B2 files; cross-references WorkflowDocument/Resource (file+previewImages)/Course (videoUrl+documents)/Prompt (exampleImages); returns `data` (orphaned) + `referencedFiles` each with `source`, `uploader`, `referenced` — super admin only |
 | Studio Usage Tracking (legacy) | ✅ Complete | models/User.js, routes/studio.js | `studioUsage: {date, count}` on User; GET /studio/usage + POST /studio/use; 3 free uses/day; admin/mod unlimited |
 | Flow Image/Video Generation | ✅ Complete (Phase 2) | models/{FlowServer,StudioGeneration,User}.js, routes/studio.js, routes/cloud.js | `POST /studio/image/generate` (5/day), `POST /studio/video/generate` (1/day), `GET /studio/media/:genId/:idx` (B2 redirect or agent proxy stream), `POST /studio/save/:genId/:idx` (B2 upload), `GET /studio/history`; agent register+heartbeat via `/cloud/flow-heartbeat` + admin CRUD `/cloud/admin/flow-servers`; cron marks flow-server offline >2min |
-| AI Consultation Chat | ✅ Complete | models/ChatMessage.js, routes/chat.js | `POST /chat/send` (save user msg + forward single message to OpenClaw via `OPENCLAW_URL` with `sessionId=user._id` for session memory + save AI reply), `GET /chat/history` (display only), `DELETE /chat/history` (clears DB; OpenClaw session memory persists). Auth required. Frontend just displays — OpenClaw handles conversation context via `x-openclaw-session-key`. |
-| VocabFlip Integration | ✅ Complete | routes/vocab.js | `POST /api/vocab/spend` - deduct credit API for VocabFlip iframe app, uses `authMiddleware`, registers transaction in `transactions` connection using serviceType `vocab` |
+| AI Consultation Chat | ✅ Complete | models/ChatMessage.js, routes/chat.js, routes/settings.js | `POST /chat/send` saves user msg then routes via admin setting `useOpenClawForChat`: OpenClaw (`OPENCLAW_URL`, session memory) by default, or direct gcli (`GCLI_DIRECT_URL`, no session memory). `GET /chat/history` display history; `DELETE /chat/history` clears DB history. |
+| VocabFlip Integration | ✅ Complete | models/Vocab.js, routes/vocab.js | MongoDB-backed public decks, flashcards, ratings, import links, profile, feedback, sync notification stubs, and `POST /api/vocab/spend`; VocabFlip media upload uses existing B2 `/api/upload/presign` flow |
+| Interior Design AI API | ✅ Complete | models/InteriorProject.js, routes/interior.js, utils/aiProvider.js, routes/chat.js | Auth-gated `/api/interior` project CRUD, AI chat, version persistence, rollback, manual cabinetModel validation, 1-credit charge per valid AI response, admin/mod bypass. Reuses `useOpenClawForChat` provider toggle shared with `/api/chat/send`. |
+| Interior AI Prompt v2 + 2-step | ✅ Complete | routes/interior.js, models/User.js, models/InteriorProject.js, routes/auth.js | (A) Prompt v2: few-shot, domain hints (kích thước/vật liệu chuẩn VN), forced reply format "Quan sát ảnh/Hiểu yêu cầu/Đã áp dụng", lower askForInfo threshold. (B) Opt-in `User.preferences.interiorTwoStepConfirm` (set via `PUT /auth/profile`). When ON, `POST /interior/projects/:id/chat` accepts `stage='proposal'\|'apply'`: proposal returns plain-text analysis (1 credit, no version), apply consumes `proposalText` as context (1 credit, creates version). Total 2 credit/lần khi bật. |
 
 ---
 
@@ -402,11 +404,37 @@ B2_ACCESS_KEY_ID=your_key_id
 B2_SECRET_ACCESS_KEY=your_app_key
 B2_BUCKET_NAME=your_bucket_name
 CDN_BASE_URL=https://f004.backblazeb2.com/file/your_bucket_name
+OPENCLAW_URL=http://localhost:18791/api/chat
+GCLI_DIRECT_URL=http://localhost:18790/v1/chat/completions
+GCLI_DIRECT_MODEL=gemini-2.5-flash
 ```
 
 ---
 
 ## 7. Recent Changes (Last 3 Sessions)
+
+1. **2026-05-15** - Interior AI prompt v2, 2-step confirm, B2 presigned bypass for gcli
+   - **CDN bypass for AI fetch** `server/utils/b2Storage.js` + `server/routes/interior.js`: Added `cdnUrlToPresignedDownload(url, expiresIn=14400)` helper that strips `CDN_BASE_URL` prefix and returns a presigned B2 download URL pointing at `*.backblazeb2.com` directly. Interior chat route now resolves `refImageUrls` through `resolveImageUrlsForAi()` (with per-URL try/catch fallback) before passing to `callGcliDirect.images` — works around Cloudflare 525 SNI mismatch on `cdn.giaiphapsangtao.com` so gcli upstream can actually fetch the user's reference images. CDN URLs remain stored in MongoDB unchanged; only the AI-facing URL is rewritten.
+
+1. **2026-05-15** - Interior AI prompt upgrade + opt-in 2-step confirm
+   - **Prompt v2** `server/routes/interior.js`: Added `INTERIOR_DOMAIN_HINTS` (kích thước/vật liệu chuẩn VN), `INTERIOR_REPLY_FORMAT` (forced "Quan sát ảnh / Hiểu yêu cầu / Đã áp dụng"), `INTERIOR_FEW_SHOT` (1 compact JSON example), explicit `askForInfo` rule (when image vague / prompt too short / missing dimension+function+material).
+   - **2-step confirm**: New `buildInteriorProposalPrompt` for analysis-only stage; `POST /api/interior/projects/:id/chat` accepts `stage='proposal'|'apply'` + `proposalText`. Proposal: AI returns plain-text analysis, charges 1 credit, no version saved. Apply with `proposalText`: passes proposal as context to JSON generation, charges 1 credit, saves version → 2 credit total khi user opt-in.
+   - **User preference** `server/models/User.js`: Added `preferences.interiorTwoStepConfirm: Boolean default false`; exposed via `PUT /api/auth/profile` (`routes/auth.js`).
+   - **InteriorVersion schema** `server/models/InteriorProject.js`: Added `proposalText: String maxlength 4000` for audit of which proposal led to which version.
+   - **Verification**: `node --check` passes for `interior.js`, `InteriorProject.js`, `User.js`, `auth.js`.
+
+1. **2026-05-15** - Interior Design AI API
+   - **AI provider utility** `server/utils/aiProvider.js`: Extracted OpenClaw/gcli routing and `useOpenClawForChat` lookup for reuse by chat and interior design routes.
+   - **Interior model** `server/models/InteriorProject.js`: Stores owner, project name, current version index, soft-delete flag, and version snapshots with `modelJson`, prompt, AI reply, ref image URL, and rollback metadata.
+   - **Interior routes** `server/routes/interior.js`: Added project list/create/read/update/delete, `POST /projects/:id/chat`, and `POST /projects/:id/rollback`; validates AI JSON manually and charges 1 credit only after valid output.
+   - **Server mount** `server/index.js`: Mounted `/api/interior`.
+   - **Verification**: `node --check` passes for `aiProvider.js`, `InteriorProject.js`, `interior.js`, `chat.js`, and `index.js`.
+
+1. **2026-05-15** - Admin AI chat provider toggle
+   - **Settings** `server/routes/settings.js`: Added `useOpenClawForChat` key with default `true`.
+   - **Chat routing** `server/routes/chat.js`: `POST /api/chat/send` now reads `useOpenClawForChat`; default path keeps OpenClaw session context, direct path calls OpenAI-compatible gcli via `GCLI_DIRECT_URL`.
+   - **Env template** `.env.example`: Added `OPENCLAW_URL`, `GCLI_DIRECT_URL`, and `GCLI_DIRECT_MODEL` placeholders.
+   - **Verification**: `node --check server/routes/chat.js` and `node --check server/routes/settings.js` pass.
 
 1. **2026-05-07** - AI Consultation Chat with Persistent History
    - **New model** `server/models/ChatMessage.js`: `userId` (ref User, indexed), `role` ('user' | 'assistant'), `content` (max 16000 chars), `timestamps`. Compound indexes `{userId:1, createdAt:1}` and `{userId:1, createdAt:-1}` for history queries.
