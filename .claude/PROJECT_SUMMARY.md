@@ -1,5 +1,5 @@
 # Project Summary
-**Last Updated:** 2026-05-15 (Interior AI prompt v2, 2-step confirm, B2 presigned bypass for gcli)
+**Last Updated:** 2026-05-16 (Bundled direct bot context)
 **Updated By:** Claude Code
 
 ---
@@ -340,7 +340,7 @@ alpha-studio-backend/
 | Storage Cleanup API | ✅ Complete | routes/admin.js, utils/b2Storage.js | Lists all B2 files; cross-references WorkflowDocument/Resource (file+previewImages)/Course (videoUrl+documents)/Prompt (exampleImages); returns `data` (orphaned) + `referencedFiles` each with `source`, `uploader`, `referenced` — super admin only |
 | Studio Usage Tracking (legacy) | ✅ Complete | models/User.js, routes/studio.js | `studioUsage: {date, count}` on User; GET /studio/usage + POST /studio/use; 3 free uses/day; admin/mod unlimited |
 | Flow Image/Video Generation | ✅ Complete (Phase 2) | models/{FlowServer,StudioGeneration,User}.js, routes/studio.js, routes/cloud.js | `POST /studio/image/generate` (5/day), `POST /studio/video/generate` (1/day), `GET /studio/media/:genId/:idx` (B2 redirect or agent proxy stream), `POST /studio/save/:genId/:idx` (B2 upload), `GET /studio/history`; agent register+heartbeat via `/cloud/flow-heartbeat` + admin CRUD `/cloud/admin/flow-servers`; cron marks flow-server offline >2min |
-| AI Consultation Chat | ✅ Complete | models/ChatMessage.js, routes/chat.js, routes/settings.js | `POST /chat/send` saves user msg then routes via admin setting `useOpenClawForChat`: OpenClaw (`OPENCLAW_URL`, session memory) by default, or direct gcli (`GCLI_DIRECT_URL`, no session memory). `GET /chat/history` display history; `DELETE /chat/history` clears DB history. |
+| AI Consultation Chat | ✅ Complete | models/ChatMessage.js, routes/chat.js, routes/settings.js, utils/aiProvider.js, server/context/alpha-studio-bot | `POST /chat/send` saves user msg then routes via admin setting `useOpenClawForChat`: OpenClaw (`OPENCLAW_URL`, session memory) by default, or direct gcli (`GCLI_DIRECT_URL`) with bundled Alpha Studio workspace context and up to 3 previous MongoDB chat messages. `GET /chat/history` display history; `DELETE /chat/history` clears DB history. |
 | VocabFlip Integration | ✅ Complete | models/Vocab.js, routes/vocab.js | MongoDB-backed public decks, flashcards, ratings, import links, profile, feedback, sync notification stubs, and `POST /api/vocab/spend`; VocabFlip media upload uses existing B2 `/api/upload/presign` flow |
 | Interior Design AI API | ✅ Complete | models/InteriorProject.js, routes/interior.js, utils/aiProvider.js, routes/chat.js | Auth-gated `/api/interior` project CRUD, AI chat, version persistence, rollback, manual cabinetModel validation, 1-credit charge per valid AI response, admin/mod bypass. Reuses `useOpenClawForChat` provider toggle shared with `/api/chat/send`. |
 | Interior AI Prompt v2 + 2-step | ✅ Complete | routes/interior.js, models/User.js, models/InteriorProject.js, routes/auth.js | (A) Prompt v2: few-shot, domain hints (kích thước/vật liệu chuẩn VN), forced reply format "Quan sát ảnh/Hiểu yêu cầu/Đã áp dụng", lower askForInfo threshold. (B) Opt-in `User.preferences.interiorTwoStepConfirm` (set via `PUT /auth/profile`). When ON, `POST /interior/projects/:id/chat` accepts `stage='proposal'\|'apply'`: proposal returns plain-text analysis (1 credit, no version), apply consumes `proposalText` as context (1 credit, creates version). Total 2 credit/lần khi bật. |
@@ -412,6 +412,13 @@ GCLI_DIRECT_MODEL=gemini-2.5-flash
 ---
 
 ## 7. Recent Changes (Last 3 Sessions)
+
+1. **2026-05-16** - Bundled direct bot context for production
+   - **Bundled context** `server/context/alpha-studio-bot/{IDENTITY.md,SOUL.md,venue.md}`: Copied the Alpha Studio bot workspace files into the backend image path so Fly.io production can read them even though `tools/openclaw-server/workspaces/alpha-studio` is not present in the backend Docker context.
+   - **Provider context** `server/utils/aiProvider.js`: Direct gcli bot reads only the bundled `server/context/alpha-studio-bot` context. The loaded context is cached for 60 seconds and injected as a system prompt when `useOpenClawForChat=false`.
+   - **Direct history** `server/routes/chat.js`: Direct gcli requests include up to 3 previous MongoDB chat messages plus the current user message.
+   - **Env template** `.env.example`: No bot context path env is required; production uses the bundled backend context.
+   - **Verification**: `node --check` passes for `server/utils/aiProvider.js` and `server/routes/chat.js`.
 
 1. **2026-05-15** - Interior AI prompt v2, 2-step confirm, B2 presigned bypass for gcli
    - **CDN bypass for AI fetch** `server/utils/b2Storage.js` + `server/routes/interior.js`: Added `cdnUrlToPresignedDownload(url, expiresIn=14400)` helper that strips `CDN_BASE_URL` prefix and returns a presigned B2 download URL pointing at `*.backblazeb2.com` directly. Interior chat route now resolves `refImageUrls` through `resolveImageUrlsForAi()` (with per-URL try/catch fallback) before passing to `callGcliDirect.images` — works around Cloudflare 525 SNI mismatch on `cdn.giaiphapsangtao.com` so gcli upstream can actually fetch the user's reference images. CDN URLs remain stored in MongoDB unchanged; only the AI-facing URL is rewritten.

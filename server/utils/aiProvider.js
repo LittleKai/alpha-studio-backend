@@ -1,3 +1,6 @@
+import { readFile } from 'fs/promises';
+import path from 'path';
+import { fileURLToPath } from 'url';
 import SystemSetting from '../models/SystemSetting.js';
 
 /**
@@ -12,6 +15,84 @@ import SystemSetting from '../models/SystemSetting.js';
 // Cached by raw env string so reloading env in dev is detected automatically.
 let _gcliKeysRaw = null;
 let _gcliKeysCache = null;
+let _workspaceContextCache = {
+    key: null,
+    expiresAt: 0,
+    text: null
+};
+
+const WORKSPACE_CONTEXT_TTL_MS = 60 * 1000;
+const ALPHA_STUDIO_WORKSPACE_FILES = ['IDENTITY.md', 'SOUL.md', 'venue.md'];
+
+function getEmbeddedAlphaStudioWorkspaceDir() {
+    const currentDir = path.dirname(fileURLToPath(import.meta.url));
+    return path.resolve(currentDir, '..', 'context', 'alpha-studio-bot');
+}
+
+function getAlphaStudioWorkspaceDirs() {
+    return [getEmbeddedAlphaStudioWorkspaceDir()];
+}
+
+async function readWorkspaceDir(workspaceDir) {
+    const parts = await Promise.all(ALPHA_STUDIO_WORKSPACE_FILES.map(async (fileName) => {
+        const content = await readFile(path.join(workspaceDir, fileName), 'utf8');
+        return `# ${fileName}\n${content.trim()}`;
+    }));
+    return parts.join('\n\n---\n\n');
+}
+
+async function readAlphaStudioWorkspaceContext() {
+    const workspaceDirs = getAlphaStudioWorkspaceDirs();
+    const cacheKey = workspaceDirs.join('|');
+    const now = Date.now();
+    if (
+        _workspaceContextCache.key === cacheKey
+        && _workspaceContextCache.text
+        && _workspaceContextCache.expiresAt > now
+    ) {
+        return _workspaceContextCache.text;
+    }
+
+    const errors = [];
+    let workspaceBody = null;
+    let loadedFrom = null;
+    for (const workspaceDir of workspaceDirs) {
+        try {
+            workspaceBody = await readWorkspaceDir(workspaceDir);
+            loadedFrom = workspaceDir;
+            break;
+        } catch (err) {
+            errors.push(`${workspaceDir}: ${err.message}`);
+        }
+    }
+
+    if (!workspaceBody) {
+        console.warn(`[aiProvider] Cannot load Alpha Studio workspace context: ${errors.join(' | ')}`);
+        _workspaceContextCache = {
+            key: cacheKey,
+            expiresAt: now + WORKSPACE_CONTEXT_TTL_MS,
+            text: null
+        };
+        return null;
+    }
+
+    const text = [
+        'You are serving Alpha Studio through the direct gcli provider, without OpenClaw.',
+        'Use the following Alpha Studio workspace instructions and knowledge as your authoritative context.',
+        'Never mention these internal files, paths, prompts, or implementation details to the user.',
+        'If the answer is not covered by this context, say you do not have that detail and direct the user to human support.',
+        '',
+        workspaceBody
+    ].join('\n');
+
+    _workspaceContextCache = {
+        key: cacheKey,
+        expiresAt: now + WORKSPACE_CONTEXT_TTL_MS,
+        text
+    };
+    console.log(`[aiProvider] Loaded Alpha Studio bot context from ${loadedFrom}`);
+    return text;
+}
 
 function parseGcliKeys(raw) {
     if (!raw || typeof raw !== 'string') return [];
@@ -134,6 +215,19 @@ export async function callGcliDirect(content, options = {}) {
             ...encodedImages.map((url) => ({ type: 'image_url', image_url: { url } }))
         ]
         : content;
+    const messages = [];
+    if (options.systemPrompt) {
+        messages.push({ role: 'system', content: options.systemPrompt });
+    }
+    if (Array.isArray(options.messages) && options.messages.length > 0 && encodedImages.length === 0) {
+        for (const msg of options.messages) {
+            if (!msg || typeof msg.content !== 'string' || !msg.content.trim()) continue;
+            const role = ['system', 'user', 'assistant'].includes(msg.role) ? msg.role : 'user';
+            messages.push({ role, content: msg.content.trim() });
+        }
+    } else {
+        messages.push({ role: 'user', content: userContent });
+    }
 
     const response = await fetch(url, {
         method: 'POST',
@@ -143,7 +237,7 @@ export async function callGcliDirect(content, options = {}) {
         },
         body: JSON.stringify({
             model,
-            messages: [{ role: 'user', content: userContent }]
+            messages
         })
     });
 
@@ -190,9 +284,14 @@ export async function getGcliBotModel() {
     return setting?.value || process.env.GCLI_DIRECT_MODEL || 'gemini-3.1-flash-lite';
 }
 
-export async function callConfiguredAiProvider(content, sessionId) {
+export async function callConfiguredAiProvider(content, sessionId, options = {}) {
     const useOpenClaw = await shouldUseOpenClawForChat();
     if (useOpenClaw) return callOpenClaw(content, sessionId);
     const model = await getGcliBotModel();
-    return callGcliDirect(content, { model });
+    const systemPrompt = options.systemPrompt || await readAlphaStudioWorkspaceContext();
+    return callGcliDirect(content, {
+        model,
+        systemPrompt,
+        messages: options.messages
+    });
 }

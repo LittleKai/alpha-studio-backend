@@ -48,15 +48,33 @@ router.post('/send', authMiddleware, async (req, res) => {
             });
         }
 
+        const recentMessages = await ChatMessage
+            .find({ userId: req.user._id })
+            .sort({ createdAt: -1 })
+            .limit(3)
+            .lean();
+        const directProviderHistory = recentMessages
+            .reverse()
+            .map((msg) => ({
+                role: msg.role,
+                content: msg.content
+            }));
+
         const userMessage = await ChatMessage.create({
             userId: req.user._id,
+            role: 'user',
+            content: trimmed
+        });
+        directProviderHistory.push({
             role: 'user',
             content: trimmed
         });
 
         let aiText;
         try {
-            const aiResult = await callConfiguredAiProvider(trimmed, req.user._id.toString());
+            const aiResult = await callConfiguredAiProvider(trimmed, req.user._id.toString(), {
+                messages: directProviderHistory
+            });
             aiText = aiResult.text;
         } catch (err) {
             console.error('AI chat forward error:', err.message);
