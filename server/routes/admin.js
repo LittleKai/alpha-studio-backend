@@ -9,8 +9,12 @@ import Resource from '../models/Resource.js';
 import Course from '../models/Course.js';
 import Prompt from '../models/Prompt.js';
 import StudioGeneration from '../models/StudioGeneration.js';
+import InteriorAnalysis from '../models/InteriorAnalysis.js';
+import InteriorRender from '../models/InteriorRender.js';
+import InteriorTemplate from '../models/InteriorTemplate.js';
 import { authMiddleware, adminOnly } from '../middleware/auth.js';
 import { listAllFiles, deleteFile as deleteB2File } from '../utils/b2Storage.js';
+import { validateTemplateStructure, extractDsl } from '../utils/templateValidator.js';
 
 const router = express.Router();
 
@@ -749,6 +753,22 @@ router.get('/storage/orphaned', async (req, res) => {
             }
         }
 
+        // Interior analysis cache: uploaded reference image
+        const interiorAnalyses = await InteriorAnalysis.find({}, 'imageUrl').lean();
+        for (const a of interiorAnalyses) {
+            const key = extractB2Key(a.imageUrl);
+            if (key) usedKeys.add(key);
+        }
+
+        // Interior renders: 3D view conditioning + AI render output
+        const interiorRenders = await InteriorRender.find({}, 'viewUrl renderUrl').lean();
+        for (const r of interiorRenders) {
+            const viewKey = extractB2Key(r.viewUrl);
+            if (viewKey) usedKeys.add(viewKey);
+            const renderKey = extractB2Key(r.renderUrl);
+            if (renderKey) usedKeys.add(renderKey);
+        }
+
         // Course lesson videos + documents
         const courses = await Course.find({}, 'modules').lean();
         for (const course of courses) {
@@ -813,6 +833,160 @@ router.delete('/storage/orphaned', async (req, res) => {
     } catch (error) {
         console.error('Delete orphaned file error:', error);
         res.status(500).json({ success: false, message: 'Lỗi server' });
+    }
+});
+
+// ─── Interior template review (Phase 12) ─────────────────────────────────────
+//
+// All endpoints already protected by router.use(authMiddleware) + adminOnly above.
+// Admin reviews user-committed pending templates; can approve, edit, deprecate
+// (soft hide from AI catalog), or reject (hard delete unless status='seed').
+
+router.get('/interior-templates', async (req, res) => {
+    try {
+        const { status, category, search, page = 1, limit = 50 } = req.query;
+        const query = {};
+        if (status) query.status = status;
+        if (category) query.category = category;
+        if (search) {
+            const safe = String(search).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+            query.$or = [
+                { templateId: { $regex: safe, $options: 'i' } },
+                { tags: { $regex: safe, $options: 'i' } },
+                { 'description.vi': { $regex: safe, $options: 'i' } },
+                { 'description.en': { $regex: safe, $options: 'i' } }
+            ];
+        }
+
+        const pageNum = Math.max(1, parseInt(page, 10) || 1);
+        const limitNum = Math.min(200, Math.max(1, parseInt(limit, 10) || 50));
+        const skip = (pageNum - 1) * limitNum;
+
+        const [items, total] = await Promise.all([
+            InteriorTemplate.find(query)
+                .sort({ updatedAt: -1 })
+                .skip(skip)
+                .limit(limitNum)
+                .populate('authorId', 'email name')
+                .lean(),
+            InteriorTemplate.countDocuments(query)
+        ]);
+
+        return res.json({
+            success: true,
+            data: { items, total, page: pageNum, limit: limitNum, pages: Math.ceil(total / limitNum) }
+        });
+    } catch (error) {
+        console.error('Admin interior-templates list error:', error);
+        return res.status(500).json({ success: false, message: 'Lỗi tải danh sách template.' });
+    }
+});
+
+router.get('/interior-templates/:id', async (req, res) => {
+    try {
+        if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
+            return res.status(400).json({ success: false, message: 'ID không hợp lệ.' });
+        }
+        const tpl = await InteriorTemplate.findById(req.params.id).populate('authorId', 'email name').lean();
+        if (!tpl) return res.status(404).json({ success: false, message: 'Không tìm thấy template.' });
+        return res.json({ success: true, data: tpl });
+    } catch (error) {
+        console.error('Admin interior-template get error:', error);
+        return res.status(500).json({ success: false, message: 'Lỗi tải template.' });
+    }
+});
+
+router.post('/interior-templates/:id/approve', async (req, res) => {
+    try {
+        if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
+            return res.status(400).json({ success: false, message: 'ID không hợp lệ.' });
+        }
+        const tpl = await InteriorTemplate.findByIdAndUpdate(
+            req.params.id,
+            { $set: { status: 'approved' } },
+            { new: true }
+        );
+        if (!tpl) return res.status(404).json({ success: false, message: 'Không tìm thấy template.' });
+        return res.json({ success: true, message: 'Đã duyệt template.', data: tpl });
+    } catch (error) {
+        console.error('Admin interior-template approve error:', error);
+        return res.status(500).json({ success: false, message: 'Lỗi duyệt template.' });
+    }
+});
+
+router.post('/interior-templates/:id/reject', async (req, res) => {
+    try {
+        if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
+            return res.status(400).json({ success: false, message: 'ID không hợp lệ.' });
+        }
+        const tpl = await InteriorTemplate.findById(req.params.id);
+        if (!tpl) return res.status(404).json({ success: false, message: 'Không tìm thấy template.' });
+        if (tpl.status === 'seed') {
+            return res.status(400).json({ success: false, message: 'Không thể xoá seed template.' });
+        }
+        await InteriorTemplate.deleteOne({ _id: req.params.id });
+        return res.json({ success: true, message: 'Đã từ chối và xoá template.' });
+    } catch (error) {
+        console.error('Admin interior-template reject error:', error);
+        return res.status(500).json({ success: false, message: 'Lỗi xoá template.' });
+    }
+});
+
+router.post('/interior-templates/:id/edit', async (req, res) => {
+    try {
+        if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
+            return res.status(400).json({ success: false, message: 'ID không hợp lệ.' });
+        }
+        const tpl = await InteriorTemplate.findById(req.params.id);
+        if (!tpl) return res.status(404).json({ success: false, message: 'Không tìm thấy template.' });
+
+        const { name, description, category, tags, params, styleOptions, dsl, previewDims, bumpVersion } = req.body || {};
+
+        if (dsl !== undefined) {
+            const candidate = {
+                id: tpl.templateId,
+                category: category || tpl.category,
+                params: params || tpl.params || {},
+                dsl: extractDsl({ dsl })
+            };
+            const validation = validateTemplateStructure(candidate);
+            if (!validation.valid) {
+                return res.status(400).json({ success: false, message: `DSL không hợp lệ: ${validation.message}` });
+            }
+            tpl.dsl = candidate.dsl;
+        }
+        if (name !== undefined) tpl.name = name;
+        if (description !== undefined) tpl.description = description;
+        if (category !== undefined) tpl.category = category;
+        if (tags !== undefined && Array.isArray(tags)) tpl.tags = tags.slice(0, 20);
+        if (params !== undefined) tpl.params = params;
+        if (styleOptions !== undefined) tpl.styleOptions = styleOptions;
+        if (previewDims !== undefined) tpl.previewDims = previewDims;
+        if (bumpVersion) tpl.version += 1;
+
+        await tpl.save();
+        return res.json({ success: true, message: 'Đã cập nhật template.', data: tpl });
+    } catch (error) {
+        console.error('Admin interior-template edit error:', error);
+        return res.status(500).json({ success: false, message: 'Lỗi cập nhật template.' });
+    }
+});
+
+router.post('/interior-templates/:id/deprecate', async (req, res) => {
+    try {
+        if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
+            return res.status(400).json({ success: false, message: 'ID không hợp lệ.' });
+        }
+        const tpl = await InteriorTemplate.findByIdAndUpdate(
+            req.params.id,
+            { $set: { status: 'deprecated' } },
+            { new: true }
+        );
+        if (!tpl) return res.status(404).json({ success: false, message: 'Không tìm thấy template.' });
+        return res.json({ success: true, message: 'Đã đánh dấu deprecated.', data: tpl });
+    } catch (error) {
+        console.error('Admin interior-template deprecate error:', error);
+        return res.status(500).json({ success: false, message: 'Lỗi cập nhật template.' });
     }
 });
 

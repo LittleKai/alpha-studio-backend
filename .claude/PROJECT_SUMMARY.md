@@ -1,5 +1,11 @@
 # Project Summary
-**Last Updated:** 2026-05-16 (Bundled direct bot context)
+
+**Phase 13 Update (2026-05-20):** Interior Agent Harness added. Generic extractable runner code lives in `server/agent-runner/` (`ToolRegistry`, `SkillLoader`, SSE helpers, JSON protocol parser, loop runner). Interior domain tools live in `server/tools/interior/` with 15 registered tools. New `POST /api/interior/projects/:id/agent` streams SSE steps and commits through `model.commit`; `InteriorAgentLog` stores step logs with 30-day TTL. Agent flow costs 2 credits on commit and coexists with legacy `/chat`.
+
+**Phase 12 Update (2026-05-19):** Backend now hosts the self-extending interior template library. New model `InteriorTemplate` (status: seed/pending/approved/deprecated). New endpoints: `GET /api/interior/templates` (engine catalog load, returns seed+approved deduped by highest version), `POST /api/interior/templates` (user commits a project inline template to pending), and `/api/admin/interior-templates` CRUD (list/getOne/approve/reject/edit/deprecate). `/api/interior/projects/:id/chat` now extracts AI-emitted `tplNew` blocks into `modelJson.inlineTemplates[id]`, replaces with `tpl: id`, and surfaces created ids in `data.meta.newInlineTemplates`. DSL validation lives in `server/utils/templateValidator.js` (AST whitelist mirror of the engine `expression.js`). Seed script `scripts/seed-interior-templates.mjs` upserts the 7 built-in templates from `tools/interior-design-engine/src/templates/` (idempotent).
+
+**Phase 11 Update (2026-05-19):** `server/routes/interior.js` now validates the compact template contract: top-level `palette`, optional `inlineTemplates`, and module/detail items using either legacy `width/height/depth` boxes or `tpl/style` template references. The default project model uses `sliding-2door` with `palette: "wood-oak"`, and `/api/interior` prompts include the built-in template catalog while no longer promoting CSG hints.
+**Last Updated:** 2026-05-18 (Interior Phase 10 nhóm A prompt/template fixes)
 **Updated By:** Claude Code
 
 ---
@@ -45,6 +51,7 @@ alpha-studio-backend/
 │   │   ├── Article.js             # Articles for About & Services pages (bilingual)
 │   │   ├── HostMachine.js         # Cloud host machine registry
 │   │   ├── CloudSession.js        # Cloud desktop sessions
+│   │   ├── InteriorAiLog.js       # Raw AI request/response per Interior /chat call (TTL 30 days)
 │   │   ├── WorkflowProject.js     # Workflow projects (team, tasks, chatHistory, expenseLog)
 │   │   ├── WorkflowDocument.js    # Workflow documents (file metadata, status, comments)
 │   │   ├── FeaturedStudent.js     # Featured students (userId ref, order, label, hired)
@@ -225,6 +232,17 @@ alpha-studio-backend/
 ├── /upload
 │   ├── POST   /presign           # Generate B2 presigned upload URL (auth)
 │   └── DELETE /file              # Delete file from B2 (admin)
+├── /interior
+│   ├── GET    /projects                    # List user's interior projects (auth)
+│   ├── POST   /projects                    # Create project (auth)
+│   ├── GET    /projects/:id                # Get project (auth, owner)
+│   ├── PATCH  /projects/:id                # Rename project (auth, owner)
+│   ├── DELETE /projects/:id                # Soft delete project (auth, owner)
+│   ├── POST   /projects/:id/chat           # AI chat — proposal or apply stage (auth, charges credit)
+│   ├── POST   /projects/:id/rollback       # Move currentVersionIndex to target version (auth, owner)
+│   ├── POST   /analyze-image               # Image → design model JSON (auth + quota)
+│   ├── POST   /generate-render             # 3D view + style prompt → render placeholder (auth + quota)
+│   └── GET    /admin/logs                  # List InteriorAiLog (auth + adminOnly); filters projectId/userId/stage/status
 ├── /workflow
 │   │   ├── GET    /projects          # List user's projects (auth)
 │   │   ├── POST   /projects          # Create project (auth)
@@ -343,7 +361,9 @@ alpha-studio-backend/
 | AI Consultation Chat | ✅ Complete | models/ChatMessage.js, routes/chat.js, routes/settings.js, utils/aiProvider.js, server/context/alpha-studio-bot | `POST /chat/send` saves user msg then routes via admin setting `useOpenClawForChat`: OpenClaw (`OPENCLAW_URL`, session memory) by default, or direct gcli (`GCLI_DIRECT_URL`) with bundled Alpha Studio workspace context and up to 3 previous MongoDB chat messages. `GET /chat/history` display history; `DELETE /chat/history` clears DB history. |
 | VocabFlip Integration | ✅ Complete | models/Vocab.js, routes/vocab.js | MongoDB-backed public decks, flashcards, ratings, import links, profile, feedback, sync notification stubs, and `POST /api/vocab/spend`; VocabFlip media upload uses existing B2 `/api/upload/presign` flow |
 | Interior Design AI API | ✅ Complete | models/InteriorProject.js, routes/interior.js, utils/aiProvider.js, routes/chat.js | Auth-gated `/api/interior` project CRUD, AI chat, version persistence, rollback, manual cabinetModel validation, 1-credit charge per valid AI response, admin/mod bypass. Reuses `useOpenClawForChat` provider toggle shared with `/api/chat/send`. |
-| Interior AI Prompt v2 + 2-step | ✅ Complete | routes/interior.js, models/User.js, models/InteriorProject.js, routes/auth.js | (A) Prompt v2: few-shot, domain hints (kích thước/vật liệu chuẩn VN), forced reply format "Quan sát ảnh/Hiểu yêu cầu/Đã áp dụng", lower askForInfo threshold. (B) Opt-in `User.preferences.interiorTwoStepConfirm` (set via `PUT /auth/profile`). When ON, `POST /interior/projects/:id/chat` accepts `stage='proposal'\|'apply'`: proposal returns plain-text analysis (1 credit, no version), apply consumes `proposalText` as context (1 credit, creates version). Total 2 credit/lần khi bật. |
+| Interior AI Prompt v2 + 2-step | ✅ Complete | routes/interior.js, models/User.js, models/InteriorProject.js, routes/auth.js | (A) Prompt v2: few-shot, domain hints (kích thước/vật liệu chuẩn VN), Phase 10 strict dimension anchor, `/chat` `runs[]` rule for L/U/island/parallel layouts, z-axis wall-depth convention, forced reply format "Quan sát ảnh/Hiểu yêu cầu/Đã áp dụng", lower askForInfo threshold. (B) Opt-in `User.preferences.interiorTwoStepConfirm` (set via `PUT /auth/profile`). When ON, `POST /interior/projects/:id/chat` accepts `stage='proposal'\|'apply'`: proposal returns plain-text analysis (1 credit, no version), apply consumes `proposalText` as context (1 credit, creates version). Total 2 credit/lần khi bật. |
+| Interior Image-to-Design (Phase 4+) | ✅ Complete | routes/interior.js (+/analyze-image, +/generate-render), middleware/interiorQuota.js, models/{InteriorAnalysis,InteriorRender,InteriorQuota}.js, routes/admin.js (orphan scan) | `POST /interior/analyze-image` (auth + 5/24h quota): JSON body `{imageUrl, hints, modelOverride}`, sha256 cache (24h TTL), Gemini Flash 3 default → Pro 3.1 escalate, 2-attempt JSON repair loop, returns `{model, suggestedModel, meta}`. Prompt teaches Phase 8 `runs[]` for L/U/island/galley layouts and Phase 7 `csgHints[]`; validator accepts either legacy `modules[]` or new `runs[]`, not both. Default project model now uses an opaque solid panel template instead of transparent zone modules. |
+| Interior AI Log Viewer | ✅ Complete | models/InteriorAiLog.js, routes/interior.js, scripts/dump-interior-log.mjs | Every `/api/interior/projects/:id/chat` call (both `proposal` and `apply` stages) records raw prompt, ref images, raw AI response, parsed reply, latency, usage, status (`ok`/`parse-failed`/`validation-failed`/`upstream-error`), errorMessage. TTL 30 days. `GET /api/interior/admin/logs?projectId=&userId=&stage=&status=&limit=` accepts EITHER (auth + adminOnly) OR header `x-reviewer-token: $INTERIOR_LOG_REVIEWER_TOKEN` (reviewer bypass for ops/debug). Direct dump: `node scripts/dump-interior-log.mjs <projectId>`. |
 
 ---
 
@@ -412,6 +432,11 @@ GCLI_DIRECT_MODEL=gemini-2.5-flash
 ---
 
 ## 7. Recent Changes (Last 3 Sessions)
+
+1. **2026-05-18** - Interior Phase 8 runs prompt
+   - **Analyze prompt** `server/routes/interior.js`: Added `runs[]` instructions for L/U/island/galley layouts with `{id, origin:{x,z}, direction, modules}`.
+   - **Validation**: `validateCabinetModel` now accepts either legacy `modules[]` or new `runs[]`, rejects using both, and validates each run direction/origin/modules.
+   - **Database docs**: `DATABASE.md` documents that InteriorProject/InteriorAnalysis `modelJson` can store `runs[]`.
 
 1. **2026-05-16** - Bundled direct bot context for production
    - **Bundled context** `server/context/alpha-studio-bot/{IDENTITY.md,SOUL.md,venue.md}`: Copied the Alpha Studio bot workspace files into the backend image path so Fly.io production can read them even though `tools/openclaw-server/workspaces/alpha-studio` is not present in the backend Docker context.
