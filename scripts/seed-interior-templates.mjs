@@ -55,10 +55,7 @@ async function main() {
                     params: tpl.params || {},
                     styleOptions: tpl.style || {},
                     dsl: {
-                        frontSvg: tpl.frontSvg || [],
-                        sideSvg: tpl.sideSvg || [],
-                        planSvg: tpl.planSvg || [],
-                        isoBoxes: tpl.isoBoxes || []
+                        boxes: tpl.boxes || tpl.isoBoxes || []
                     },
                     status: 'seed',
                     authorId: null,

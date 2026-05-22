@@ -1,4 +1,4 @@
-import { findRun, invalid, isObject, isPositiveNumber, makeId, ok } from './common.js';
+import { applyTemplateDimensionDefaults, findRun, invalid, isObject, isPositiveNumber, makeId, ok } from './common.js';
 
 function validateDimsForRaw(args) {
     return isPositiveNumber(args.width) && isPositiveNumber(args.height) && isPositiveNumber(args.depth);
@@ -6,7 +6,7 @@ function validateDimsForRaw(args) {
 
 export default {
     name: 'module.add',
-    description: 'Add a module to an existing run using tpl, tplInline, or raw box fields.',
+    description: 'Add a module to an existing run using tpl, tplInline, or raw box fields. For known tpl ids, missing width/height/depth are filled from template defaults.',
     validateArgs: (args) => {
         if (typeof args.runId !== 'string') return invalid('runId is required.');
         const tplCount = [args.tpl, args.tplInline].filter(Boolean).length;
@@ -20,7 +20,7 @@ export default {
         const run = findRun(ctx, args.runId);
         if (!run) return { ok: false, error: `Run ${args.runId} not found.` };
         const moduleId = makeId('mod');
-        const module = {
+        const module = applyTemplateDimensionDefaults({
             id: moduleId,
             x: args.x,
             y: args.y,
@@ -35,7 +35,7 @@ export default {
             ...(args.kind ? { kind: args.kind } : {}),
             ...(args.materialRef ? { materialRef: args.materialRef } : {}),
             ...(args.color ? { color: args.color } : {})
-        };
+        });
         run.modules.push(module);
         return { ok: true, data: { moduleId, module } };
     }

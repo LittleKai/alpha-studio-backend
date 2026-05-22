@@ -139,6 +139,75 @@ function maskKey(key) {
     return `${key.slice(0, 4)}…${key.slice(-4)}`;
 }
 
+function sleep(ms) {
+    return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+// Retry policy for upstream gcli: 429 (rate limit) and 503 (service unavailable)
+// trigger exponential backoff with jitter; honors Retry-After header (in seconds)
+// when present. Each retry picks a fresh key from the pool, so a single bad key
+// won't block the request if there are multiple in rotation. Network-layer
+// errors (DNS/socket) get the same treatment. Non-retryable status codes (400,
+// 401, 500, etc.) return immediately so the caller surfaces them to the user.
+const GCLI_RETRY_STATUSES = new Set([429, 503]);
+const GCLI_MAX_RETRIES = Number(process.env.GCLI_MAX_RETRIES) || 3;
+const GCLI_BASE_DELAY_MS = Number(process.env.GCLI_BASE_DELAY_MS) || 1000;
+
+function computeBackoffMs(attempt, retryAfterHeader) {
+    if (retryAfterHeader) {
+        const seconds = Number(retryAfterHeader);
+        if (Number.isFinite(seconds) && seconds > 0) {
+            return Math.min(seconds * 1000, 30000); // cap 30s
+        }
+    }
+    return GCLI_BASE_DELAY_MS * Math.pow(2, attempt) + Math.floor(Math.random() * 500);
+}
+
+async function fetchGcliWithRetry(url, body) {
+    let lastErrorMessage = null;
+    let lastStatus = null;
+    const triedKeys = [];
+    for (let attempt = 0; attempt < GCLI_MAX_RETRIES; attempt += 1) {
+        const token = pickGcliKey();
+        if (!token) throw new Error('Thiếu GCLI_API_KEY trong env backend.');
+        triedKeys.push(maskKey(token));
+
+        let response;
+        try {
+            response = await fetch(url, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${token}`
+                },
+                body
+            });
+        } catch (networkErr) {
+            lastErrorMessage = networkErr.message || 'Network error';
+            lastStatus = null;
+            if (attempt < GCLI_MAX_RETRIES - 1) {
+                const delay = computeBackoffMs(attempt, null);
+                console.warn(`[gcli] network error attempt ${attempt + 1}/${GCLI_MAX_RETRIES} key=${maskKey(token)} → retry in ${delay}ms: ${lastErrorMessage}`);
+                await sleep(delay);
+                continue;
+            }
+            throw new Error(`gcli network error after ${GCLI_MAX_RETRIES} attempts: ${lastErrorMessage}`);
+        }
+
+        if (GCLI_RETRY_STATUSES.has(response.status) && attempt < GCLI_MAX_RETRIES - 1) {
+            const retryAfter = response.headers.get('retry-after');
+            const delay = computeBackoffMs(attempt, retryAfter);
+            lastStatus = response.status;
+            console.warn(`[gcli] ${response.status} ${response.statusText} attempt ${attempt + 1}/${GCLI_MAX_RETRIES} key=${maskKey(token)} → retry in ${delay}ms${retryAfter ? ` (Retry-After=${retryAfter})` : ''}`);
+            await sleep(delay);
+            continue;
+        }
+
+        return { response, token, triedKeys, attempts: attempt + 1 };
+    }
+    throw new Error(`gcli rate-limited after ${GCLI_MAX_RETRIES} attempts (status=${lastStatus}, tried keys: ${triedKeys.join(', ')}).`);
+}
+
 // Gemini qua gcli upstream KHÔNG tự fetch HTTPS URL — bắt buộc base64 data URL.
 // Flash sẽ hallucinate plausibly (prompt_tokens ≈ 11) khi không có ảnh, Pro thì
 // báo thẳng "không có ảnh". Vì vậy mọi URL phải được fetch + encode trước khi gửi.
@@ -192,11 +261,9 @@ export async function callOpenClaw(content, sessionId) {
 export async function callGcliDirect(content, options = {}) {
     const url = process.env.GCLI_DIRECT_URL || 'https://gcli.ggchan.dev/v1/chat/completions';
     const model = options.model || process.env.GCLI_DIRECT_MODEL || 'gemini-3.1-flash-lite';
-    // Pool nhiều key với weighted random — xem parseGcliKeys() ở đầu file.
-    const token = pickGcliKey();
-    if (!token) {
-        throw new Error('Thiếu GCLI_API_KEY trong env backend.');
-    }
+    // Key pool + retry handled inside fetchGcliWithRetry. Each retry picks a
+    // fresh key (weighted random) so multi-key envs naturally rotate around a
+    // rate-limited key.
 
     const images = Array.isArray(options.images) ? options.images.filter(Boolean) : [];
     // Fetch + encode mỗi URL → data URL. Nếu fetch fail thì giữ URL gốc (AI sẽ
@@ -229,17 +296,8 @@ export async function callGcliDirect(content, options = {}) {
         messages.push({ role: 'user', content: userContent });
     }
 
-    const response = await fetch(url, {
-        method: 'POST',
-        headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${token}`
-        },
-        body: JSON.stringify({
-            model,
-            messages
-        })
-    });
+    const body = JSON.stringify({ model, messages });
+    const { response, token, attempts } = await fetchGcliWithRetry(url, body);
 
     const raw = await response.text();
     let data;
@@ -267,7 +325,8 @@ export async function callGcliDirect(content, options = {}) {
     if (usage) {
         const keyCount = getGcliKeys().length;
         const keyTag = keyCount > 1 ? ` key=${maskKey(token)} (pool=${keyCount})` : '';
-        console.log(`[gcli] model=${model}${keyTag} tokens: prompt=${usage.promptTokens} completion=${usage.completionTokens} total=${usage.totalTokens}`);
+        const retryTag = attempts > 1 ? ` retries=${attempts - 1}` : '';
+        console.log(`[gcli] model=${model}${keyTag}${retryTag} tokens: prompt=${usage.promptTokens} completion=${usage.completionTokens} total=${usage.totalTokens}`);
     }
 
     return { text, usage, model: data.model || model };

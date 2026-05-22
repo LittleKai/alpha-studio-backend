@@ -17,7 +17,10 @@ const TEMPLATE_CATEGORIES = new Set([
     'base-cabinet', 'wall-cabinet', 'tall-cabinet', 'drawer-base', 'corner-cabinet', 'island', 'kitchen-other'
 ]);
 const ID_REGEX = /^[a-z][a-z0-9-]{1,63}$/;
-const REQUIRED_VIEWS = ['frontSvg', 'sideSvg', 'planSvg', 'isoBoxes'];
+const ALLOWED_VIEWS = ['boxes', 'isoBoxes'];
+const SVG_VIEWS = ['frontSvg', 'sideSvg', 'planSvg'];
+const ALLOWED_PRIMITIVE_TYPES = new Set(['box', 'roundedBox', 'cylinder']);
+const ALLOWED_CYLINDER_AXES = new Set(['x', 'y', 'z']);
 
 function validateExpression(value) {
     if (typeof value !== 'string') return true;
@@ -41,21 +44,33 @@ function walkShapeValues(shape, visitor) {
 
 function validateDsl(dsl) {
     if (!dsl || typeof dsl !== 'object' || Array.isArray(dsl)) {
-        return { valid: false, message: 'DSL phải là object.' };
+        return { valid: false, message: 'DSL must be an object.' };
     }
-    for (const view of REQUIRED_VIEWS) {
+    for (const view of SVG_VIEWS) {
+        if (dsl[view] !== undefined) {
+            return { valid: false, message: "SVG view fields no longer supported. Use 'boxes' array only." };
+        }
+    }
+    for (const view of ALLOWED_VIEWS) {
         const list = dsl[view];
         if (list === undefined) continue;
         if (!Array.isArray(list)) {
-            return { valid: false, message: `${view} phải là mảng.` };
+            return { valid: false, message: `${view} must be an array.` };
         }
         if (list.length > 200) {
-            return { valid: false, message: `${view} tối đa 200 shape.` };
+            return { valid: false, message: `${view} max 200 shapes.` };
         }
         for (let i = 0; i < list.length; i += 1) {
             const shape = list[i];
             if (!shape || typeof shape !== 'object' || Array.isArray(shape)) {
-                return { valid: false, message: `${view}[${i}] phải là object.` };
+                return { valid: false, message: `${view}[${i}] must be an object.` };
+            }
+            const primitiveType = shape.type || 'box';
+            if (!ALLOWED_PRIMITIVE_TYPES.has(primitiveType)) {
+                return { valid: false, message: `Unsupported primitive type in ${view}[${i}]: ${primitiveType}` };
+            }
+            if (primitiveType === 'cylinder' && shape.axis !== undefined && !ALLOWED_CYLINDER_AXES.has(shape.axis)) {
+                return { valid: false, message: `Unsupported cylinder axis in ${view}[${i}]: ${shape.axis}` };
             }
             let badExpr = null;
             walkShapeValues(shape, (value) => {
@@ -63,29 +78,29 @@ function validateDsl(dsl) {
                 if (value.includes('{{') && !validateExpression(value)) badExpr = value;
             });
             if (badExpr) {
-                return { valid: false, message: `Biểu thức không hợp lệ trong ${view}[${i}]: ${badExpr.slice(0, 80)}` };
+                return { valid: false, message: `Invalid expression in ${view}[${i}]: ${badExpr.slice(0, 80)}` };
             }
         }
     }
-    if (!REQUIRED_VIEWS.some((view) => Array.isArray(dsl[view]) && dsl[view].length > 0)) {
-        return { valid: false, message: 'Phải có ít nhất một view (frontSvg/sideSvg/planSvg/isoBoxes).' };
+    if (!ALLOWED_VIEWS.some((view) => Array.isArray(dsl[view]) && dsl[view].length > 0)) {
+        return { valid: false, message: "At least one non-empty 'boxes' array is required." };
     }
     return { valid: true };
 }
 
 function validateParams(params) {
     if (!params || typeof params !== 'object' || Array.isArray(params)) {
-        return { valid: false, message: 'params phải là object.' };
+        return { valid: false, message: 'params must be an object.' };
     }
     const keys = Object.keys(params);
-    if (keys.length > 30) return { valid: false, message: 'params tối đa 30 trường.' };
+    if (keys.length > 30) return { valid: false, message: 'params max 30 fields.' };
     for (const key of keys) {
         const def = params[key];
         if (!def || typeof def !== 'object') continue;
-        if (def.min !== undefined && !Number.isFinite(def.min)) return { valid: false, message: `params.${key}.min phải là số.` };
-        if (def.max !== undefined && !Number.isFinite(def.max)) return { valid: false, message: `params.${key}.max phải là số.` };
+        if (def.min !== undefined && !Number.isFinite(def.min)) return { valid: false, message: `params.${key}.min must be a number.` };
+        if (def.max !== undefined && !Number.isFinite(def.max)) return { valid: false, message: `params.${key}.max must be a number.` };
         if (def.default !== undefined && !Number.isFinite(def.default) && typeof def.default !== 'string') {
-            return { valid: false, message: `params.${key}.default không hợp lệ.` };
+            return { valid: false, message: `params.${key}.default is invalid.` };
         }
     }
     return { valid: true };
@@ -93,16 +108,16 @@ function validateParams(params) {
 
 export function validateTemplateStructure(tpl) {
     if (!tpl || typeof tpl !== 'object' || Array.isArray(tpl)) {
-        return { valid: false, message: 'Template phải là object.' };
+        return { valid: false, message: 'Template must be an object.' };
     }
     if (typeof tpl.id !== 'string' || !ID_REGEX.test(tpl.id)) {
-        return { valid: false, message: 'Template id thiếu hoặc không đúng kebab-case.' };
+        return { valid: false, message: 'Template id is missing or not kebab-case.' };
     }
     if (!tpl.category || !TEMPLATE_CATEGORIES.has(tpl.category)) {
-        return { valid: false, message: `category không hợp lệ. Cho phép: ${[...TEMPLATE_CATEGORIES].join(', ')}.` };
+        return { valid: false, message: `Invalid category. Allowed: ${[...TEMPLATE_CATEGORIES].join(', ')}.` };
     }
     if (tpl.tags !== undefined && !Array.isArray(tpl.tags)) {
-        return { valid: false, message: 'tags phải là mảng chuỗi.' };
+        return { valid: false, message: 'tags must be an array of strings.' };
     }
     const paramsCheck = validateParams(tpl.params || {});
     if (!paramsCheck.valid) return paramsCheck;
@@ -112,12 +127,9 @@ export function validateTemplateStructure(tpl) {
 
 export function extractDsl(tpl) {
     if (!tpl || typeof tpl !== 'object') return {};
-    if (tpl.dsl && typeof tpl.dsl === 'object' && !Array.isArray(tpl.dsl)) return tpl.dsl;
+    const source = tpl.dsl && typeof tpl.dsl === 'object' && !Array.isArray(tpl.dsl) ? tpl.dsl : tpl;
     return {
-        frontSvg: Array.isArray(tpl.frontSvg) ? tpl.frontSvg : [],
-        sideSvg: Array.isArray(tpl.sideSvg) ? tpl.sideSvg : [],
-        planSvg: Array.isArray(tpl.planSvg) ? tpl.planSvg : [],
-        isoBoxes: Array.isArray(tpl.isoBoxes) ? tpl.isoBoxes : []
+        boxes: Array.isArray(source.boxes) ? source.boxes : (Array.isArray(source.isoBoxes) ? source.isoBoxes : [])
     };
 }
 

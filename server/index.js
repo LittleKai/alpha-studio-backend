@@ -47,8 +47,12 @@ configureBucketCors();
 
 // CORS configuration
 const allowedOrigins = [
+    'null',
     'http://localhost:3000',
     'http://localhost:5173',
+    'http://localhost:3002',
+    'http://127.0.0.1:3001',
+    'http://127.0.0.1:3002',
     'http://127.0.0.1:5173',
     'https://alphastudio.vercel.app'
 ];
@@ -65,10 +69,11 @@ console.log('Allowed CORS origins:', allowedOrigins);
 
 app.use(cors({
     origin: function(origin, callback) {
-        // Allow requests with no origin (mobile apps, curl, etc.)
+        // Allow requests with no origin (mobile apps, curl, etc.) and
+        // Origin: null from local file:// workshop pages.
         if (!origin) return callback(null, true);
 
-        if (allowedOrigins.includes(origin)) {
+        if (origin === 'null' || allowedOrigins.includes(origin)) {
             callback(null, true);
         } else {
             console.warn('CORS blocked origin:', origin);

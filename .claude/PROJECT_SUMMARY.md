@@ -1,11 +1,20 @@
 # Project Summary
 
+**Phase 15 Follow-up (2026-05-22):** Interior template validation now whitelists curved `boxes[]` primitives: regular box, `roundedBox`, and `cylinder`. Unknown primitive types are rejected at import/edit time. Seed script was rerun and MongoDB now includes `cab-base-rounded-end@1` as a `seed` template with rounded/cylindrical geometry.
+
+**Phase 15 Follow-up (2026-05-21):** Interior agent tools now fill known template `width`/`height`/`depth` defaults before preview/commit, preventing tpl modules such as kitchen base/wall/corner cabinets from inheriting the whole model height/depth when the AI omits dimensions. Default Interior project Vietnamese strings were corrected from mojibake to UTF-8.
+
+**Phase 14 Update (2026-05-20):** Interior template validation now accepts `boxes`/legacy `isoBoxes` only and rejects `frontSvg`/`sideSvg`/`planSvg` with a clear error. The interior agent prompt and `template.create` tests now document and verify boxes-only templates.
+
+**Phase 14 Update (2026-05-20):** Added direct interior template import endpoint for the static Interior Component Workshop. `POST /api/interior/templates/import` accepts selected template DSL objects, validates them with `validateTemplateStructure`, creates a new `InteriorTemplate` version per template, and imports as `approved` for admin/mod users or `pending` for regular users.
+If selected templates already match the latest library version, the endpoint returns success with `skipped` instead of failing with HTTP 400.
+
 **Phase 13 Update (2026-05-20):** Interior Agent Harness added. Generic extractable runner code lives in `server/agent-runner/` (`ToolRegistry`, `SkillLoader`, SSE helpers, JSON protocol parser, loop runner). Interior domain tools live in `server/tools/interior/` with 15 registered tools. New `POST /api/interior/projects/:id/agent` streams SSE steps and commits through `model.commit`; `InteriorAgentLog` stores step logs with 30-day TTL. Agent flow costs 2 credits on commit and coexists with legacy `/chat`.
 
 **Phase 12 Update (2026-05-19):** Backend now hosts the self-extending interior template library. New model `InteriorTemplate` (status: seed/pending/approved/deprecated). New endpoints: `GET /api/interior/templates` (engine catalog load, returns seed+approved deduped by highest version), `POST /api/interior/templates` (user commits a project inline template to pending), and `/api/admin/interior-templates` CRUD (list/getOne/approve/reject/edit/deprecate). `/api/interior/projects/:id/chat` now extracts AI-emitted `tplNew` blocks into `modelJson.inlineTemplates[id]`, replaces with `tpl: id`, and surfaces created ids in `data.meta.newInlineTemplates`. DSL validation lives in `server/utils/templateValidator.js` (AST whitelist mirror of the engine `expression.js`). Seed script `scripts/seed-interior-templates.mjs` upserts the 7 built-in templates from `tools/interior-design-engine/src/templates/` (idempotent).
 
 **Phase 11 Update (2026-05-19):** `server/routes/interior.js` now validates the compact template contract: top-level `palette`, optional `inlineTemplates`, and module/detail items using either legacy `width/height/depth` boxes or `tpl/style` template references. The default project model uses `sliding-2door` with `palette: "wood-oak"`, and `/api/interior` prompts include the built-in template catalog while no longer promoting CSG hints.
-**Last Updated:** 2026-05-18 (Interior Phase 10 nhóm A prompt/template fixes)
+**Last Updated:** 2026-05-22 (Interior curved template primitives)
 **Updated By:** Claude Code
 
 ---
@@ -242,6 +251,7 @@ alpha-studio-backend/
 │   ├── POST   /projects/:id/rollback       # Move currentVersionIndex to target version (auth, owner)
 │   ├── POST   /analyze-image               # Image → design model JSON (auth + quota)
 │   ├── POST   /generate-render             # 3D view + style prompt → render placeholder (auth + quota)
+│   ├── POST   /workshop/components/delete  # Local/dev Workshop source JSON delete + bundle regen (localhost only)
 │   └── GET    /admin/logs                  # List InteriorAiLog (auth + adminOnly); filters projectId/userId/stage/status
 ├── /workflow
 │   │   ├── GET    /projects          # List user's projects (auth)
@@ -361,8 +371,10 @@ alpha-studio-backend/
 | AI Consultation Chat | ✅ Complete | models/ChatMessage.js, routes/chat.js, routes/settings.js, utils/aiProvider.js, server/context/alpha-studio-bot | `POST /chat/send` saves user msg then routes via admin setting `useOpenClawForChat`: OpenClaw (`OPENCLAW_URL`, session memory) by default, or direct gcli (`GCLI_DIRECT_URL`) with bundled Alpha Studio workspace context and up to 3 previous MongoDB chat messages. `GET /chat/history` display history; `DELETE /chat/history` clears DB history. |
 | VocabFlip Integration | ✅ Complete | models/Vocab.js, routes/vocab.js | MongoDB-backed public decks, flashcards, ratings, import links, profile, feedback, sync notification stubs, and `POST /api/vocab/spend`; VocabFlip media upload uses existing B2 `/api/upload/presign` flow |
 | Interior Design AI API | ✅ Complete | models/InteriorProject.js, routes/interior.js, utils/aiProvider.js, routes/chat.js | Auth-gated `/api/interior` project CRUD, AI chat, version persistence, rollback, manual cabinetModel validation, 1-credit charge per valid AI response, admin/mod bypass. Reuses `useOpenClawForChat` provider toggle shared with `/api/chat/send`. |
-| Interior AI Prompt v2 + 2-step | ✅ Complete | routes/interior.js, models/User.js, models/InteriorProject.js, routes/auth.js | (A) Prompt v2: few-shot, domain hints (kích thước/vật liệu chuẩn VN), Phase 10 strict dimension anchor, `/chat` `runs[]` rule for L/U/island/parallel layouts, z-axis wall-depth convention, forced reply format "Quan sát ảnh/Hiểu yêu cầu/Đã áp dụng", lower askForInfo threshold. (B) Opt-in `User.preferences.interiorTwoStepConfirm` (set via `PUT /auth/profile`). When ON, `POST /interior/projects/:id/chat` accepts `stage='proposal'\|'apply'`: proposal returns plain-text analysis (1 credit, no version), apply consumes `proposalText` as context (1 credit, creates version). Total 2 credit/lần khi bật. |
+| Interior AI Prompt v2 + 2-step | ✅ Complete | routes/interior.js, models/User.js, models/InteriorProject.js, routes/auth.js, utils/templateValidator.js | (A) Prompt v2: few-shot, domain hints (kích thước/vật liệu chuẩn VN), Phase 10 strict dimension anchor, `/chat` `runs[]` rule for L/U/island/parallel layouts, z-axis wall-depth convention, forced reply format "Quan sát ảnh/Hiểu yêu cầu/Đã áp dụng", lower askForInfo threshold. Phase 14 template instructions require `boxes` only for new `tplNew` payloads, while validator accepts legacy `isoBoxes` and rejects SVG view fields. (B) Opt-in `User.preferences.interiorTwoStepConfirm` (set via `PUT /auth/profile`). When ON, `POST /interior/projects/:id/chat` accepts `stage='proposal'\|'apply'`: proposal returns plain-text analysis (1 credit, no version), apply consumes `proposalText` as context (1 credit, creates version). Total 2 credit/lần khi bật. |
 | Interior Image-to-Design (Phase 4+) | ✅ Complete | routes/interior.js (+/analyze-image, +/generate-render), middleware/interiorQuota.js, models/{InteriorAnalysis,InteriorRender,InteriorQuota}.js, routes/admin.js (orphan scan) | `POST /interior/analyze-image` (auth + 5/24h quota): JSON body `{imageUrl, hints, modelOverride}`, sha256 cache (24h TTL), Gemini Flash 3 default → Pro 3.1 escalate, 2-attempt JSON repair loop, returns `{model, suggestedModel, meta}`. Prompt teaches Phase 8 `runs[]` for L/U/island/galley layouts and Phase 7 `csgHints[]`; validator accepts either legacy `modules[]` or new `runs[]`, not both. Default project model now uses an opaque solid panel template instead of transparent zone modules. |
+| Interior Component Workshop Cleanup | ✅ Complete | routes/interior.js, tools/interior-component-workshop/component-library.js | `POST /api/interior/workshop/components/delete` deletes selected local Workshop `components/<id>.json` files and regenerates `data/template-bundle.js`. It is enabled only in local/dev (or `INTERIOR_WORKSHOP_DELETE_ENABLED=true`) and only accepts loopback requests from no origin, `Origin: null`, localhost, or 127.0.0.1; no Bearer token is required for this local cleanup endpoint. |
+| Interior Workshop File-Origin CORS | ✅ Complete | server/index.js | `Origin: null` from `file://` workshop pages is now treated as an allowed CORS origin instead of logging `CORS blocked origin: null`. Local workshop origins on localhost/127.0.0.1 are also explicitly allowed. |
 | Interior AI Log Viewer | ✅ Complete | models/InteriorAiLog.js, routes/interior.js, scripts/dump-interior-log.mjs | Every `/api/interior/projects/:id/chat` call (both `proposal` and `apply` stages) records raw prompt, ref images, raw AI response, parsed reply, latency, usage, status (`ok`/`parse-failed`/`validation-failed`/`upstream-error`), errorMessage. TTL 30 days. `GET /api/interior/admin/logs?projectId=&userId=&stage=&status=&limit=` accepts EITHER (auth + adminOnly) OR header `x-reviewer-token: $INTERIOR_LOG_REVIEWER_TOKEN` (reviewer bypass for ops/debug). Direct dump: `node scripts/dump-interior-log.mjs <projectId>`. |
 
 ---
@@ -432,6 +444,27 @@ GCLI_DIRECT_MODEL=gemini-2.5-flash
 ---
 
 ## 7. Recent Changes (Last 3 Sessions)
+
+1. **2026-05-22** - Interior curved template primitive validation
+   - **Validator** `server/utils/templateValidator.js`: Accepts only regular boxes, `roundedBox`, and `cylinder` inside `boxes[]`; rejects unsupported primitive types and invalid cylinder axes before import/admin edit.
+   - **Tests** `server/utils/__tests__/templateValidator.test.mjs`: Covers accepted curved primitives and rejection of freeform path-style primitives.
+   - **Seed library**: `npm run seed:interior-templates` upserted 14 templates, including `cab-base-rounded-end@1` with `roundedBox` body/front and `cylinder` knob.
+
+1. **2026-05-21** - Interior agent dimension defaults + UTF-8 text fix
+   - **Agent tools** `server/tools/interior/common.js`, `module-add.js`, `module-update.js`, `model-commit.js`: Known template modules now auto-fill missing `width`/`height`/`depth` from seed template defaults. This prevents `tpl` kitchen base/wall/corner cabinets from rendering as full-height/full-depth blocks when AI omits dimensions.
+   - **Seed script** `scripts/seed-interior-templates.mjs`: Writes boxes-only template DSL from `tpl.boxes` so reseeding preserves the Phase 14 component library contract.
+   - **Tests** `server/tools/interior/__tests__/tools.test.mjs`: Added coverage for base cabinet defaults, wall cabinet missing-depth fill, and commit-time default fill.
+   - **Interior route** `server/routes/interior.js`: Corrected default project title/specs/name/reply Vietnamese strings from mojibake to valid UTF-8.
+   - **Data repair**: Project `6a0ef1d40fb2810566f8dbf8` received a new corrected version at index 2; old versions remain intact.
+
+1. **2026-05-21** - Interior Workshop backend cleanup endpoint
+   - **Interior route** `server/routes/interior.js`: Added `POST /api/interior/workshop/components/delete` for local/dev Workshop cleanup. It validates kebab-case IDs, deletes only files inside `tools/interior-component-workshop/components`, regenerates `data/template-bundle.js`, and accepts loopback/null-origin/localhost requests without Bearer token.
+   - **Workshop UI** `tools/interior-component-workshop/component-library.js`: Import/delete flows now call the backend cleanup endpoint instead of a separate helper server.
+   - **Verification**: `node --check` passes for backend `server/routes/interior.js` and updated Workshop scripts.
+
+1. **2026-05-22** - Interior Workshop file-origin CORS
+   - **Server CORS** `server/index.js`: Added explicit allow handling for `Origin: null` from `file://` Workshop pages plus localhost/127.0.0.1 Workshop origins. This removes misleading `CORS blocked origin: null` warnings while preserving the existing permissive dev behavior.
+   - **Verification**: `node --check server/index.js` passes.
 
 1. **2026-05-18** - Interior Phase 8 runs prompt
    - **Analyze prompt** `server/routes/interior.js`: Added `runs[]` instructions for L/U/island/galley layouts with `{id, origin:{x,z}, direction, modules}`.

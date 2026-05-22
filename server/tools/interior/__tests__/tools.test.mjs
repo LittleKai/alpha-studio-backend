@@ -12,15 +12,34 @@ test('module.add validates and adds a module', async () => {
     const result = await moduleAdd.handler({ runId: 'main', x: 0, y: 0, z: 0, tpl: 'base-cabinet-2door' }, ctx);
     assert.equal(result.ok, true);
     assert.equal(ctx.draftModel.runs[0].modules.length, 1);
+    assert.equal(result.data.module.width, 80);
+    assert.equal(result.data.module.height, 86);
+    assert.equal(result.data.module.depth, 60);
+});
+
+test('module.add preserves supplied dimensions and fills missing template defaults', async () => {
+    const ctx = { draftModel: { width: 500, height: 260, depth: 60, runs: [{ id: 'main', origin: { x: 0, z: 0 }, direction: 'east', modules: [] }] } };
+    const result = await moduleAdd.handler({ runId: 'main', x: 0, y: 145, z: 25, width: 100, height: 95, tpl: 'wall-cabinet-2door' }, ctx);
+    assert.equal(result.ok, true);
+    assert.equal(result.data.module.width, 100);
+    assert.equal(result.data.module.height, 95);
+    assert.equal(result.data.module.depth, 35);
 });
 
 test('template.create stores valid DSL and rejects bad DSL', async () => {
     const ctx = { draftModel: { inlineTemplates: {} } };
     const bad = await templateCreate.handler({ id: 'bad-template', category: 'base-cabinet', params: {}, frontSvg: 'bad' }, ctx);
     assert.equal(bad.ok, false);
-    const good = await templateCreate.handler({ id: 'good-template', category: 'base-cabinet', params: {}, frontSvg: [{ type: 'rect', x: 0, y: 0, w: 1, h: 1 }] }, ctx);
+    assert.match(bad.error, /SVG view fields no longer supported/);
+    const good = await templateCreate.handler({
+        id: 'good-template',
+        category: 'base-cabinet',
+        params: {},
+        boxes: [{ x: 0, y: 0, z: 0, w: 1, h: 1, d: 1, faces: { front: '$woodFront' } }]
+    }, ctx);
     assert.equal(good.ok, true);
     assert.ok(ctx.draftModel.inlineTemplates['good-template']);
+    assert.deepEqual(ctx.draftModel.inlineTemplates['good-template'].boxes, [{ x: 0, y: 0, z: 0, w: 1, h: 1, d: 1, faces: { front: '$woodFront' } }]);
 });
 
 test('model.commit pushes valid version and rejects invalid model', async () => {
@@ -37,6 +56,9 @@ test('model.commit pushes valid version and rejects invalid model', async () => 
     const result = await modelCommit.handler({ reply: 'done' }, validCtx);
     assert.equal(result.ok, true);
     assert.equal(project.currentVersionIndex, 1);
+    assert.equal(project.versions[1].modelJson.runs[0].modules[0].width, 80);
+    assert.equal(project.versions[1].modelJson.runs[0].modules[0].height, 86);
+    assert.equal(project.versions[1].modelJson.runs[0].modules[0].depth, 60);
     const invalid = await modelCommit.handler({ reply: 'bad' }, { project, draftModel: { width: 0 } });
     assert.equal(invalid.ok, false);
 });

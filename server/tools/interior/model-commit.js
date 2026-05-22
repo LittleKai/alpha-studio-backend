@@ -1,5 +1,5 @@
 import { validateCabinetModel } from '../../utils/cabinetModelValidator.js';
-import { ensureDraft, invalid, ok } from './common.js';
+import { applyTemplateDefaultsToModel, invalid, ok } from './common.js';
 
 export default {
     name: 'model.commit',
@@ -7,7 +7,7 @@ export default {
     terminal: true,
     validateArgs: (args) => (typeof args.reply === 'string' && args.reply.trim() ? ok() : invalid('reply is required.')),
     handler: async (args, ctx) => {
-        ensureDraft(ctx.draftModel);
+        applyTemplateDefaultsToModel(ctx.draftModel);
         const validation = validateCabinetModel(ctx.draftModel);
         if (!validation.valid) return { ok: false, error: validation.message };
         const project = ctx.project;

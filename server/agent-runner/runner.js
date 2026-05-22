@@ -12,6 +12,8 @@ function errorUserMessage(message) {
 
 export async function runAgentLoop({
     initialPrompt,
+    initialMessages,
+    initialStepIndex = 0,
     systemPrompt,
     registry,
     ctx,
@@ -22,23 +24,37 @@ export async function runAgentLoop({
     onDone,
     onError
 }) {
-    const messages = [{ role: 'user', content: initialPrompt }];
+    // Resume support: when initialMessages is provided, the runner continues
+    // a previous conversation instead of seeding from initialPrompt. This is
+    // how /agent/runs/:runId/resume picks up after a pause.
+    const messages = Array.isArray(initialMessages) && initialMessages.length > 0
+        ? [...initialMessages]
+        : [{ role: 'user', content: initialPrompt }];
     let parseRetries = 0;
-    for (let stepIndex = 0; stepIndex < maxSteps; stepIndex += 1) {
+    for (let stepIndex = initialStepIndex; stepIndex < initialStepIndex + maxSteps; stepIndex += 1) {
         if (ctx?.abortSignal?.aborted) {
-            const error = { message: 'Agent loop aborted by client.' };
-            await onError?.(error);
-            return { ok: false, status: 'aborted', error, messages };
+            // Use a distinct status from AI-initiated 'aborted' (model.abort tool)
+            // so the route can mark client-side aborts as resumable 'paused'
+            // instead of terminal. Skip onError — same reasoning as maxSteps:
+            // throwing on the consumer side would block the paused event.
+            return { ok: false, status: 'interrupted', error: { message: 'Agent loop aborted by client.' }, messages };
         }
+        // Measure total step duration from BEFORE the AI call so latencyMs
+        // reflects the real wait the user experiences (gcli round-trip 10–30s
+        // dominates the local tool handler time which is sub-millisecond).
+        const stepStartedAt = Date.now();
         let aiText = '';
         try {
             const response = await aiCall({ messages, systemPrompt });
             aiText = typeof response === 'string' ? response : (response?.text || '');
             if (response?.usage) ctx.totalTokens = (ctx.totalTokens || 0) + (response.usage.totalTokens || response.usage.total_tokens || 0);
         } catch (error) {
-            const payload = { message: error.message || 'AI call failed.' };
-            await onError?.(payload);
-            return { ok: false, status: 'error', error: payload, messages };
+            // Don't fire onError here: frontend treats 'error' SSE event as fatal
+            // (throws + exits stream). Upstream gcli errors (524, network) are
+            // transient — surface them via the route's 'paused' event instead so
+            // the resume banner appears with the error reason. Run state is
+            // already persisted incrementally.
+            return { ok: false, status: 'error', error: { message: error.message || 'AI call failed.' }, messages };
         }
 
         const parsed = parseAiTurn(aiText);
@@ -48,9 +64,8 @@ export async function runAgentLoop({
             messages.push({ role: 'assistant', content: aiText || '' });
             messages.push({ role: 'user', content: errorUserMessage(message) });
             if (parseRetries > 1) {
-                const payload = { message };
-                await onError?.(payload);
-                return { ok: false, status: 'error', error: payload, messages };
+                // Same rationale: surface as resumable rather than killing the stream.
+                return { ok: false, status: 'error', error: { message }, messages };
             }
             stepIndex -= 1;
             continue;
@@ -72,14 +87,15 @@ export async function runAgentLoop({
         }
 
         await onStep?.(stepIndex, { thought, tool: toolName, args });
-        const startedAt = Date.now();
         let result;
         try {
             result = normalizeResult(await tool.handler(args, ctx));
         } catch (error) {
             result = { ok: false, error: error.message || 'Tool handler crashed.' };
         }
-        const latencyMs = Date.now() - startedAt;
+        // Total step latency = AI call + parse + dispatch + handler. The AI
+        // round-trip dominates this; tool handlers are typically sub-ms.
+        const latencyMs = Date.now() - stepStartedAt;
         messages.push({ role: 'user', content: JSON.stringify(result) });
         await onResult?.(stepIndex, result, latencyMs);
         if (tool.terminal && result.ok) {
@@ -87,7 +103,11 @@ export async function runAgentLoop({
             return { ok: true, status: toolName === 'model.abort' ? 'aborted' : 'committed', data: result.data || {}, messages };
         }
     }
-    const payload = { message: 'Max steps exceeded' };
-    await onError?.(payload);
-    return { ok: false, status: 'maxSteps', error: payload, messages };
+    // maxSteps is a PAUSE point, not an error — the route handler will emit a
+    // 'paused' SSE event downstream. We deliberately skip onError here because
+    // the frontend consumer treats `error` events as fatal (it throws + exits
+    // the stream loop), which would prevent the subsequent 'paused' event from
+    // ever reaching the UI. Only true runtime failures (parse retries, aiCall
+    // throws, abort) call onError above.
+    return { ok: false, status: 'maxSteps', error: { message: 'Max steps exceeded' }, messages };
 }
