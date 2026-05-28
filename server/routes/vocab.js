@@ -10,6 +10,8 @@ import {
     VocabProfile,
     VocabPublicDeck,
     VocabPublicFlashcard,
+    VocabPrivateDeck,
+    VocabPrivateFlashcard,
 } from '../models/Vocab.js';
 
 const router = express.Router();
@@ -142,6 +144,61 @@ function serializeFeedback(item) {
         app_version: f.appVersion,
         platform: f.platform,
         created_at: toDate(f.createdAt),
+    };
+}
+
+function serializePrivateDeck(deck) {
+    const d = deck.toObject ? deck.toObject() : deck;
+    return {
+        id: d.deckId,
+        name: d.name,
+        description: d.description,
+        source_language: d.sourceLanguage,
+        target_language: d.targetLanguage,
+        created_at: toDate(d.createdAt),
+        updated_at: toDate(d.updatedAt),
+        linked_public_deck_id: d.linkedPublicDeckId,
+        linked_version: d.linkedVersion,
+        is_published: d.isPublished ? 1 : 0,
+        published_deck_id: d.publishedDeckId,
+        was_imported: d.wasImported ? 1 : 0,
+        show_back_first: d.showBackFirst ? 1 : 0,
+        front_fields: d.frontFields,
+        back_fields: d.backFields,
+        image_display_mode: d.imageDisplayMode,
+        image_path: d.imagePath,
+        auto_play_tts_on_flip: d.autoPlayTtsOnFlip ? 1 : 0,
+        category: d.category,
+        tags: d.tags && d.tags.length > 0 ? d.tags.join(',') : null,
+        card_count: d.cardCount || 0,
+        new_count: d.newCount || 0,
+        learning_count: d.learningCount || 0,
+        review_count: d.reviewCount || 0,
+    };
+}
+
+function serializePrivateFlashcard(card) {
+    const c = card.toObject ? card.toObject() : card;
+    return {
+        id: c.cardId,
+        deck_id: c.deckId,
+        front: c.front,
+        front_phonetic: c.frontPhonetic,
+        back: c.back,
+        example: c.example,
+        notes: c.notes,
+        image_url: c.imageUrl,
+        front_image_url: c.frontImageUrl,
+        back_image_url: c.backImageUrl,
+        share_image: c.shareImage ? 1 : 0,
+        tags: c.tags && c.tags.length > 0 ? c.tags.join(',') : '',
+        created_at: toDate(c.createdAt),
+        updated_at: toDate(c.updatedAt),
+        easiness_factor: c.easinessFactor || 2.5,
+        interval: c.interval || 0,
+        repetitions: c.repetitions || 0,
+        next_review_date: toDate(c.nextReviewDate),
+        last_review_date: toDate(c.lastReviewDate),
     };
 }
 
@@ -531,6 +588,501 @@ router.post('/spend', authMiddleware, async (req, res) => {
             success: false,
             message: 'Lỗi server khi trừ xu VocabFlip'
         });
+    }
+});
+
+/**
+ * =========================================================================
+ * VocabFlip Private Storage & CRUD Routes (Web client integration)
+ * =========================================================================
+ */
+
+router.get('/my-decks', authMiddleware, async (req, res) => {
+    try {
+        const uId = userId(req);
+        const now = new Date();
+        const counts = await VocabPrivateFlashcard.aggregate([
+            { $match: { userId: new mongoose.Types.ObjectId(uId.toString()) } },
+            {
+                $group: {
+                    _id: "$deckId",
+                    total: { $sum: 1 },
+                    newCount: {
+                        $sum: { $cond: [{ $eq: ["$repetitions", 0] }, 1, 0] }
+                    },
+                    learningCount: {
+                        $sum: {
+                            $cond: [
+                                {
+                                    $and: [
+                                        { $gt: ["$repetitions", 0] },
+                                        { $lt: ["$repetitions", 3] }
+                                    ]
+                                },
+                                1,
+                                0
+                            ]
+                        }
+                    },
+                    reviewCount: {
+                        $sum: {
+                            $cond: [
+                                {
+                                    $and: [
+                                        { $gte: ["$repetitions", 3] },
+                                        {
+                                            $or: [
+                                                { $eq: ["$nextReviewDate", null] },
+                                                { $lte: ["$nextReviewDate", now] }
+                                            ]
+                                        }
+                                    ]
+                                },
+                                1,
+                                0
+                            ]
+                        }
+                    }
+                }
+            }
+        ]);
+
+        const countsMap = {};
+        counts.forEach(c => {
+            countsMap[c._id] = {
+                total: c.total || 0,
+                newCount: c.newCount || 0,
+                learning: c.learningCount || 0,
+                review: c.reviewCount || 0
+            };
+        });
+
+        const decks = await VocabPrivateDeck.find({ userId: uId }).sort({ createdAt: 1 });
+        const serialized = decks.map(d => {
+            const c = countsMap[d.deckId] || { total: 0, newCount: 0, learning: 0, review: 0 };
+            return serializePrivateDeck({
+                ...d.toObject(),
+                cardCount: c.total,
+                newCount: c.newCount,
+                learningCount: c.learning,
+                reviewCount: c.review
+            });
+        });
+
+        return ok(res, serialized);
+    } catch (error) {
+        console.error('Get private decks error:', error);
+        return res.status(500).json({ success: false, message: 'Cannot load decks' });
+    }
+});
+
+router.get('/my-decks/cards/search', authMiddleware, async (req, res) => {
+    try {
+        const uId = userId(req);
+        const { q, limit = 50 } = req.query;
+        if (!q) {
+            return res.status(400).json({ success: false, message: 'Search query q is required' });
+        }
+
+        const regex = new RegExp(String(q).replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i');
+        const cards = await VocabPrivateFlashcard.find({
+            userId: uId,
+            $or: [
+                { front: regex },
+                { back: regex },
+                { example: regex },
+                { notes: regex },
+                { tags: regex }
+            ]
+        }).limit(Math.min(Number(limit) || 50, 100));
+
+        return ok(res, cards.map(serializePrivateFlashcard));
+    } catch (error) {
+        console.error('Search private cards error:', error);
+        return res.status(500).json({ success: false, message: 'Cannot search cards' });
+    }
+});
+
+router.get('/my-decks/cards/:cardId', authMiddleware, async (req, res) => {
+    try {
+        const uId = userId(req);
+        const card = await VocabPrivateFlashcard.findOne({ cardId: req.params.cardId, userId: uId });
+        if (!card) {
+            return res.status(404).json({ success: false, message: 'Card not found' });
+        }
+        return ok(res, serializePrivateFlashcard(card));
+    } catch (error) {
+        console.error('Get private card error:', error);
+        return res.status(500).json({ success: false, message: 'Cannot load card' });
+    }
+});
+
+router.get('/my-decks/:deckId', authMiddleware, async (req, res) => {
+    try {
+        const uId = userId(req);
+        const deck = await VocabPrivateDeck.findOne({ deckId: req.params.deckId, userId: uId });
+        if (!deck) {
+            return res.status(404).json({ success: false, message: 'Deck not found' });
+        }
+
+        const now = new Date();
+        const counts = await VocabPrivateFlashcard.aggregate([
+            { $match: { deckId: req.params.deckId, userId: new mongoose.Types.ObjectId(uId.toString()) } },
+            {
+                $group: {
+                    _id: "$deckId",
+                    total: { $sum: 1 },
+                    newCount: {
+                        $sum: { $cond: [{ $eq: ["$repetitions", 0] }, 1, 0] }
+                    },
+                    learningCount: {
+                        $sum: {
+                            $cond: [
+                                {
+                                    $and: [
+                                        { $gt: ["$repetitions", 0] },
+                                        { $lt: ["$repetitions", 3] }
+                                    ]
+                                },
+                                1,
+                                0
+                            ]
+                        }
+                    },
+                    reviewCount: {
+                        $sum: {
+                            $cond: [
+                                {
+                                    $and: [
+                                        { $gte: ["$repetitions", 3] },
+                                        {
+                                            $or: [
+                                                { $eq: ["$nextReviewDate", null] },
+                                                { $lte: ["$nextReviewDate", now] }
+                                            ]
+                                        }
+                                    ]
+                                },
+                                1,
+                                0
+                            ]
+                        }
+                    }
+                }
+            }
+        ]);
+
+        const c = counts[0] || { total: 0, newCount: 0, learningCount: 0, reviewCount: 0 };
+        const serialized = serializePrivateDeck({
+            ...deck.toObject(),
+            cardCount: c.total,
+            newCount: c.newCount,
+            learningCount: c.learningCount,
+            reviewCount: c.reviewCount
+        });
+
+        return ok(res, serialized);
+    } catch (error) {
+        console.error('Get private deck error:', error);
+        return res.status(500).json({ success: false, message: 'Cannot load deck' });
+    }
+});
+
+router.post('/my-decks', authMiddleware, async (req, res) => {
+    try {
+        const uId = userId(req);
+        const body = req.body || {};
+        const deckId = String(body.id || new mongoose.Types.ObjectId().toString()).toUpperCase();
+        
+        const existing = await VocabPrivateDeck.findOne({ deckId, userId: uId });
+        if (existing) {
+            return res.status(409).json({ success: false, message: 'Deck ID already exists for this user' });
+        }
+
+        const deck = await VocabPrivateDeck.create({
+            deckId,
+            userId: uId,
+            name: body.name,
+            description: body.description || null,
+            sourceLanguage: body.source_language || 'en',
+            targetLanguage: body.target_language || 'vi',
+            linkedPublicDeckId: body.linked_public_deck_id || null,
+            linkedVersion: body.linked_version || null,
+            isPublished: Boolean(body.is_published),
+            publishedDeckId: body.published_deck_id || null,
+            wasImported: Boolean(body.was_imported),
+            showBackFirst: Boolean(body.show_back_first),
+            frontFields: body.front_fields || null,
+            backFields: body.back_fields || null,
+            imageDisplayMode: body.image_display_mode || 'both',
+            imagePath: body.image_path || null,
+            autoPlayTtsOnFlip: body.auto_play_tts_on_flip !== false,
+            category: body.category || null,
+            tags: Array.isArray(body.tags) ? body.tags : (body.tags ? body.tags.split(',') : []),
+        });
+
+        return ok(res, serializePrivateDeck(deck), 'Deck created');
+    } catch (error) {
+        console.error('Create private deck error:', error);
+        return res.status(500).json({ success: false, message: 'Cannot create deck' });
+    }
+});
+
+router.put('/my-decks/:deckId', authMiddleware, async (req, res) => {
+    try {
+        const uId = userId(req);
+        const deck = await VocabPrivateDeck.findOne({ deckId: req.params.deckId, userId: uId });
+        if (!deck) {
+            return res.status(404).json({ success: false, message: 'Deck not found' });
+        }
+
+        const body = req.body || {};
+        if (body.name !== undefined) deck.name = body.name;
+        if (body.description !== undefined) deck.description = body.description;
+        if (body.source_language !== undefined) deck.sourceLanguage = body.source_language;
+        if (body.target_language !== undefined) deck.targetLanguage = body.target_language;
+        if (body.linked_public_deck_id !== undefined) deck.linkedPublicDeckId = body.linked_public_deck_id;
+        if (body.linked_version !== undefined) deck.linkedVersion = body.linked_version;
+        if (body.is_published !== undefined) deck.isPublished = Boolean(body.is_published);
+        if (body.published_deck_id !== undefined) deck.publishedDeckId = body.published_deck_id;
+        if (body.was_imported !== undefined) deck.wasImported = Boolean(body.was_imported);
+        if (body.show_back_first !== undefined) deck.showBackFirst = Boolean(body.show_back_first);
+        if (body.front_fields !== undefined) deck.frontFields = body.front_fields;
+        if (body.back_fields !== undefined) deck.backFields = body.back_fields;
+        if (body.image_display_mode !== undefined) deck.imageDisplayMode = body.image_display_mode;
+        if (body.image_path !== undefined) deck.imagePath = body.image_path;
+        if (body.auto_play_tts_on_flip !== undefined) deck.autoPlayTtsOnFlip = Boolean(body.auto_play_tts_on_flip);
+        if (body.category !== undefined) deck.category = body.category;
+        if (body.tags !== undefined) {
+            deck.tags = Array.isArray(body.tags) ? body.tags : (body.tags ? body.tags.split(',') : []);
+        }
+
+        await deck.save();
+        return ok(res, serializePrivateDeck(deck), 'Deck updated');
+    } catch (error) {
+        console.error('Update private deck error:', error);
+        return res.status(500).json({ success: false, message: 'Cannot update deck' });
+    }
+});
+
+router.delete('/my-decks/:deckId', authMiddleware, async (req, res) => {
+    try {
+        const uId = userId(req);
+        const deck = await VocabPrivateDeck.findOne({ deckId: req.params.deckId, userId: uId });
+        if (!deck) {
+            return res.status(404).json({ success: false, message: 'Deck not found' });
+        }
+
+        await VocabPrivateFlashcard.deleteMany({ deckId: req.params.deckId, userId: uId });
+        await VocabPrivateDeck.deleteOne({ _id: deck._id });
+
+        return ok(res, null, 'Deck deleted');
+    } catch (error) {
+        console.error('Delete private deck error:', error);
+        return res.status(500).json({ success: false, message: 'Cannot delete deck' });
+    }
+});
+
+router.get('/my-decks/:deckId/cards', authMiddleware, async (req, res) => {
+    try {
+        const uId = userId(req);
+        const deck = await VocabPrivateDeck.findOne({ deckId: req.params.deckId, userId: uId });
+        if (!deck) {
+            return res.status(404).json({ success: false, message: 'Deck not found' });
+        }
+
+        const cards = await VocabPrivateFlashcard.find({ deckId: req.params.deckId, userId: uId }).sort({ createdAt: 1 });
+        return ok(res, cards.map(serializePrivateFlashcard));
+    } catch (error) {
+        console.error('Get private cards error:', error);
+        return res.status(500).json({ success: false, message: 'Cannot load cards' });
+    }
+});
+
+router.get('/my-decks/:deckId/due-cards', authMiddleware, async (req, res) => {
+    try {
+        const uId = userId(req);
+        const deck = await VocabPrivateDeck.findOne({ deckId: req.params.deckId, userId: uId });
+        if (!deck) {
+            return res.status(404).json({ success: false, message: 'Deck not found' });
+        }
+
+        const now = new Date();
+        const cards = await VocabPrivateFlashcard.find({
+            deckId: req.params.deckId,
+            userId: uId,
+            $or: [
+                { repetitions: 0 },
+                { repetitions: { $gt: 0, $lt: 3 } },
+                { 
+                    repetitions: { $gte: 3 },
+                    $or: [
+                        { nextReviewDate: null },
+                        { nextReviewDate: { $lte: now } }
+                    ]
+                }
+            ]
+        });
+
+        return ok(res, cards.map(serializePrivateFlashcard));
+    } catch (error) {
+        console.error('Get private due cards error:', error);
+        return res.status(500).json({ success: false, message: 'Cannot load due cards' });
+    }
+});
+
+router.post('/my-decks/:deckId/cards', authMiddleware, async (req, res) => {
+    try {
+        const uId = userId(req);
+        const deck = await VocabPrivateDeck.findOne({ deckId: req.params.deckId, userId: uId });
+        if (!deck) {
+            return res.status(404).json({ success: false, message: 'Deck not found' });
+        }
+
+        const body = req.body || {};
+        const cardId = String(body.id || new mongoose.Types.ObjectId().toString());
+
+        const existing = await VocabPrivateFlashcard.findOne({ cardId, userId: uId });
+        if (existing) {
+            return res.status(409).json({ success: false, message: 'Card ID already exists for this user' });
+        }
+
+        const card = await VocabPrivateFlashcard.create({
+            cardId,
+            deckId: req.params.deckId,
+            userId: uId,
+            front: body.front,
+            frontPhonetic: body.front_phonetic || null,
+            back: body.back,
+            example: body.example || null,
+            notes: body.notes || null,
+            imageUrl: body.image_url || null,
+            frontImageUrl: body.front_image_url || null,
+            backImageUrl: body.back_image_url || null,
+            shareImage: body.share_image !== false,
+            tags: Array.isArray(body.tags) ? body.tags : (body.tags ? body.tags.split(',') : []),
+            easinessFactor: body.easiness_factor !== undefined ? Number(body.easiness_factor) : 2.5,
+            interval: body.interval !== undefined ? Number(body.interval) : 0,
+            repetitions: body.repetitions !== undefined ? Number(body.repetitions) : 0,
+            nextReviewDate: body.next_review_date ? new Date(body.next_review_date) : null,
+            lastReviewDate: body.last_review_date ? new Date(body.last_review_date) : null,
+        });
+
+        return ok(res, serializePrivateFlashcard(card), 'Card created');
+    } catch (error) {
+        console.error('Create private card error:', error);
+        return res.status(500).json({ success: false, message: 'Cannot create card' });
+    }
+});
+
+router.post('/my-decks/:deckId/cards/batch', authMiddleware, async (req, res) => {
+    try {
+        const uId = userId(req);
+        const deck = await VocabPrivateDeck.findOne({ deckId: req.params.deckId, userId: uId });
+        if (!deck) {
+            return res.status(404).json({ success: false, message: 'Deck not found' });
+        }
+
+        const cardsData = req.body || [];
+        if (!Array.isArray(cardsData)) {
+            return res.status(400).json({ success: false, message: 'Body must be an array of flashcards' });
+        }
+
+        const preparedCards = cardsData.map(c => {
+            const cardId = String(c.id || new mongoose.Types.ObjectId().toString());
+            return {
+                cardId,
+                deckId: req.params.deckId,
+                userId: uId,
+                front: c.front,
+                frontPhonetic: c.front_phonetic || null,
+                back: c.back,
+                example: c.example || null,
+                notes: c.notes || null,
+                imageUrl: c.image_url || null,
+                frontImageUrl: c.front_image_url || null,
+                backImageUrl: c.back_image_url || null,
+                shareImage: c.share_image !== false,
+                tags: Array.isArray(c.tags) ? c.tags : (c.tags ? c.tags.split(',') : []),
+                easinessFactor: c.easiness_factor !== undefined ? Number(c.easiness_factor) : 2.5,
+                interval: c.interval !== undefined ? Number(c.interval) : 0,
+                repetitions: c.repetitions !== undefined ? Number(c.repetitions) : 0,
+                nextReviewDate: c.next_review_date ? new Date(c.next_review_date) : null,
+                lastReviewDate: c.last_review_date ? new Date(c.last_review_date) : null,
+            };
+        });
+
+        const ops = preparedCards.map(c => ({
+            updateOne: {
+                filter: { cardId: c.cardId, userId: uId },
+                update: { $set: c },
+                upsert: true
+            }
+        }));
+
+        await VocabPrivateFlashcard.bulkWrite(ops);
+
+        const updatedCards = await VocabPrivateFlashcard.find({
+            cardId: { $in: preparedCards.map(c => c.cardId) },
+            userId: uId
+        });
+
+        return ok(res, updatedCards.map(serializePrivateFlashcard), 'Batch cards synchronized');
+    } catch (error) {
+        console.error('Batch sync private cards error:', error);
+        return res.status(500).json({ success: false, message: 'Cannot sync flashcards' });
+    }
+});
+
+router.put('/my-decks/:deckId/cards/:cardId', authMiddleware, async (req, res) => {
+    try {
+        const uId = userId(req);
+        const card = await VocabPrivateFlashcard.findOne({ cardId: req.params.cardId, userId: uId });
+        if (!card) {
+            return res.status(404).json({ success: false, message: 'Card not found' });
+        }
+
+        const body = req.body || {};
+        if (body.front !== undefined) card.front = body.front;
+        if (body.front_phonetic !== undefined) card.frontPhonetic = body.front_phonetic;
+        if (body.back !== undefined) card.back = body.back;
+        if (body.example !== undefined) card.example = body.example;
+        if (body.notes !== undefined) card.notes = body.notes;
+        if (body.image_url !== undefined) card.imageUrl = body.image_url;
+        if (body.front_image_url !== undefined) card.frontImageUrl = body.front_image_url;
+        if (body.back_image_url !== undefined) card.backImageUrl = body.back_image_url;
+        if (body.share_image !== undefined) card.shareImage = Boolean(body.share_image);
+        if (body.tags !== undefined) {
+            card.tags = Array.isArray(body.tags) ? body.tags : (body.tags ? body.tags.split(',') : []);
+        }
+        
+        if (body.easiness_factor !== undefined) card.easinessFactor = Number(body.easiness_factor);
+        if (body.interval !== undefined) card.interval = Number(body.interval);
+        if (body.repetitions !== undefined) card.repetitions = Number(body.repetitions);
+        if (body.next_review_date !== undefined) card.nextReviewDate = body.next_review_date ? new Date(body.next_review_date) : null;
+        if (body.last_review_date !== undefined) card.lastReviewDate = body.last_review_date ? new Date(body.last_review_date) : null;
+
+        await card.save();
+        return ok(res, serializePrivateFlashcard(card), 'Card updated');
+    } catch (error) {
+        console.error('Update private card error:', error);
+        return res.status(500).json({ success: false, message: 'Cannot update card' });
+    }
+});
+
+router.delete('/my-decks/:deckId/cards/:cardId', authMiddleware, async (req, res) => {
+    try {
+        const uId = userId(req);
+        const card = await VocabPrivateFlashcard.findOne({ cardId: req.params.cardId, userId: uId });
+        if (!card) {
+            return res.status(404).json({ success: false, message: 'Card not found' });
+        }
+
+        await VocabPrivateFlashcard.deleteOne({ _id: card._id });
+        return ok(res, null, 'Card deleted');
+    } catch (error) {
+        console.error('Delete private card error:', error);
+        return res.status(500).json({ success: false, message: 'Cannot delete card' });
     }
 });
 

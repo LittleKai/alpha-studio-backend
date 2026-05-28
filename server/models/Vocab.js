@@ -85,9 +85,56 @@ const vocabFeedbackSchema = new mongoose.Schema({
     platform: { type: String, default: null },
 }, { timestamps: true });
 
+const vocabPrivateDeckSchema = new mongoose.Schema({
+    deckId: { type: String, required: true, unique: true, index: true },
+    userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true, index: true },
+    name: { type: String, required: true, trim: true },
+    description: { type: String, default: null },
+    sourceLanguage: { type: String, default: 'en', index: true },
+    targetLanguage: { type: String, default: 'vi', index: true },
+    linkedPublicDeckId: { type: String, default: null },
+    linkedVersion: { type: Number, default: null },
+    isPublished: { type: Boolean, default: false },
+    publishedDeckId: { type: String, default: null },
+    wasImported: { type: Boolean, default: false },
+    showBackFirst: { type: Boolean, default: false },
+    frontFields: { type: String, default: null },
+    backFields: { type: String, default: null },
+    imageDisplayMode: { type: String, default: 'both' },
+    imagePath: { type: String, default: null },
+    autoPlayTtsOnFlip: { type: Boolean, default: true },
+    category: { type: String, default: null },
+    tags: [{ type: String, trim: true }],
+}, { timestamps: true });
+
+const vocabPrivateFlashcardSchema = new mongoose.Schema({
+    cardId: { type: String, required: true, unique: true, index: true },
+    deckId: { type: String, required: true, index: true },
+    userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true, index: true },
+    front: { type: String, required: true },
+    frontPhonetic: { type: String, default: null },
+    back: { type: String, required: true },
+    example: { type: String, default: null },
+    notes: { type: String, default: null },
+    imageUrl: { type: String, default: null },
+    frontImageUrl: { type: String, default: null },
+    backImageUrl: { type: String, default: null },
+    shareImage: { type: Boolean, default: true },
+    tags: [{ type: String, trim: true }],
+    // SM-2 Review fields
+    easinessFactor: { type: Number, default: 2.5 },
+    interval: { type: Number, default: 0 },
+    repetitions: { type: Number, default: 0 },
+    nextReviewDate: { type: Date, default: null, index: true },
+    lastReviewDate: { type: Date, default: null },
+}, { timestamps: true });
+
 export const VocabPublicDeck = mongoose.model('VocabPublicDeck', vocabPublicDeckSchema);
 export const VocabPublicFlashcard = mongoose.model('VocabPublicFlashcard', vocabPublicFlashcardSchema);
 export const VocabDeckRating = mongoose.model('VocabDeckRating', vocabRatingSchema);
 export const VocabImportLink = mongoose.model('VocabImportLink', vocabImportLinkSchema);
 export const VocabProfile = mongoose.model('VocabProfile', vocabProfileSchema);
 export const VocabFeedback = mongoose.model('VocabFeedback', vocabFeedbackSchema);
+export const VocabPrivateDeck = mongoose.model('VocabPrivateDeck', vocabPrivateDeckSchema);
+export const VocabPrivateFlashcard = mongoose.model('VocabPrivateFlashcard', vocabPrivateFlashcardSchema);
+

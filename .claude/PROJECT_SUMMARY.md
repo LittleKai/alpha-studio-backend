@@ -1,5 +1,7 @@
 # Project Summary
 
+**Phase 15 Follow-up (2026-05-27):** VocabFlip private storage integration. Added MongoDB schemas `VocabPrivateDeck` and `VocabPrivateFlashcard` and implemented private deck & flashcard CRUD + search REST routes to route VocabFlip storage through the backend for web users (kIsWeb=true).
+
 **Phase 15 Follow-up (2026-05-22):** Interior template validation now whitelists curved `boxes[]` primitives: regular box, `roundedBox`, and `cylinder`. Unknown primitive types are rejected at import/edit time. Seed script was rerun and MongoDB now includes `cab-base-rounded-end@1` as a `seed` template with rounded/cylindrical geometry.
 
 **Phase 15 Follow-up (2026-05-21):** Interior agent tools now fill known template `width`/`height`/`depth` defaults before preview/commit, preventing tpl modules such as kitchen base/wall/corner cabinets from inheriting the whole model height/depth when the AI omits dimensions. Default Interior project Vietnamese strings were corrected from mojibake to UTF-8.
@@ -14,7 +16,7 @@ If selected templates already match the latest library version, the endpoint ret
 **Phase 12 Update (2026-05-19):** Backend now hosts the self-extending interior template library. New model `InteriorTemplate` (status: seed/pending/approved/deprecated). New endpoints: `GET /api/interior/templates` (engine catalog load, returns seed+approved deduped by highest version), `POST /api/interior/templates` (user commits a project inline template to pending), and `/api/admin/interior-templates` CRUD (list/getOne/approve/reject/edit/deprecate). `/api/interior/projects/:id/chat` now extracts AI-emitted `tplNew` blocks into `modelJson.inlineTemplates[id]`, replaces with `tpl: id`, and surfaces created ids in `data.meta.newInlineTemplates`. DSL validation lives in `server/utils/templateValidator.js` (AST whitelist mirror of the engine `expression.js`). Seed script `scripts/seed-interior-templates.mjs` upserts the 7 built-in templates from `tools/interior-design-engine/src/templates/` (idempotent).
 
 **Phase 11 Update (2026-05-19):** `server/routes/interior.js` now validates the compact template contract: top-level `palette`, optional `inlineTemplates`, and module/detail items using either legacy `width/height/depth` boxes or `tpl/style` template references. The default project model uses `sliding-2door` with `palette: "wood-oak"`, and `/api/interior` prompts include the built-in template catalog while no longer promoting CSG hints.
-**Last Updated:** 2026-05-22 (Interior curved template primitives)
+**Last Updated:** 2026-05-27 (VocabFlip private storage)
 **Updated By:** Claude Code
 
 ---
@@ -364,12 +366,123 @@ alpha-studio-backend/
 | B2 Presigned Upload | ✅ Complete | routes/upload.js, utils/b2Storage.js | Generate presigned PUT URL for browser-direct upload to Backblaze B2; `listAllFiles()` for bucket enumeration |
 | Workflow Projects API | ✅ Complete | models/WorkflowProject.js, routes/workflow.js | CRUD projects with team, tasks, chatHistory, expenseLog — auth required; GET /projects shows all non-completed for users |
 | Workflow Documents API | ✅ Complete | models/WorkflowDocument.js, routes/workflow.js | CRUD document records with status, comments, note — auth required; GET ?projectId returns all project docs to members |
+├── /workflow
+│   │   ├── GET    /projects          # List user's projects (auth)
+│   │   ├── POST   /projects          # Create project (auth)
+│   │   ├── PUT    /projects/:id      # Update project (auth, creator/admin)
+│   │   ├── DELETE /projects/:id      # Delete project + docs (auth, creator/admin)
+│   │   ├── GET    /users/search      # Search users by name (auth)
+│   │   ├── GET    /users/:id         # Get user public profile (auth)
+│   │   ├── GET    /documents         # List user's docs, ?projectId=xxx (auth)
+│   │   ├── POST   /documents         # Create document record (auth)
+│   │   ├── PUT    /documents/:id     # Update document (auth, creator/admin)
+│   │   └── DELETE /documents/:id     # Delete document (auth, creator/admin)
+├── /chat (auth required)
+│   ├── GET    /history          # User's chat history (?limit=50, max 200, oldest→newest)
+│   ├── POST   /send             # Send single message → save user msg + forward to OpenClaw + save reply
+│   └── DELETE /history          # Clear user's chat history (DB only; OpenClaw session memory persists)
+└── /health               # Health check endpoint
+```
+
+---
+
+## 3. Key Decisions & Patterns
+
+### Authentication System
+- **Password Security:** bcrypt with 12 salt rounds
+- **Token:** JWT with 7-day expiration
+- **Storage:** httpOnly cookie + Authorization header support
+- **Middleware:** `authMiddleware` for protected routes
+
+### Database Architecture (MongoDB Atlas)
+- **Connection:** MongoDB Atlas Cloud (Cluster0)
+- **Database Name:** `alpha-studio`
+- **Collections:** 13 collections
+  - `users` - User accounts with hashed passwords + balance
+  - `courses` - Course information
+  - `students` - Student profiles
+  - `partners` - Partner profiles
+  - `projects` - User projects
+  - `studio_sessions` - AI studio session history
+  - `transformations` - Available transformations
+  - `api_usage` - API usage tracking
+  - `transactions` - Payment transactions (topup, spend, refund, manual_topup, bonus)
+  - `webhooklogs` - Casso webhook logs for debugging/reprocessing
+  - `prompts` - Shared prompts with multiple contents, ratings, engagement
+  - `resources` - Resource hub files with metadata and engagement
+  - `comments` - Comments for prompts and resources
+- **Documentation:** See DATABASE.md for detailed schema
+
+### CORS Configuration
+- Development: localhost:3000, localhost:5173, 127.0.0.1:5173
+- Production: Set via `FRONTEND_URL` environment variable
+- Supports credentials for cookie-based auth
+- Methods: GET, POST, PUT, PATCH, DELETE, OPTIONS
+
+### Admin Authorization
+- **adminOnly middleware:** Checks `user.role === 'admin'`
+- **Protected routes:** All /api/courses/* endpoints
+- Returns 403 Forbidden for non-admin users
+
+### Error Handling
+- Centralized error middleware
+- User-friendly error messages
+- Duplicate key detection (MongoDB code 11000)
+- Mongoose validation error handling
+
+---
+
+## 4. Active Features & Status
+
+| Feature | Status | Files Involved | Notes |
+|---------|--------|----------------|-------|
+| User Registration | ✅ Complete | routes/auth.js | Email + password validation |
+| User Login | ✅ Complete | routes/auth.js | JWT token generation |
+| User Logout | ✅ Complete | routes/auth.js | Cookie clearing |
+| Get Current User | ✅ Complete | routes/auth.js | Protected route |
+| Update Profile | ✅ Complete | routes/auth.js | Name update |
+| Change Password | ✅ Complete | routes/auth.js | Old password verification |
+| Health Check | ✅ Complete | index.js | API status endpoint |
+| Password Hashing | ✅ Complete | models/User.js | bcrypt with 12 rounds |
+| JWT Middleware | ✅ Complete | middleware/auth.js | Token verification |
+| Admin Middleware | ✅ Complete | middleware/auth.js | Role-based authorization |
+| CORS Support | ✅ Complete | index.js | Multi-origin + PATCH method |
+| Course CRUD | ✅ Complete | routes/courses.js | Create, Read, Update, Delete |
+| Course Publishing | ✅ Complete | routes/courses.js | Publish, Unpublish, Archive |
+| Course Statistics | ✅ Complete | routes/courses.js | Aggregated stats endpoint |
+| Multilingual Courses | ✅ Complete | models/Course.js | VI/EN title and description |
+| Course Modules/Lessons | ✅ Complete | models/Course.js | Nested schema structure |
+| Job CRUD | ✅ Complete | routes/jobs.js | Create, Read, Update, Delete |
+| Job Publishing | ✅ Complete | routes/jobs.js | Publish, Close |
+| Job Statistics | ✅ Complete | routes/jobs.js | Aggregated stats endpoint |
+| Partner CRUD | ✅ Complete | routes/partners.js | Create, Read, Update, Delete |
+| Partner Publishing | ✅ Complete | routes/partners.js | Publish, Unpublish |
+| Partner Statistics | ✅ Complete | routes/partners.js | Aggregated stats endpoint |
+| Partner Skills | ✅ Complete | models/Partner.js | String array for skills |
+| Stale Index Cleanup | ✅ Complete | db/connection.js | Auto-drops stale indexes on startup |
+| Payment System | ✅ Complete | routes/payment.js, models/Transaction.js | Credit packages, VietQR, Casso webhook |
+| Webhook Logging | ✅ Complete | models/WebhookLog.js | Stores all incoming webhooks for debugging |
+| Admin Management | ✅ Complete | routes/admin.js | Users, transactions, webhook management |
+| Manual Top-up | ✅ Complete | routes/admin.js | Admin can top-up users manually |
+| Webhook Assignment | ✅ Complete | routes/admin.js | Admin can assign unmatched webhooks to users |
+| Transaction Timeout | ✅ Complete | routes/admin.js | Auto-timeout after 5 min without webhook match |
+| Share Prompts API | ✅ Complete | routes/prompts.js, models/Prompt.js | CRUD, like, bookmark, rate, download, featured, moderation |
+| Resource Hub API | ✅ Complete | routes/resources.js, models/Resource.js | CRUD, file upload (50MB), like, bookmark, rate, download |
+| Comments API | ✅ Complete | routes/comments.js, models/Comment.js | Comments for prompts/resources with likes |
+| Course Enrollment API | ✅ Complete | routes/enrollments.js, models/Enrollment.js | Enroll with credit deduction for paid courses; Transaction recorded; progress tracking |
+| Course Reviews API | ✅ Complete | routes/reviews.js, models/Review.js | CRUD, rating distribution, helpful votes, admin reply |
+| Lesson Video/Documents | ✅ Complete | models/Course.js | videoUrl and documents array per lesson |
+| Article CMS | ✅ Complete | models/Article.js, routes/articles.js | Bilingual articles for About & Services pages, admin CRUD |
+| Cloud Desktop API | ✅ Complete | models/HostMachine.js, models/CloudSession.js, routes/cloud.js | User connect/disconnect, admin machine/session management, agent heartbeat, cron cleanup |
+| B2 Presigned Upload | ✅ Complete | routes/upload.js, utils/b2Storage.js | Generate presigned PUT URL for browser-direct upload to Backblaze B2; `listAllFiles()` for bucket enumeration |
+| Workflow Projects API | ✅ Complete | models/WorkflowProject.js, routes/workflow.js | CRUD projects with team, tasks, chatHistory, expenseLog — auth required; GET /projects shows all non-completed for users |
+| Workflow Documents API | ✅ Complete | models/WorkflowDocument.js, routes/workflow.js | CRUD document records with status, comments, note — auth required; GET ?projectId returns all project docs to members |
 | Workflow User Profile API | ✅ Complete | routes/workflow.js | GET /users/:id returns public profile (name, avatar, role, email, phone, bio, skills, location, socials) — auth required |
 | Storage Cleanup API | ✅ Complete | routes/admin.js, utils/b2Storage.js | Lists all B2 files; cross-references WorkflowDocument/Resource (file+previewImages)/Course (videoUrl+documents)/Prompt (exampleImages); returns `data` (orphaned) + `referencedFiles` each with `source`, `uploader`, `referenced` — super admin only |
 | Studio Usage Tracking (legacy) | ✅ Complete | models/User.js, routes/studio.js | `studioUsage: {date, count}` on User; GET /studio/usage + POST /studio/use; 3 free uses/day; admin/mod unlimited |
 | Flow Image/Video Generation | ✅ Complete (Phase 2) | models/{FlowServer,StudioGeneration,User}.js, routes/studio.js, routes/cloud.js | `POST /studio/image/generate` (5/day), `POST /studio/video/generate` (1/day), `GET /studio/media/:genId/:idx` (B2 redirect or agent proxy stream), `POST /studio/save/:genId/:idx` (B2 upload), `GET /studio/history`; agent register+heartbeat via `/cloud/flow-heartbeat` + admin CRUD `/cloud/admin/flow-servers`; cron marks flow-server offline >2min |
 | AI Consultation Chat | ✅ Complete | models/ChatMessage.js, routes/chat.js, routes/settings.js, utils/aiProvider.js, server/context/alpha-studio-bot | `POST /chat/send` saves user msg then routes via admin setting `useOpenClawForChat`: OpenClaw (`OPENCLAW_URL`, session memory) by default, or direct gcli (`GCLI_DIRECT_URL`) with bundled Alpha Studio workspace context and up to 3 previous MongoDB chat messages. `GET /chat/history` display history; `DELETE /chat/history` clears DB history. |
-| VocabFlip Integration | ✅ Complete | models/Vocab.js, routes/vocab.js | MongoDB-backed public decks, flashcards, ratings, import links, profile, feedback, sync notification stubs, and `POST /api/vocab/spend`; VocabFlip media upload uses existing B2 `/api/upload/presign` flow |
+| VocabFlip Integration | ✅ Complete (Phase 15) | models/Vocab.js, routes/vocab.js | MongoDB-backed public library (decks, flashcards, ratings, import links, profile, feedback, sync notification stubs) & private cloud storage CRUD for web users (`VocabPrivateDeck`, `VocabPrivateFlashcard` models, `/my-decks` routes); VocabFlip media upload uses existing B2 presign flow |
 | Interior Design AI API | ✅ Complete | models/InteriorProject.js, routes/interior.js, utils/aiProvider.js, routes/chat.js | Auth-gated `/api/interior` project CRUD, AI chat, version persistence, rollback, manual cabinetModel validation, 1-credit charge per valid AI response, admin/mod bypass. Reuses `useOpenClawForChat` provider toggle shared with `/api/chat/send`. |
 | Interior AI Prompt v2 + 2-step | ✅ Complete | routes/interior.js, models/User.js, models/InteriorProject.js, routes/auth.js, utils/templateValidator.js | (A) Prompt v2: few-shot, domain hints (kích thước/vật liệu chuẩn VN), Phase 10 strict dimension anchor, `/chat` `runs[]` rule for L/U/island/parallel layouts, z-axis wall-depth convention, forced reply format "Quan sát ảnh/Hiểu yêu cầu/Đã áp dụng", lower askForInfo threshold. Phase 14 template instructions require `boxes` only for new `tplNew` payloads, while validator accepts legacy `isoBoxes` and rejects SVG view fields. (B) Opt-in `User.preferences.interiorTwoStepConfirm` (set via `PUT /auth/profile`). When ON, `POST /interior/projects/:id/chat` accepts `stage='proposal'\|'apply'`: proposal returns plain-text analysis (1 credit, no version), apply consumes `proposalText` as context (1 credit, creates version). Total 2 credit/lần khi bật. |
 | Interior Image-to-Design (Phase 4+) | ✅ Complete | routes/interior.js (+/analyze-image, +/generate-render), middleware/interiorQuota.js, models/{InteriorAnalysis,InteriorRender,InteriorQuota}.js, routes/admin.js (orphan scan) | `POST /interior/analyze-image` (auth + 5/24h quota): JSON body `{imageUrl, hints, modelOverride}`, sha256 cache (24h TTL), Gemini Flash 3 default → Pro 3.1 escalate, 2-attempt JSON repair loop, returns `{model, suggestedModel, meta}`. Prompt teaches Phase 8 `runs[]` for L/U/island/galley layouts and Phase 7 `csgHints[]`; validator accepts either legacy `modules[]` or new `runs[]`, not both. Default project model now uses an opaque solid panel template instead of transparent zone modules. |
