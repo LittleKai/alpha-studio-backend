@@ -515,7 +515,6 @@ alpha-studio-backend/
 
 ### When making changes:
 1. Always update this file's "Last Updated" timestamp
-2. Create/update entry in `docs/bug-fixes/CHANGELOG.md`
 3. Follow naming conventions in CONVENTIONS.md
 4. Use ES Module syntax (import/export)
 5. Handle errors consistently with try/catch
@@ -554,223 +553,8 @@ GCLI_DIRECT_URL=http://localhost:18790/v1/chat/completions
 GCLI_DIRECT_MODEL=gemini-2.5-flash
 ```
 
----
 
-## 7. Recent Changes (Last 3 Sessions)
-
-1. **2026-05-22** - Interior curved template primitive validation
-   - **Validator** `server/utils/templateValidator.js`: Accepts only regular boxes, `roundedBox`, and `cylinder` inside `boxes[]`; rejects unsupported primitive types and invalid cylinder axes before import/admin edit.
-   - **Tests** `server/utils/__tests__/templateValidator.test.mjs`: Covers accepted curved primitives and rejection of freeform path-style primitives.
-   - **Seed library**: `npm run seed:interior-templates` upserted 14 templates, including `cab-base-rounded-end@1` with `roundedBox` body/front and `cylinder` knob.
-
-1. **2026-05-21** - Interior agent dimension defaults + UTF-8 text fix
-   - **Agent tools** `server/tools/interior/common.js`, `module-add.js`, `module-update.js`, `model-commit.js`: Known template modules now auto-fill missing `width`/`height`/`depth` from seed template defaults. This prevents `tpl` kitchen base/wall/corner cabinets from rendering as full-height/full-depth blocks when AI omits dimensions.
-   - **Seed script** `scripts/seed-interior-templates.mjs`: Writes boxes-only template DSL from `tpl.boxes` so reseeding preserves the Phase 14 component library contract.
-   - **Tests** `server/tools/interior/__tests__/tools.test.mjs`: Added coverage for base cabinet defaults, wall cabinet missing-depth fill, and commit-time default fill.
-   - **Interior route** `server/routes/interior.js`: Corrected default project title/specs/name/reply Vietnamese strings from mojibake to valid UTF-8.
-   - **Data repair**: Project `6a0ef1d40fb2810566f8dbf8` received a new corrected version at index 2; old versions remain intact.
-
-1. **2026-05-21** - Interior Workshop backend cleanup endpoint
-   - **Interior route** `server/routes/interior.js`: Added `POST /api/interior/workshop/components/delete` for local/dev Workshop cleanup. It validates kebab-case IDs, deletes only files inside `tools/interior-component-workshop/components`, regenerates `data/template-bundle.js`, and accepts loopback/null-origin/localhost requests without Bearer token.
-   - **Workshop UI** `tools/interior-component-workshop/component-library.js`: Import/delete flows now call the backend cleanup endpoint instead of a separate helper server.
-   - **Verification**: `node --check` passes for backend `server/routes/interior.js` and updated Workshop scripts.
-
-1. **2026-05-22** - Interior Workshop file-origin CORS
-   - **Server CORS** `server/index.js`: Added explicit allow handling for `Origin: null` from `file://` Workshop pages plus localhost/127.0.0.1 Workshop origins. This removes misleading `CORS blocked origin: null` warnings while preserving the existing permissive dev behavior.
-   - **Verification**: `node --check server/index.js` passes.
-
-1. **2026-05-18** - Interior Phase 8 runs prompt
-   - **Analyze prompt** `server/routes/interior.js`: Added `runs[]` instructions for L/U/island/galley layouts with `{id, origin:{x,z}, direction, modules}`.
-   - **Validation**: `validateCabinetModel` now accepts either legacy `modules[]` or new `runs[]`, rejects using both, and validates each run direction/origin/modules.
-   - **Database docs**: `DATABASE.md` documents that InteriorProject/InteriorAnalysis `modelJson` can store `runs[]`.
-
-1. **2026-05-16** - Bundled direct bot context for production
-   - **Bundled context** `server/context/alpha-studio-bot/{IDENTITY.md,SOUL.md,venue.md}`: Copied the Alpha Studio bot workspace files into the backend image path so Fly.io production can read them even though `tools/openclaw-server/workspaces/alpha-studio` is not present in the backend Docker context.
-   - **Provider context** `server/utils/aiProvider.js`: Direct gcli bot reads only the bundled `server/context/alpha-studio-bot` context. The loaded context is cached for 60 seconds and injected as a system prompt when `useOpenClawForChat=false`.
-   - **Direct history** `server/routes/chat.js`: Direct gcli requests include up to 3 previous MongoDB chat messages plus the current user message.
-   - **Env template** `.env.example`: No bot context path env is required; production uses the bundled backend context.
-   - **Verification**: `node --check` passes for `server/utils/aiProvider.js` and `server/routes/chat.js`.
-
-1. **2026-05-15** - Interior AI prompt v2, 2-step confirm, B2 presigned bypass for gcli
-   - **CDN bypass for AI fetch** `server/utils/b2Storage.js` + `server/routes/interior.js`: Added `cdnUrlToPresignedDownload(url, expiresIn=14400)` helper that strips `CDN_BASE_URL` prefix and returns a presigned B2 download URL pointing at `*.backblazeb2.com` directly. Interior chat route now resolves `refImageUrls` through `resolveImageUrlsForAi()` (with per-URL try/catch fallback) before passing to `callGcliDirect.images` — works around Cloudflare 525 SNI mismatch on `cdn.giaiphapsangtao.com` so gcli upstream can actually fetch the user's reference images. CDN URLs remain stored in MongoDB unchanged; only the AI-facing URL is rewritten.
-
-1. **2026-05-15** - Interior AI prompt upgrade + opt-in 2-step confirm
-   - **Prompt v2** `server/routes/interior.js`: Added `INTERIOR_DOMAIN_HINTS` (kích thước/vật liệu chuẩn VN), `INTERIOR_REPLY_FORMAT` (forced "Quan sát ảnh / Hiểu yêu cầu / Đã áp dụng"), `INTERIOR_FEW_SHOT` (1 compact JSON example), explicit `askForInfo` rule (when image vague / prompt too short / missing dimension+function+material).
-   - **2-step confirm**: New `buildInteriorProposalPrompt` for analysis-only stage; `POST /api/interior/projects/:id/chat` accepts `stage='proposal'|'apply'` + `proposalText`. Proposal: AI returns plain-text analysis, charges 1 credit, no version saved. Apply with `proposalText`: passes proposal as context to JSON generation, charges 1 credit, saves version → 2 credit total khi user opt-in.
-   - **User preference** `server/models/User.js`: Added `preferences.interiorTwoStepConfirm: Boolean default false`; exposed via `PUT /api/auth/profile` (`routes/auth.js`).
-   - **InteriorVersion schema** `server/models/InteriorProject.js`: Added `proposalText: String maxlength 4000` for audit of which proposal led to which version.
-   - **Verification**: `node --check` passes for `interior.js`, `InteriorProject.js`, `User.js`, `auth.js`.
-
-1. **2026-05-15** - Interior Design AI API
-   - **AI provider utility** `server/utils/aiProvider.js`: Extracted OpenClaw/gcli routing and `useOpenClawForChat` lookup for reuse by chat and interior design routes.
-   - **Interior model** `server/models/InteriorProject.js`: Stores owner, project name, current version index, soft-delete flag, and version snapshots with `modelJson`, prompt, AI reply, ref image URL, and rollback metadata.
-   - **Interior routes** `server/routes/interior.js`: Added project list/create/read/update/delete, `POST /projects/:id/chat`, and `POST /projects/:id/rollback`; validates AI JSON manually and charges 1 credit only after valid output.
-   - **Server mount** `server/index.js`: Mounted `/api/interior`.
-   - **Verification**: `node --check` passes for `aiProvider.js`, `InteriorProject.js`, `interior.js`, `chat.js`, and `index.js`.
-
-1. **2026-05-15** - Admin AI chat provider toggle
-   - **Settings** `server/routes/settings.js`: Added `useOpenClawForChat` key with default `true`.
-   - **Chat routing** `server/routes/chat.js`: `POST /api/chat/send` now reads `useOpenClawForChat`; default path keeps OpenClaw session context, direct path calls OpenAI-compatible gcli via `GCLI_DIRECT_URL`.
-   - **Env template** `.env.example`: Added `OPENCLAW_URL`, `GCLI_DIRECT_URL`, and `GCLI_DIRECT_MODEL` placeholders.
-   - **Verification**: `node --check server/routes/chat.js` and `node --check server/routes/settings.js` pass.
-
-1. **2026-05-07** - AI Consultation Chat with Persistent History
-   - **New model** `server/models/ChatMessage.js`: `userId` (ref User, indexed), `role` ('user' | 'assistant'), `content` (max 16000 chars), `timestamps`. Compound indexes `{userId:1, createdAt:1}` and `{userId:1, createdAt:-1}` for history queries.
-   - **Replaced** `server/routes/chat.js` (old `POST /generate { messages[] }` proxy → new auth-gated history-aware routes):
-     - `GET  /api/chat/history?limit=N` — returns user's recent ChatMessages (default 50, max 200, oldest→newest order). Used by FE to render chat history.
-     - `POST /api/chat/send { content }` — saves user message → forwards single `{messages:[user]}` payload to `OPENCLAW_URL` with `sessionId: req.user._id.toString()` (OpenClaw maintains conversation context per-session via `x-openclaw-session-key`) → saves assistant reply → returns `{ userMessage, assistantMessage }`. Returns 502 with userMessage preserved if OpenClaw fails.
-     - `DELETE /api/chat/history` — clears user's ChatMessage docs from MongoDB. **Note:** OpenClaw session memory persists (no documented HTTP API to reset session); document-only display reset.
-   - Architecture: Frontend just displays history; OpenClaw is single source of truth for conversation context. Per-user isolation via `req.user._id` as session key.
-   - Env: `OPENCLAW_URL` already in `.env` (`https://openclaw.giaiphapsangtao.com/api/chat`); fallback `http://localhost:18791/api/chat` for local dev.
-
-2. **2026-05-04** - OpenClaw API Channel Integration (superseded by 2026-05-07)
-   - `server/routes/chat.js`: Updated proxy logic to call the new Middle-tier `api-server.js` on `http://localhost:18791/api/chat` instead of directly contacting the local `gcli-proxy`.
-   - Injected `sessionId: req.user._id` for authenticated requests to ensure the Gateway can maintain bối cảnh per-user, and adjusted the text extraction path.
-
-1. **2026-05-01** - Encrypted Gemini API keys in database
-   - `utils/encryption.js`: Created utility for AES-256-CBC encryption/decryption
-   - `settings.js`: Added encryption when saving `geminiApiKey` and `videoApiKey`. Returning mapped strings (`********`) on the `GET` request to prevent leaking to the admin UI.
-   - `gemini.js`: Decrypted keys before use when calling Google Gemini API
-
-1. **2026-04-30** - Fixed Studio history media URL loading (ERR_CONNECTION_CLOSED)
-   - `server/routes/studio.js`: Updated `GET /api/studio/media/:genId/:itemIdx` endpoint to generate short-lived B2 presigned download URLs for saved items instead of redirecting directly to the Vercel-bound CDN. This fixes images and videos failing to load in StudioHistoryDrawer because the bucket is configured as private and the alias didn't proxy the files correctly.
-
-1. **2026-04-23** - Plan 3 Phase 2: Flow pipeline backend integration
-   - **New models**:
-     - `FlowServer.js`: name, machineId (unique), agentUrl, secret, status (available|degraded|offline), tokenValid, tokenExpiresAt, projectId, lastPingAt, enabled
-     - `StudioGeneration.js`: userId, flowServerId, type (image|video), model, prompt, aspectRatio, count, hasReferenceImage, items[] (filename, ext, size, seed, mediaId, saved, b2Key, b2Url, savedAt), expiresAt (+48h default)
-   - **User.js**: Added `studioUsage.imageCount`, `studioUsage.videoCount` (kept `count` for legacy)
-   - **studio.js** — New endpoints (all authMiddleware):
-     - `GET /usage`: returns `{ image: {used,limit,remaining}, video: {...}, legacy: {...}, unlimited? }`
-     - `POST /image/generate`: 5/day, validates model (imagen4|banana2|banana-pro) + ratio, consumes quota + refunds on agent error, picks random available+tokenValid FlowServer, forwards to `/api/studio/image`, persists StudioGeneration, returns serialized items with `previewUrl: /api/studio/media/:genId/:idx`
-     - `POST /video/generate`: 1/day, validates model (veo|veo-r2v) + ratio, requires referenceImage for veo-r2v
-     - `GET /media/:genId/:idx`: ownership check → if saved redirect 302 to B2 CDN; else stream bytes from flow agent via `Readable.fromWeb`
-     - `POST /save/:genId/:idx`: downloads from agent, uploads to B2 via new `uploadFile(key, buffer, contentType)` helper, stores `items[idx].{saved,b2Key,b2Url,savedAt}`
-     - `GET /history?limit=20&type=image|video`: user's recent gens
-   - **cloud.js** — New endpoints:
-     - `POST /flow-heartbeat`: x-agent-secret auth, updates FlowServer status/tokenValid/tokenExpiresAt/projectId/lastPingAt
-     - `GET/POST/PUT/PATCH/DELETE /admin/flow-servers[/:id][/toggle]`: admin CRUD mirroring HostMachine pattern
-     - `POST /admin/flow-servers/:id/sync`: sync auto-fill API projects directly from Agent
-     - `DELETE /admin/flow-servers/:id/projects/:projectId`: remote disconnect an active Flow Project ID
-   - **b2Storage.js**: Added `uploadFile(key, body, contentType)` — server-side bytes → B2 via PutObjectCommand
-   - **index.js**:
-     - Cron every 60s: mark FlowServer offline + tokenValid=false if lastPingAt > 2 min (parallel to HostMachine)
-     - Cron every 30min: delete StudioGeneration where expiresAt < now AND no item.saved=true (preserves B2 artifacts)
-   - **admin.js** — GET /storage/orphaned: added scan of `StudioGeneration.items[].b2Key` (only items with `saved: true`)
-
-1. **2026-02-24** - Course purchase; User role enum fix; Localized instructor.bio
-   - `models/User.js`: Added `'mod'` to `role` enum (`['student', 'partner', 'mod', 'admin']`); fixes 500 error when saving any mod-role user (topup, password change, balance deduction, etc.)
-   - `models/Course.js`: Changed `instructor.bio` from `type: String` → `{ vi: String, en: String }` to match frontend LocalizedString format
-   - `routes/enrollments.js`: Import `User` + `Transaction`; paid course enrollment now checks `user.balance >= finalPrice`, deducts balance, creates `Transaction` (`type: 'spend'`, `serviceType: 'course'`, `paymentMethod: 'system'`, `status: 'completed'`); insufficient balance returns `{ requiresTopup: true, required, current }`
-
-1. **2026-02-23** - Storage Cleanup orphaned checker fixes + referencedFiles response
-   - `admin.js` — GET /storage/orphaned:
-     - Fixed Resource query: `createdBy` → `author` (correct field name in Resource model)
-     - Added `Prompt` import; added scan of `Prompt.exampleImages[].publicId / url`
-     - Added scan of `Resource.previewImages[].publicId / url` (was only checking `file`)
-     - Fixed Course scan: added `lesson.videoUrl` extraction (was only scanning `lesson.documents[]`)
-     - Refactored: `toFileObj(f, referenced)` helper builds both lists with `uploader`, `uploadedAt`, `source`, `referenced` fields
-     - Response now includes `referencedFiles: [...]` alongside `data` (orphaned); both carry `source` and `referenced` flags
-
-1. **2026-02-22** - Storage Cleanup API, User Public Profile, B2 listAllFiles
-   - `b2Storage.js`: Added `ListObjectsV2Command` import; added `listAllFiles()` with pagination loop (handles large buckets via `ContinuationToken`)
-   - `workflow.js` — GET /projects: Restored `{ status: { $ne: 'completed' } }` for regular users (all non-completed visible to everyone)
-   - `workflow.js` — GET /users/:id: New endpoint returning user public profile (`name, avatar, role, email, phone, bio, skills, location, socials`); placed after `/users/search` to avoid route conflict
-   - `admin.js` — Added `SUPER_ADMIN_EMAIL = 'aduc5525@gmail.com'`; added `extractB2Key(url)` helper; added imports for `WorkflowDocument`, `Resource`, `Course`, `listAllFiles`, `deleteFile`
-   - `admin.js` — GET /storage/orphaned: Lists all B2 files via `listAllFiles()`, builds `usedKeys` Set from 3 collections (WorkflowDocument.fileKey, Resource.file.publicId, Course lesson documents), returns array of orphaned files with uploader info
-   - `admin.js` — DELETE /storage/orphaned: Takes `{ key }` from request body, calls `deleteFile(key)` — both endpoints 403 if not super admin
-
-1. **2026-02-22** - Workflow API: Project Visibility, Note Field, Member Doc Access (2nd pass)
-   - `WorkflowDocument.js`: Added `note: { type: String, default: '' }` field
-   - `workflow.js` — GET /projects: Admin sees all; others see all non-completed + own/member completed (`$or: [status≠completed, createdBy, team.id]`)
-   - `workflow.js` — DELETE /projects: Admin-only (403 otherwise) + `status === 'completed'` required (400 if planning/active)
-   - `workflow.js` — GET /documents with `?projectId`: Checks team membership (team.id / createdBy / admin/mod), returns ALL project docs (was filtering by createdBy)
-   - `workflow.js` — PUT /documents: Added `note` to allowed update fields; auth updated to also allow project creator/manager
-
-2. **2026-02-22** - Workflow Projects & Documents API
-   - Created `server/models/WorkflowProject.js`: subdocuments (expenseLog, tasks, team, chatHistory, tasks) with `_id: false` + `toJSON: { virtuals: true }`
-   - Created `server/models/WorkflowDocument.js`: file metadata (name, type, size, uploadDate, uploader, status, url, projectId, comments) + `toJSON: { virtuals: true }`
-   - Created `server/routes/workflow.js`: 8 endpoints (4 projects + 4 documents), all `authMiddleware`-protected, creator-or-admin authorization
-   - Mounted `/api/workflow` in server/index.js
-
-3. **2026-02-12** - Article CMS for About & Services Pages
-   - Created Article model (models/Article.js):
-     - Bilingual title, excerpt, content (vi/en)
-     - slug (auto-generated from Vietnamese title)
-     - category: 'about' | 'services'
-     - status: draft/published/archived
-     - author (ref User), order, isFeatured, tags
-     - Indexes: category+status+order, slug (unique), text search
-   - Created Articles API (routes/articles.js):
-     - Public: GET / (list published), GET /:slug (detail)
-     - Admin/Mod: GET /admin/list, POST /, PUT /:id, DELETE /:id
-     - PATCH /:id/publish, PATCH /:id/unpublish
-     - Route ordering: /admin/list before /:slug to avoid conflicts
-   - Registered article routes in server/index.js
-
-2. **2026-01-24** - Course Enrollment & Reviews APIs
-   - Updated Course model (models/Course.js):
-     - Added `videoUrl` field to lesson schema for video URL input
-     - Added `documents` array to lesson schema with name, url, type, size
-   - Created Enrollment model (models/Enrollment.js):
-     - Tracks user enrollment in courses
-     - Progress tracking (completedLessons array with watchedDuration, lastPosition)
-     - Current lesson tracking (moduleId, lessonId)
-     - Status: active, completed, cancelled
-   - Created Review model (models/Review.js):
-     - Rating 1-5 stars with comment
-     - Helpful count with users array
-     - Admin reply support
-     - Status: approved, pending, rejected
-     - Verified purchase flag
-   - Created Enrollments API (routes/enrollments.js):
-     - GET /my-courses - list enrolled courses with course details
-     - GET /check/:courseId - check enrollment status
-     - POST /:courseId - enroll in course
-     - GET /:courseId/progress - get enrollment progress
-     - PUT /:courseId/progress - update lesson progress (completed, watchedDuration)
-     - DELETE /:courseId - unenroll
-   - Created Reviews API (routes/reviews.js):
-     - GET /course/:courseId - get reviews with rating distribution
-     - GET /my-review/:courseId - get user's review
-     - POST /:courseId - create review
-     - PUT /:reviewId - update review
-     - DELETE /:reviewId - delete review
-     - POST /:reviewId/helpful - toggle helpful
-     - POST /:reviewId/reply - admin reply
-   - Fixed rating distribution aggregation: proper mongoose.Types.ObjectId conversion
-   - Updated server/index.js to register new routes
-
-2. **2026-01-23** - Share Prompts & Resource Hub APIs
-   - Created Prompt model with:
-     - Bilingual title/description (vi/en)
-     - Multiple prompt contents (promptContents array with label + content)
-     - Legacy single promptContent support for backward compatibility
-     - Notes field (max 5000 chars)
-     - Categories: image-generation, text-generation, code, workflow, other
-     - Platforms: midjourney, stable-diffusion, dalle, comfyui, chatgpt, claude, other
-     - Example images with input/output types
-     - Engagement: likes, bookmarks, downloads, views, comments count
-     - Rating system (1-5 stars with average calculation)
-     - Status: published, hidden, archived
-     - Featured flag, moderation fields
-   - Created Resource model with:
-     - Bilingual title/description
-     - Resource types: template, dataset, design-asset, project-file, 3d-model, font, other
-     - File upload (url, publicId, filename, format, size up to 50MB, mimeType)
-     - Thumbnail and preview images
-     - Compatible software array
-     - Same engagement/rating system as Prompts
-   - Created Comment model for both prompts and resources
-   - Full API routes for prompts: CRUD, like, bookmark, download, rate, hide/unhide, feature
-   - Full API routes for resources: same as prompts + file download tracking
-   - Search support: regex search in title, description, content, tags, promptContents
-   - Bugfix: Added promptContents support in POST/PUT routes (was only checking legacy promptContent)
-
-3. **2026-01-22** - Payment System with Casso Webhook V2
-
----
-
+## 7. Quick Commands
 ## 8. Quick Commands
 ```bash
 # Development
@@ -785,7 +569,7 @@ npm run db:migrate-passwords  # Hash existing plain-text passwords
 
 ---
 
-## 9. Sample Users
+## 8. Sample Users
 
 After running `npm run db:init` and `npm run db:migrate-passwords`:
 
@@ -798,4 +582,4 @@ After running `npm run db:init` and `npm run db:migrate-passwords`:
 
 **NOTE TO CLAUDE CODE:**
 Read this file FIRST before making any changes.
-Update Section 4, 5, 7 after each session.
+Update active features status and TODOs after each session.
