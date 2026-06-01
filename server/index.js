@@ -28,6 +28,7 @@ import vocabRoutes from './routes/vocab.js';
 import interiorRoutes from './routes/interior.js';
 import crmRoutes from './routes/crm.js';
 import { configureBucketCors } from './utils/b2Storage.js';
+import { runSubscriptionMaintenance } from './jobs/crmSubscriptionJobs.js';
 import cron from 'node-cron';
 import HostMachine from './models/HostMachine.js';
 import CloudSession from './models/CloudSession.js';
@@ -246,6 +247,11 @@ cron.schedule('0 * * * *', async () => {
     } catch (error) {
         console.error('[Cron] Studio refs purge error:', error);
     }
+});
+
+// Cron: CRM Subscription maintenance (run hourly to expire or auto-renew)
+cron.schedule('0 * * * *', async () => {
+    await runSubscriptionMaintenance();
 });
 
 // Start server

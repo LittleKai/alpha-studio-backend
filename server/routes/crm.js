@@ -14,7 +14,10 @@ import CrmContact from '../models/CrmContact.js';
 import CrmTemplate from '../models/CrmTemplate.js';
 import CrmCampaign from '../models/CrmCampaign.js';
 import CrmExecutionLog from '../models/CrmExecutionLog.js';
+import CrmAuditLog from '../models/CrmAuditLog.js';
 import SystemSetting from '../models/SystemSetting.js';
+
+import { crmPairingLimiter, crmDeviceLimiter, crmAiLimiter } from '../middleware/crmRateLimit.js';
 
 import { CRM_PLANS, CRM_AI_PACKS, getCrmProduct } from '../utils/crmCatalog.js';
 import { hasQuota, consumeQuota, refundQuota } from '../utils/crmQuota.js';
@@ -336,6 +339,13 @@ router.post('/billing/checkout', authMiddleware, async (req, res) => {
                     await subscription.save();
                 }
 
+                await CrmAuditLog.create({
+                    userId: user._id,
+                    subscriptionId: subscription ? subscription._id : null,
+                    action: 'billing_checkout',
+                    details: { productId, orderType, paymentMethod: 'credit' }
+                });
+
                 return res.json({
                     success: true,
                     message: `${product.name} đã được thanh toán thành công qua Credits.`,
@@ -399,6 +409,12 @@ router.post('/billing/checkout', authMiddleware, async (req, res) => {
 
             const qrCodeUrl = `https://img.vietqr.io/image/${bankInfo.bankId}-${bankInfo.accountNumber}-compact2.png?amount=${product.priceVnd}&addInfo=${orderCode}`;
 
+            await CrmAuditLog.create({
+                userId: req.user._id,
+                action: 'billing_checkout',
+                details: { productId, orderType, paymentMethod: 'bank_transfer', transactionCode: orderCode }
+            });
+
             return res.json({
                 success: true,
                 data: {
@@ -445,7 +461,7 @@ router.get('/devices', authMiddleware, async (req, res) => {
 });
 
 // POST /api/crm/devices/register
-router.post('/devices/register', authMiddleware, requireActiveSubscription, async (req, res) => {
+router.post('/devices/register', crmDeviceLimiter, authMiddleware, requireActiveSubscription, async (req, res) => {
     try {
         const { machineFingerprint, displayName, platform, appVersion, agentVersion } = req.body;
 
@@ -486,6 +502,13 @@ router.post('/devices/register', authMiddleware, requireActiveSubscription, asyn
         });
 
         await newDevice.save();
+
+        await CrmAuditLog.create({
+            userId: req.user._id,
+            subscriptionId: sub._id,
+            action: 'device_registered',
+            details: { deviceId: newDevice._id, platform }
+        });
 
         res.json({
             success: true,
@@ -532,7 +555,7 @@ router.post('/devices/:id/disable', authMiddleware, async (req, res) => {
 });
 
 // POST /api/crm/pairing/start
-router.post('/pairing/start', userOrAgentAuth, requireActiveSubscription, async (req, res) => {
+router.post('/pairing/start', crmPairingLimiter, userOrAgentAuth, requireActiveSubscription, async (req, res) => {
     try {
         const { deviceId } = req.body;
         if (!deviceId) {
@@ -586,7 +609,7 @@ router.post('/pairing/start', userOrAgentAuth, requireActiveSubscription, async 
 });
 
 // POST /api/crm/pairing/confirm
-router.post('/pairing/confirm', authMiddleware, requireActiveSubscription, async (req, res) => {
+router.post('/pairing/confirm', crmPairingLimiter, authMiddleware, requireActiveSubscription, async (req, res) => {
     try {
         const { pairingCode, qrToken } = req.body;
 
@@ -632,6 +655,13 @@ router.post('/pairing/confirm', authMiddleware, requireActiveSubscription, async
                 await device.save();
             }
         }
+
+        await CrmAuditLog.create({
+            userId: req.user._id,
+            subscriptionId: session.subscriptionId,
+            action: 'device_paired',
+            details: { deviceId: session.deviceId, sessionId: session._id }
+        });
 
         res.json({
             success: true,
@@ -1125,7 +1155,7 @@ router.get('/execution-logs', authMiddleware, async (req, res) => {
 // ==========================================
 
 // POST /api/crm/ai/chat
-router.post('/ai/chat', authMiddleware, requireActiveSubscription, async (req, res) => {
+router.post('/ai/chat', crmAiLimiter, authMiddleware, requireActiveSubscription, async (req, res) => {
     const startTime = Date.now();
     let quotaBucket = 'none';
     const sub = req.crmSubscription;
