@@ -1,0 +1,1394 @@
+import express from 'express';
+import crypto from 'crypto';
+import { authMiddleware, adminOnly } from '../middleware/auth.js';
+import User from '../models/User.js';
+import Transaction from '../models/Transaction.js';
+import CrmSubscription from '../models/CrmSubscription.js';
+import CrmDevice from '../models/CrmDevice.js';
+import CrmPairingSession from '../models/CrmPairingSession.js';
+import CrmAgentCommand from '../models/CrmAgentCommand.js';
+import CrmBillingOrder from '../models/CrmBillingOrder.js';
+import CrmAiUsage from '../models/CrmAiUsage.js';
+import CrmCustomer from '../models/CrmCustomer.js';
+import CrmContact from '../models/CrmContact.js';
+import CrmTemplate from '../models/CrmTemplate.js';
+import CrmCampaign from '../models/CrmCampaign.js';
+import CrmExecutionLog from '../models/CrmExecutionLog.js';
+import SystemSetting from '../models/SystemSetting.js';
+
+import { CRM_PLANS, CRM_AI_PACKS, getCrmProduct } from '../utils/crmCatalog.js';
+import { hasQuota, consumeQuota, refundQuota } from '../utils/crmQuota.js';
+import { fulfillCrmBillingOrder } from '../utils/crmBilling.js';
+import { callConfiguredAiProvider } from '../utils/aiProvider.js';
+
+const router = express.Router();
+
+// Helper to generate a random 6-character uppercase string
+const generateOrderContent = () => {
+    const uppercase = 'ABCDEFGHJKLMNPQRSTUVWXYZ';
+    const numbers = '123456789';
+    const allChars = uppercase + numbers;
+    let result = '';
+    result += uppercase.charAt(Math.floor(Math.random() * uppercase.length));
+    result += uppercase.charAt(Math.floor(Math.random() * uppercase.length));
+    result += numbers.charAt(Math.floor(Math.random() * numbers.length));
+    result += numbers.charAt(Math.floor(Math.random() * numbers.length));
+    result += allChars.charAt(Math.floor(Math.random() * allChars.length));
+    result += allChars.charAt(Math.floor(Math.random() * allChars.length));
+    return result.split('').sort(() => 0.5 - Math.random()).join('');
+};
+
+// Helper: Ensure user has active CRM subscription for mutating actions
+const requireActiveSubscription = async (req, res, next) => {
+    try {
+        const sub = await CrmSubscription.findOne({ userId: req.user._id, status: 'active' });
+        if (!sub) {
+            return res.status(403).json({
+                success: false,
+                message: 'Yêu cầu gói đăng ký Alpha CRM đang hoạt động.'
+            });
+        }
+        
+        // Check periodEnd proactively
+        if (new Date() > new Date(sub.periodEnd)) {
+            sub.status = 'expired';
+            await sub.save();
+            return res.status(403).json({
+                success: false,
+                message: 'Gói đăng ký Alpha CRM của bạn đã hết hạn.'
+            });
+        }
+        
+        req.crmSubscription = sub;
+        next();
+    } catch (error) {
+        next(error);
+    }
+};
+
+const agentAuthMiddleware = async (req, res, next) => {
+    try {
+        const deviceId = req.headers['x-agent-device-id'] || req.body.deviceId;
+        const agentSecret = req.headers['x-agent-secret'] || req.body.agentSecret;
+
+        if (!deviceId || !agentSecret) {
+            return res.status(401).json({ success: false, message: 'Thiếu deviceId hoặc agentSecret.' });
+        }
+
+        const device = await CrmDevice.findOne({ _id: deviceId, status: 'active' });
+        if (!device) {
+            return res.status(403).json({ success: false, message: 'Thiết bị không tồn tại hoặc đã bị vô hiệu hóa.' });
+        }
+
+        const incomingSecretHash = crypto.createHash('sha256').update(agentSecret).digest('hex');
+        if (device.agentSecretHash !== incomingSecretHash) {
+            return res.status(403).json({ success: false, message: 'Sai mật khẩu thiết bị.' });
+        }
+
+        req.crmDevice = device;
+        req.user = { _id: device.userId }; // Mock req.user for active subscription checks
+        next();
+    } catch (error) {
+        next(error);
+    }
+};
+
+const userOrAgentAuth = async (req, res, next) => {
+    if ((req.headers['x-agent-device-id'] && req.headers['x-agent-secret']) || (req.body.deviceId && req.body.agentSecret)) {
+        return agentAuthMiddleware(req, res, next);
+    }
+    return authMiddleware(req, res, next);
+};
+
+// ==========================================
+// 1. CATALOG, SUBSCRIPTION, & QUOTA ROUTES
+// ==========================================
+
+// GET /api/crm/catalog
+router.get('/catalog', (req, res) => {
+    res.json({
+        success: true,
+        data: {
+            plans: CRM_PLANS,
+            packs: CRM_AI_PACKS
+        }
+    });
+});
+
+// GET /api/crm/subscription/me
+router.get('/subscription/me', authMiddleware, async (req, res) => {
+    try {
+        // Find latest subscription (could be active, expired, cancelled, etc.)
+        const sub = await CrmSubscription.findOne({ userId: req.user._id }).sort({ createdAt: -1 });
+        if (!sub) {
+            return res.json({
+                success: true,
+                message: 'Không tìm thấy gói đăng ký CRM nào.',
+                data: { active: false, subscription: null }
+            });
+        }
+
+        // Proactively check expiry and auto-expire if periodEnd has passed
+        if (sub.status === 'active' && new Date() > new Date(sub.periodEnd)) {
+            sub.status = 'expired';
+            await sub.save();
+        }
+
+        res.json({
+            success: true,
+            data: {
+                active: sub.status === 'active',
+                subscription: sub
+            }
+        });
+    } catch (error) {
+        console.error('Error fetching CRM subscription:', error);
+        res.status(500).json({ success: false, message: 'Lỗi máy chủ.' });
+    }
+});
+
+// GET /api/crm/quota
+router.get('/quota', authMiddleware, async (req, res) => {
+    try {
+        const sub = await CrmSubscription.findOne({ userId: req.user._id, status: 'active' });
+        if (!sub) {
+            return res.json({
+                success: true,
+                data: {
+                    active: false,
+                    includedAiLimit: 0,
+                    includedAiUsed: 0,
+                    extraAiRemaining: 0,
+                    totalRemaining: 0
+                }
+            });
+        }
+
+        // Proactively verify periodEnd of the active subscription
+        if (new Date() > new Date(sub.periodEnd)) {
+            sub.status = 'expired';
+            await sub.save();
+            return res.json({
+                success: true,
+                data: {
+                    active: false,
+                    includedAiLimit: sub.includedAiLimit,
+                    includedAiUsed: sub.includedAiUsed,
+                    extraAiRemaining: sub.extraAiRemaining,
+                    totalRemaining: sub.extraAiRemaining // Extra AI requests are still kept but inactive
+                }
+            });
+        }
+
+        const includedRemaining = Math.max(0, sub.includedAiLimit - sub.includedAiUsed);
+        res.json({
+            success: true,
+            data: {
+                active: true,
+                includedAiLimit: sub.includedAiLimit,
+                includedAiUsed: sub.includedAiUsed,
+                extraAiRemaining: sub.extraAiRemaining,
+                totalRemaining: includedRemaining + sub.extraAiRemaining
+            }
+        });
+    } catch (error) {
+        console.error('Error fetching CRM quota:', error);
+        res.status(500).json({ success: false, message: 'Lỗi máy chủ.' });
+    }
+});
+
+// ==========================================
+// 2. CRM BILLING ROUTES
+// ==========================================
+
+// POST /api/crm/billing/checkout
+router.post('/billing/checkout', authMiddleware, async (req, res) => {
+    try {
+        const { productId, paymentMethod } = req.body;
+
+        if (!productId || !paymentMethod) {
+            return res.status(400).json({ success: false, message: 'Thiếu productId hoặc paymentMethod.' });
+        }
+
+        const product = getCrmProduct(productId);
+        if (!product) {
+            return res.status(404).json({ success: false, message: 'Không tìm thấy sản phẩm này trong danh mục.' });
+        }
+
+        const orderType = CRM_PLANS[productId] ? 'subscription' : 'ai_pack';
+
+        // Check if active subscription exists for AI packs at checkout time
+        if (orderType === 'ai_pack') {
+            const activeSub = await CrmSubscription.findOne({ userId: req.user._id, status: 'active' });
+            if (!activeSub) {
+                return res.status(400).json({ 
+                    success: false, 
+                    message: 'Bạn phải có gói CRM đang hoạt động để mua gói AI top-up.' 
+                });
+            }
+            if (new Date() > new Date(activeSub.periodEnd)) {
+                activeSub.status = 'expired';
+                await activeSub.save();
+                return res.status(400).json({ 
+                    success: false, 
+                    message: 'Gói đăng ký CRM của bạn đã hết hạn. Hãy gia hạn trước khi mua gói AI top-up.' 
+                });
+            }
+        }
+
+        // Method 1: Credit Balance Checkout (Fulfill immediately)
+        if (paymentMethod === 'credit') {
+            const priceCredits = product.priceCredits;
+
+            // Deduct balance atomically
+            const user = await User.findOneAndUpdate(
+                { _id: req.user._id, balance: { $gte: priceCredits } },
+                { $inc: { balance: -priceCredits } },
+                { new: true }
+            );
+
+            if (!user) {
+                return res.status(400).json({ success: false, message: 'Số dư credit của bạn không đủ.' });
+            }
+
+            // Generate unique transaction code
+            let transactionCode = 'CRM-' + generateOrderContent();
+
+            try {
+                // Create Transaction record for credits spent
+                const transaction = new Transaction({
+                    userId: user._id,
+                    type: 'spend',
+                    amount: product.priceVnd,
+                    credits: priceCredits,
+                    status: 'completed',
+                    transactionCode,
+                    paymentMethod: 'system',
+                    description: `Mua ${product.name} qua Credits`,
+                    serviceType: orderType === 'subscription' ? 'alpha_crm_subscription' : 'alpha_crm_ai_pack',
+                    processedAt: new Date()
+                });
+                await transaction.save();
+
+                // Fulfill the product
+                let subscription;
+                if (orderType === 'subscription') {
+                    const now = new Date();
+                    const oldActiveSub = await CrmSubscription.findOne({ userId: user._id, status: 'active' });
+
+                    if (oldActiveSub) {
+                        // Check proactively if it is expired by date
+                        if (new Date() > new Date(oldActiveSub.periodEnd)) {
+                            // Expire it
+                            oldActiveSub.status = 'expired';
+                            await oldActiveSub.save();
+
+                            // Create new subscription starting from now
+                            subscription = new CrmSubscription({
+                                userId: user._id,
+                                status: 'active',
+                                plan: productId,
+                                periodStart: now,
+                                periodEnd: new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000),
+                                includedAiLimit: product.includedAiLimit,
+                                includedAiUsed: 0,
+                                extraAiRemaining: oldActiveSub.extraAiRemaining,
+                                deviceLimit: product.deviceLimit,
+                                lastRenewedAt: now
+                            });
+                            await subscription.save();
+                        } else {
+                            // Extend the active subscription in-place
+                            subscription = oldActiveSub;
+                            subscription.periodEnd = new Date(new Date(oldActiveSub.periodEnd).getTime() + 30 * 24 * 60 * 60 * 1000);
+                            subscription.plan = productId;
+                            subscription.includedAiLimit = product.includedAiLimit;
+                            subscription.includedAiUsed = 0; // Reset included AI quota for the new period
+                            subscription.lastRenewedAt = now;
+                            await subscription.save();
+                        }
+                    } else {
+                        // No active subscription. Find latest regardless of status to preserve extraAiRemaining
+                        const latestSub = await CrmSubscription.findOne({ userId: user._id }).sort({ createdAt: -1 });
+                        const extraAiRemaining = latestSub ? latestSub.extraAiRemaining : 0;
+
+                        subscription = new CrmSubscription({
+                            userId: user._id,
+                            status: 'active',
+                            plan: productId,
+                            periodStart: now,
+                            periodEnd: new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000),
+                            includedAiLimit: product.includedAiLimit,
+                            includedAiUsed: 0,
+                            extraAiRemaining,
+                            deviceLimit: product.deviceLimit,
+                            lastRenewedAt: now
+                        });
+                        await subscription.save();
+                    }
+                } else {
+                    // AI pack purchase (subscription check already passed at checkout top)
+                    subscription = await CrmSubscription.findOne({ userId: user._id, status: 'active' });
+                    if (!subscription) {
+                        throw new Error('Bạn phải có gói CRM đang hoạt động để mua gói AI top-up.');
+                    }
+                    subscription.extraAiRemaining += product.extraAiLimit;
+                    await subscription.save();
+                }
+
+                return res.json({
+                    success: true,
+                    message: `${product.name} đã được thanh toán thành công qua Credits.`,
+                    data: {
+                        fulfilled: true,
+                        subscription
+                    }
+                });
+
+            } catch (err) {
+                // Compensating rollback: refund credits AND mark any saved Transaction as failed
+                await User.findByIdAndUpdate(user._id, { $inc: { balance: priceCredits } });
+                // Mark the transaction as failed so billing history stays consistent
+                await Transaction.findOneAndUpdate(
+                    { transactionCode, userId: user._id, status: 'completed' },
+                    { $set: { status: 'failed', failedReason: `Fulfillment failed: ${err.message}` } }
+                );
+                console.error(`[Compensating Rollback] Rolled back credit deduction of ${priceCredits} credits for user ${user._id} due to checkout fulfillment failure:`, err);
+                
+                return res.status(500).json({ 
+                    success: false, 
+                    message: `Lỗi xử lý đơn hàng. Đã hoàn trả credit. Chi tiết: ${err.message}` 
+                });
+            }
+        }
+
+        // Method 2: Bank Transfer (Creates a CrmBillingOrder)
+        if (paymentMethod === 'bank_transfer') {
+            // Generate unique order code (starts with CRM)
+            let orderCode;
+            let attempts = 0;
+            do {
+                orderCode = 'CRM' + generateOrderContent();
+                const exists = await CrmBillingOrder.findOne({ transactionCode: orderCode });
+                if (!exists) break;
+                attempts++;
+            } while (attempts < 10);
+
+            if (attempts >= 10) {
+                return res.status(500).json({ success: false, message: 'Không thể tạo mã đơn hàng duy nhất.' });
+            }
+
+            const billingOrder = new CrmBillingOrder({
+                userId: req.user._id,
+                productId,
+                orderType,
+                paymentMethod: 'bank_transfer',
+                amountVnd: product.priceVnd,
+                credits: product.priceCredits,
+                transactionCode: orderCode,
+                status: 'pending'
+            });
+            await billingOrder.save();
+
+            const bankInfo = {
+                bankId: 'OCB',
+                bankName: 'OCB (Phương Đông)',
+                accountNumber: 'CASS55252503',
+                accountHolder: 'NGUYEN ANH DUC'
+            };
+
+            const qrCodeUrl = `https://img.vietqr.io/image/${bankInfo.bankId}-${bankInfo.accountNumber}-compact2.png?amount=${product.priceVnd}&addInfo=${orderCode}`;
+
+            return res.json({
+                success: true,
+                data: {
+                    fulfilled: false,
+                    order: billingOrder,
+                    bankInfo,
+                    qrCodeUrl,
+                    transferContent: orderCode
+                }
+            });
+        }
+
+        res.status(400).json({ success: false, message: 'Phương thức thanh toán không được hỗ trợ.' });
+    } catch (error) {
+        console.error('Checkout error:', error);
+        res.status(500).json({ success: false, message: 'Lỗi máy chủ khi tạo đơn hàng.' });
+    }
+});
+
+// GET /api/crm/billing/orders
+router.get('/billing/orders', authMiddleware, async (req, res) => {
+    try {
+        const orders = await CrmBillingOrder.find({ userId: req.user._id }).sort({ createdAt: -1 });
+        res.json({ success: true, data: orders });
+    } catch (error) {
+        console.error('Error fetching billing orders:', error);
+        res.status(500).json({ success: false, message: 'Lỗi máy chủ.' });
+    }
+});
+
+// ==========================================
+// 3. DEVICE REGISTRATION & PAIRING ROUTES
+// ==========================================
+
+// GET /api/crm/devices
+router.get('/devices', authMiddleware, async (req, res) => {
+    try {
+        const devices = await CrmDevice.find({ userId: req.user._id }).sort({ createdAt: -1 });
+        res.json({ success: true, data: devices });
+    } catch (error) {
+        console.error('Error fetching devices:', error);
+        res.status(500).json({ success: false, message: 'Lỗi máy chủ.' });
+    }
+});
+
+// POST /api/crm/devices/register
+router.post('/devices/register', authMiddleware, requireActiveSubscription, async (req, res) => {
+    try {
+        const { machineFingerprint, displayName, platform, appVersion, agentVersion } = req.body;
+
+        if (!machineFingerprint || !displayName) {
+            return res.status(400).json({ success: false, message: 'Thiếu vân tay máy (machineFingerprint) hoặc tên hiển thị.' });
+        }
+
+        const sub = req.crmSubscription;
+
+        // Hash the fingerprint hash to avoid exposing raw fingerprints
+        const machineFingerprintHash = crypto.createHash('sha256').update(machineFingerprint).digest('hex');
+
+        // Check if there are other active devices on this subscription
+        const activeDevices = await CrmDevice.find({ subscriptionId: sub._id, status: 'active' });
+
+        if (activeDevices.length >= sub.deviceLimit) {
+            return res.status(400).json({
+                success: false,
+                message: `Đã đạt giới hạn thiết bị hoạt động (${sub.deviceLimit}). Vui lòng vô hiệu hóa thiết bị cũ trước.`
+            });
+        }
+
+        // Generate a cryptographically strong secret for the agent
+        const agentSecret = crypto.randomBytes(32).toString('hex');
+        const agentSecretHash = crypto.createHash('sha256').update(agentSecret).digest('hex');
+
+        const newDevice = new CrmDevice({
+            userId: req.user._id,
+            subscriptionId: sub._id,
+            machineFingerprintHash,
+            displayName,
+            platform: platform || 'windows',
+            appVersion: appVersion || '',
+            agentVersion: agentVersion || '',
+            status: 'active',
+            agentSecretHash,
+            lastIp: req.ip
+        });
+
+        await newDevice.save();
+
+        res.json({
+            success: true,
+            message: 'Đăng ký thiết bị thành công.',
+            data: {
+                deviceId: newDevice._id,
+                agentSecret // Shared ONLY once during registration
+            }
+        });
+    } catch (error) {
+        if (error.code === 11000 || error.message.includes('E11000')) {
+            const deviceLimit = req.crmSubscription ? req.crmSubscription.deviceLimit : 1;
+            return res.status(400).json({
+                success: false,
+                message: `Đã đạt giới hạn thiết bị hoạt động (${deviceLimit}). Vui lòng vô hiệu hóa thiết bị cũ trước.`
+            });
+        }
+        console.error('Device registration error:', error);
+        res.status(500).json({ success: false, message: 'Lỗi máy chủ khi đăng ký thiết bị.' });
+    }
+});
+
+// POST /api/crm/devices/:id/disable
+router.post('/devices/:id/disable', authMiddleware, async (req, res) => {
+    try {
+        const device = await CrmDevice.findOne({ _id: req.params.id, userId: req.user._id });
+        if (!device) {
+            return res.status(404).json({ success: false, message: 'Không tìm thấy thiết bị của bạn.' });
+        }
+
+        device.status = 'disabled';
+        device.replacedAt = new Date();
+        await device.save();
+
+        res.json({
+            success: true,
+            message: 'Đã vô hiệu hóa thiết bị thành công.',
+            data: device
+        });
+    } catch (error) {
+        console.error('Error disabling device:', error);
+        res.status(500).json({ success: false, message: 'Lỗi máy chủ.' });
+    }
+});
+
+// POST /api/crm/pairing/start
+router.post('/pairing/start', userOrAgentAuth, requireActiveSubscription, async (req, res) => {
+    try {
+        const { deviceId } = req.body;
+        if (!deviceId) {
+            return res.status(400).json({ success: false, message: 'Thiếu deviceId.' });
+        }
+
+        const device = await CrmDevice.findOne({ _id: deviceId, userId: req.user._id, status: 'active' });
+        if (!device) {
+            return res.status(404).json({ success: false, message: 'Không tìm thấy thiết bị hoạt động tương ứng.' });
+        }
+
+        // Generate 6-digit pairing code
+        const pairingCode = Math.floor(100000 + Math.random() * 900000).toString();
+        const pairingCodeHash = crypto.createHash('sha256').update(pairingCode).digest('hex');
+
+        // Generate dynamic QR pairing token
+        const qrToken = crypto.randomBytes(24).toString('hex');
+        const qrTokenHash = crypto.createHash('sha256').update(qrToken).digest('hex');
+
+        // 5-minute expiry
+        const expiresAt = new Date(Date.now() + 5 * 60 * 1000);
+
+        // Delete any existing pending sessions for this device
+        await CrmPairingSession.deleteMany({ deviceId: device._id, status: 'pending' });
+
+        const pairingSession = new CrmPairingSession({
+            userId: req.user._id,
+            subscriptionId: req.crmSubscription._id,
+            deviceId: device._id,
+            pairingCodeHash,
+            qrTokenHash,
+            status: 'pending',
+            expiresAt
+        });
+
+        await pairingSession.save();
+
+        res.json({
+            success: true,
+            data: {
+                sessionId: pairingSession._id,
+                pairingCode, // Displayed to user
+                qrToken, // Embedded in VietQR/Pairing QR code
+                expiresAt
+            }
+        });
+    } catch (error) {
+        console.error('Pairing start error:', error);
+        res.status(500).json({ success: false, message: 'Lỗi máy chủ khi thiết lập ghép đôi.' });
+    }
+});
+
+// POST /api/crm/pairing/confirm
+router.post('/pairing/confirm', authMiddleware, requireActiveSubscription, async (req, res) => {
+    try {
+        const { pairingCode, qrToken } = req.body;
+
+        if (!pairingCode && !qrToken) {
+            return res.status(400).json({ success: false, message: 'Cần mã ghép đôi (pairingCode) hoặc mã QR (qrToken).' });
+        }
+
+        let query = { status: 'pending', expiresAt: { $gt: new Date() } };
+
+        if (pairingCode) {
+            const hash = crypto.createHash('sha256').update(pairingCode).digest('hex');
+            query.pairingCodeHash = hash;
+        } else {
+            const hash = crypto.createHash('sha256').update(qrToken).digest('hex');
+            query.qrTokenHash = hash;
+        }
+
+        const session = await CrmPairingSession.findOne(query);
+
+        if (!session) {
+            return res.status(404).json({ success: false, message: 'Mã ghép đôi không hợp lệ hoặc đã hết hạn.' });
+        }
+
+        // Verify cross-account security: confirming user must match pairing owner
+        if (session.userId.toString() !== req.user._id.toString()) {
+            return res.status(403).json({
+                success: false,
+                message: 'Không có quyền xác nhận ghép đôi cho tài khoản khác.'
+            });
+        }
+
+        // Confirm session
+        session.status = 'confirmed';
+        session.confirmedAt = new Date();
+        session.confirmedByUserId = req.user._id;
+        await session.save();
+
+        // Update the CrmDevice to record mobile user pairing
+        const device = await CrmDevice.findById(session.deviceId);
+        if (device) {
+            if (!device.pairedMobileUserIds.includes(req.user._id)) {
+                device.pairedMobileUserIds.push(req.user._id);
+                await device.save();
+            }
+        }
+
+        res.json({
+            success: true,
+            message: 'Đã xác nhận ghép đôi thiết bị thành công.',
+            data: {
+                deviceId: session.deviceId,
+                confirmedAt: session.confirmedAt
+            }
+        });
+    } catch (error) {
+        console.error('Pairing confirmation error:', error);
+        res.status(500).json({ success: false, message: 'Lỗi máy chủ khi xác nhận ghép đôi.' });
+    }
+});
+
+// GET /api/crm/pairing/:id
+router.get('/pairing/:id', authMiddleware, async (req, res) => {
+    try {
+        const session = await CrmPairingSession.findOne({ _id: req.params.id, userId: req.user._id });
+        if (!session) {
+            return res.status(404).json({ success: false, message: 'Không tìm thấy phiên ghép đôi này.' });
+        }
+        res.json({ success: true, data: session });
+    } catch (error) {
+        console.error('Error fetching pairing session:', error);
+        res.status(500).json({ success: false, message: 'Lỗi máy chủ.' });
+    }
+});
+
+// ==========================================
+// 3.5. OUTBOUND AGENT ENDPOINTS (AGENT AUTHENTICATED)
+// ==========================================
+
+
+// POST /api/crm/agent/heartbeat
+router.post('/agent/heartbeat', agentAuthMiddleware, async (req, res) => {
+    try {
+        const device = req.crmDevice;
+        const { status, appVersion, agentVersion, lastError } = req.body;
+
+        device.lastSeenAt = new Date();
+        device.lastIp = req.ip;
+        
+        if (appVersion) device.appVersion = appVersion;
+        if (agentVersion) device.agentVersion = agentVersion;
+        
+        await device.save();
+
+        res.json({
+            success: true,
+            message: 'Nhận Heartbeat Agent thành công.'
+        });
+    } catch (error) {
+        console.error('Agent heartbeat error:', error);
+        res.status(500).json({ success: false, message: 'Lỗi server khi ghi nhận heartbeat.' });
+    }
+});
+
+// POST /api/crm/agent/commands/next
+router.post('/agent/commands/next', agentAuthMiddleware, async (req, res) => {
+    try {
+        const device = req.crmDevice;
+
+        // Find the oldest queued command for this device
+        const command = await CrmAgentCommand.findOneAndUpdate(
+            { deviceId: device._id, status: 'queued' },
+            { $set: { status: 'sent', sentAt: new Date() } },
+            { sort: { createdAt: 1 }, new: true }
+        );
+
+        res.json({
+            success: true,
+            data: command || null
+        });
+    } catch (error) {
+        console.error('Error fetching next agent command:', error);
+        res.status(500).json({ success: false, message: 'Lỗi server.' });
+    }
+});
+
+// POST /api/crm/agent/commands/:id/result
+router.post('/agent/commands/:id/result', agentAuthMiddleware, async (req, res) => {
+    try {
+        const device = req.crmDevice;
+        const { success, result, errorMessage } = req.body;
+
+        const command = await CrmAgentCommand.findOne({ _id: req.params.id, deviceId: device._id });
+        if (!command) {
+            return res.status(404).json({ success: false, message: 'Không tìm thấy lệnh này.' });
+        }
+
+        if (success && result && result.status === 'running') {
+            command.status = 'running';
+            command.result = result;
+            command.startedAt = command.startedAt || new Date();
+            await command.save();
+
+            return res.json({
+                success: true,
+                message: 'Cap nhat trang thai lenh dang chay thanh cong.'
+            });
+        }
+
+        command.status = success ? 'succeeded' : 'failed';
+        if (result) command.result = result;
+        if (errorMessage) command.errorMessage = errorMessage;
+        command.finishedAt = new Date();
+        await command.save();
+
+        // Auto-update CrmCampaign status based on command result
+        if (command.type === 'START_CAMPAIGN') {
+            const campaignId = command.payload?.campaignId;
+            if (campaignId) {
+                const campaign = await CrmCampaign.findById(campaignId);
+                if (campaign) {
+                    const results = (result && Array.isArray(result.results)) ? result.results : [];
+                    const wasCancelled = results.some(r => r.status === 'cancelled');
+                    campaign.status = wasCancelled ? 'cancelled' : 'completed';
+                    campaign.finishedAt = new Date();
+                    await campaign.save();
+                    console.log(`[crm-agent] Automatically updated Campaign ${campaignId} status to ${campaign.status}`);
+                }
+            }
+        }
+
+        res.json({
+            success: true,
+            message: 'Cập nhật kết quả lệnh thành công.'
+        });
+    } catch (error) {
+        console.error('Error updating agent command result:', error);
+        res.status(500).json({ success: false, message: 'Lỗi server.' });
+    }
+});
+
+// ==========================================
+// 4. CLOUD CRM CUSTOMER/CONTACT/TEMPLATE/CAMPAIGN CRUD
+// ==========================================
+
+// --- CUSTOMERS ---
+router.get('/customers', authMiddleware, async (req, res) => {
+    try {
+        const customers = await CrmCustomer.find({ userId: req.user._id }).sort({ createdAt: -1 });
+        res.json({ success: true, data: customers });
+    } catch (error) {
+        console.error(error);
+        res.status(500).json({ success: false, message: 'Lỗi server.' });
+    }
+});
+
+router.post('/customers', authMiddleware, requireActiveSubscription, async (req, res) => {
+    try {
+        const newCust = new CrmCustomer({
+            ...req.body,
+            userId: req.user._id
+        });
+        await newCust.save();
+        res.json({ success: true, data: newCust });
+    } catch (error) {
+        console.error(error);
+        res.status(500).json({ success: false, message: 'Lỗi server.' });
+    }
+});
+
+router.get('/customers/:id', authMiddleware, async (req, res) => {
+    try {
+        const cust = await CrmCustomer.findOne({ _id: req.params.id, userId: req.user._id });
+        if (!cust) return res.status(404).json({ success: false, message: 'Không tìm thấy khách hàng.' });
+        res.json({ success: true, data: cust });
+    } catch (error) {
+        console.error(error);
+        res.status(500).json({ success: false, message: 'Lỗi server.' });
+    }
+});
+
+router.put('/customers/:id', authMiddleware, requireActiveSubscription, async (req, res) => {
+    try {
+        const updateData = { ...req.body };
+        delete updateData.userId;
+        delete updateData._id;
+        delete updateData.createdAt;
+        delete updateData.updatedAt;
+
+        const cust = await CrmCustomer.findOneAndUpdate(
+            { _id: req.params.id, userId: req.user._id },
+            { $set: updateData },
+            { new: true }
+        );
+        if (!cust) return res.status(404).json({ success: false, message: 'Không tìm thấy khách hàng.' });
+        res.json({ success: true, data: cust });
+    } catch (error) {
+        console.error(error);
+        res.status(500).json({ success: false, message: 'Lỗi server.' });
+    }
+});
+
+router.delete('/customers/:id', authMiddleware, requireActiveSubscription, async (req, res) => {
+    try {
+        const result = await CrmCustomer.findOneAndDelete({ _id: req.params.id, userId: req.user._id });
+        if (!result) return res.status(404).json({ success: false, message: 'Không tìm thấy khách hàng.' });
+        res.json({ success: true, message: 'Đã xóa khách hàng.' });
+    } catch (error) {
+        console.error(error);
+        res.status(500).json({ success: false, message: 'Lỗi server.' });
+    }
+});
+
+// --- CONTACTS ---
+router.get('/contacts', authMiddleware, async (req, res) => {
+    try {
+        const contacts = await CrmContact.find({ userId: req.user._id }).sort({ createdAt: -1 });
+        res.json({ success: true, data: contacts });
+    } catch (error) {
+        console.error(error);
+        res.status(500).json({ success: false, message: 'Lỗi server.' });
+    }
+});
+
+router.post('/contacts', authMiddleware, requireActiveSubscription, async (req, res) => {
+    try {
+        const newContact = new CrmContact({
+            ...req.body,
+            userId: req.user._id
+        });
+        await newContact.save();
+        res.json({ success: true, data: newContact });
+    } catch (error) {
+        console.error(error);
+        res.status(500).json({ success: false, message: 'Lỗi server.' });
+    }
+});
+
+router.put('/contacts/:id', authMiddleware, requireActiveSubscription, async (req, res) => {
+    try {
+        const updateData = { ...req.body };
+        delete updateData.userId;
+        delete updateData._id;
+        delete updateData.createdAt;
+        delete updateData.updatedAt;
+
+        const contact = await CrmContact.findOneAndUpdate(
+            { _id: req.params.id, userId: req.user._id },
+            { $set: updateData },
+            { new: true }
+        );
+        if (!contact) return res.status(404).json({ success: false, message: 'Không tìm thấy liên hệ.' });
+        res.json({ success: true, data: contact });
+    } catch (error) {
+        console.error(error);
+        res.status(500).json({ success: false, message: 'Lỗi server.' });
+    }
+});
+
+router.delete('/contacts/:id', authMiddleware, requireActiveSubscription, async (req, res) => {
+    try {
+        const result = await CrmContact.findOneAndDelete({ _id: req.params.id, userId: req.user._id });
+        if (!result) return res.status(404).json({ success: false, message: 'Không tìm thấy liên hệ.' });
+        res.json({ success: true, message: 'Đã xóa liên hệ.' });
+    } catch (error) {
+        console.error(error);
+        res.status(500).json({ success: false, message: 'Lỗi server.' });
+    }
+});
+
+// --- TEMPLATES ---
+router.get('/templates', authMiddleware, async (req, res) => {
+    try {
+        const templates = await CrmTemplate.find({ userId: req.user._id }).sort({ createdAt: -1 });
+        res.json({ success: true, data: templates });
+    } catch (error) {
+        console.error(error);
+        res.status(500).json({ success: false, message: 'Lỗi server.' });
+    }
+});
+
+router.post('/templates', authMiddleware, requireActiveSubscription, async (req, res) => {
+    try {
+        const newTemplate = new CrmTemplate({
+            ...req.body,
+            userId: req.user._id
+        });
+        await newTemplate.save();
+        res.json({ success: true, data: newTemplate });
+    } catch (error) {
+        console.error(error);
+        res.status(500).json({ success: false, message: 'Lỗi server.' });
+    }
+});
+
+router.put('/templates/:id', authMiddleware, requireActiveSubscription, async (req, res) => {
+    try {
+        const updateData = { ...req.body };
+        delete updateData.userId;
+        delete updateData._id;
+        delete updateData.createdAt;
+        delete updateData.updatedAt;
+
+        const template = await CrmTemplate.findOneAndUpdate(
+            { _id: req.params.id, userId: req.user._id },
+            { $set: updateData },
+            { new: true }
+        );
+        if (!template) return res.status(404).json({ success: false, message: 'Không tìm thấy biểu mẫu.' });
+        res.json({ success: true, data: template });
+    } catch (error) {
+        console.error(error);
+        res.status(500).json({ success: false, message: 'Lỗi server.' });
+    }
+});
+
+router.delete('/templates/:id', authMiddleware, requireActiveSubscription, async (req, res) => {
+    try {
+        const result = await CrmTemplate.findOneAndDelete({ _id: req.params.id, userId: req.user._id });
+        if (!result) return res.status(404).json({ success: false, message: 'Không tìm thấy biểu mẫu.' });
+        res.json({ success: true, message: 'Đã xóa biểu mẫu.' });
+    } catch (error) {
+        console.error(error);
+        res.status(500).json({ success: false, message: 'Lỗi server.' });
+    }
+});
+
+// --- CAMPAIGNS ---
+router.get('/campaigns', authMiddleware, async (req, res) => {
+    try {
+        const campaigns = await CrmCampaign.find({ userId: req.user._id }).sort({ createdAt: -1 });
+        res.json({ success: true, data: campaigns });
+    } catch (error) {
+        console.error(error);
+        res.status(500).json({ success: false, message: 'Lỗi server.' });
+    }
+});
+
+router.post('/campaigns', authMiddleware, requireActiveSubscription, async (req, res) => {
+    try {
+        const newCampaign = new CrmCampaign({
+            ...req.body,
+            userId: req.user._id
+        });
+        await newCampaign.save();
+        res.json({ success: true, data: newCampaign });
+    } catch (error) {
+        console.error(error);
+        res.status(500).json({ success: false, message: 'Lỗi server.' });
+    }
+});
+
+router.put('/campaigns/:id', authMiddleware, requireActiveSubscription, async (req, res) => {
+    try {
+        const updateData = { ...req.body };
+        delete updateData.userId;
+        delete updateData._id;
+        delete updateData.createdAt;
+        delete updateData.updatedAt;
+
+        const campaign = await CrmCampaign.findOneAndUpdate(
+            { _id: req.params.id, userId: req.user._id },
+            { $set: updateData },
+            { new: true }
+        );
+        if (!campaign) return res.status(404).json({ success: false, message: 'Không tìm thấy chiến dịch.' });
+        res.json({ success: true, data: campaign });
+    } catch (error) {
+        console.error(error);
+        res.status(500).json({ success: false, message: 'Lỗi server.' });
+    }
+});
+
+// POST /api/crm/campaigns/:id/start
+router.post('/campaigns/:id/start', authMiddleware, requireActiveSubscription, async (req, res) => {
+    try {
+        const campaign = await CrmCampaign.findOne({ _id: req.params.id, userId: req.user._id });
+        if (!campaign) {
+            return res.status(404).json({ success: false, message: 'Không tìm thấy chiến dịch.' });
+        }
+
+        if (campaign.status === 'running' || campaign.status === 'completed') {
+            return res.status(400).json({ success: false, message: 'Chiến dịch đã/đang chạy.' });
+        }
+
+        // Find active device for enqueuing commands
+        const activeDevice = await CrmDevice.findOne({ userId: req.user._id, status: 'active' });
+        if (!activeDevice) {
+            return res.status(400).json({ 
+                success: false, 
+                message: 'Bạn cần ghép đôi thiết bị Windows đang hoạt động trước khi bắt đầu chiến dịch.' 
+            });
+        }
+
+        // Fetch template content
+        const template = await CrmTemplate.findOne({ _id: campaign.templateId, userId: req.user._id });
+        if (!template) {
+            return res.status(400).json({
+                success: false,
+                message: 'Khong tim thay mau tin nhan cua chien dich.'
+            });
+        }
+        const templateMessageText = template ? template.body : 'Tin nhắn chiến dịch';
+
+        // Fetch recipients details (Zalo phone, name, ID)
+        const customers = await CrmCustomer.find({ _id: { $in: campaign.targetCustomerIds }, userId: req.user._id });
+        const targetRecipients = customers
+            .map(c => ({
+                customerId: c._id,
+                phone: c.phone ? c.phone.trim() : '',
+                name: c.name
+            }))
+            .filter(c => c.phone !== '');
+
+        if (targetRecipients.length === 0) {
+            return res.status(400).json({
+                success: false,
+                message: 'Chien dich khong co khach hang nao co so dien thoai/Zalo hop le.'
+            });
+        }
+
+        campaign.status = 'running';
+        campaign.startedAt = new Date();
+        await campaign.save();
+
+        // Enqueue command tasks to active Windows agent (rather than calling agent directly)
+        const agentCommand = new CrmAgentCommand({
+            userId: req.user._id,
+            subscriptionId: req.crmSubscription._id,
+            deviceId: activeDevice._id,
+            type: 'START_CAMPAIGN',
+            payload: {
+                campaignId: campaign._id,
+                templateId: campaign.templateId,
+                message: templateMessageText,
+                channel: campaign.channel,
+                recipients: targetRecipients
+            },
+            status: 'queued'
+        });
+        await agentCommand.save();
+
+        res.json({
+            success: true,
+            message: 'Đã đưa lệnh bắt đầu chiến dịch vào hàng đợi lệnh của thiết bị.',
+            data: { campaign, agentCommand }
+        });
+    } catch (error) {
+        console.error('Campaign start error:', error);
+        res.status(500).json({ success: false, message: 'Lỗi máy chủ.' });
+    }
+});
+
+// POST /api/crm/campaigns/:id/cancel
+router.post('/campaigns/:id/cancel', authMiddleware, requireActiveSubscription, async (req, res) => {
+    try {
+        const campaign = await CrmCampaign.findOne({ _id: req.params.id, userId: req.user._id });
+        if (!campaign) return res.status(404).json({ success: false, message: 'Không tìm thấy chiến dịch.' });
+
+        campaign.status = 'cancelled';
+        campaign.finishedAt = new Date();
+        await campaign.save();
+
+        // Send cancel command to agent
+        const activeDevice = await CrmDevice.findOne({ userId: req.user._id, status: 'active' });
+        if (activeDevice) {
+            await CrmAgentCommand.create({
+                userId: req.user._id,
+                subscriptionId: req.crmSubscription._id,
+                deviceId: activeDevice._id,
+                type: 'CANCEL_CAMPAIGN',
+                payload: { campaignId: campaign._id },
+                status: 'queued'
+            });
+        }
+
+        res.json({ success: true, message: 'Đã hủy chiến dịch thành công.', data: campaign });
+    } catch (error) {
+        console.error(error);
+        res.status(500).json({ success: false, message: 'Lỗi server.' });
+    }
+});
+
+// --- EXECUTION LOGS ---
+router.get('/execution-logs', authMiddleware, async (req, res) => {
+    try {
+        const logs = await CrmExecutionLog.find({ userId: req.user._id }).sort({ createdAt: -1 });
+        res.json({ success: true, data: logs });
+    } catch (error) {
+        console.error(error);
+        res.status(500).json({ success: false, message: 'Lỗi server.' });
+    }
+});
+
+// ==========================================
+// 5. CRM AI ENDPOINT (QUOTA ENFORCED)
+// ==========================================
+
+// POST /api/crm/ai/chat
+router.post('/ai/chat', authMiddleware, requireActiveSubscription, async (req, res) => {
+    const startTime = Date.now();
+    let quotaBucket = 'none';
+    const sub = req.crmSubscription;
+
+    try {
+        const { message, messages } = req.body;
+        const promptContent = message || (messages && messages[messages.length - 1]?.content);
+
+        if (!promptContent) {
+            return res.status(400).json({ success: false, message: 'Nội dung tin nhắn không được rỗng.' });
+        }
+
+        // Limit message length
+        if (promptContent.length > 5000) {
+            return res.status(400).json({ success: false, message: 'Tin nhắn quá dài (tối đa 5000 ký tự).' });
+        }
+
+        // 1. Quota check
+        if (!hasQuota(sub)) {
+            return res.status(403).json({
+                success: false,
+                message: 'Hết hạn mức AI quota. Vui lòng mua thêm gói AI top-up.'
+            });
+        }
+
+        // 2. Consume quota inline before the API call to avoid race conditions
+        quotaBucket = consumeQuota(sub);
+        await sub.save();
+
+        // 3. Forward AI request
+        const sessionId = `crm:${req.user._id}`;
+        let aiResponse;
+        try {
+            aiResponse = await callConfiguredAiProvider(promptContent, sessionId, { messages });
+        } catch (aiError) {
+            // Refund consumed quota if calling upstream fails
+            refundQuota(sub, quotaBucket);
+            await sub.save();
+
+            // Log failed usage
+            await CrmAiUsage.create({
+                userId: req.user._id,
+                subscriptionId: sub._id,
+                requestType: 'chat',
+                provider: 'gcli',
+                status: 'failed',
+                quotaBucket,
+                latencyMs: Date.now() - startTime,
+                errorMessage: aiError.message
+            });
+
+            return res.status(500).json({
+                success: false,
+                message: `Lỗi AI: ${aiError.message}`
+            });
+        }
+
+        // 4. Save successful usage logs
+        const promptTokens = aiResponse.usage?.promptTokens || 0;
+        const completionTokens = aiResponse.usage?.completionTokens || 0;
+        const totalTokens = aiResponse.usage?.totalTokens || 0;
+
+        await CrmAiUsage.create({
+            userId: req.user._id,
+            subscriptionId: sub._id,
+            requestType: 'chat',
+            provider: 'gcli',
+            model: aiResponse.model,
+            status: 'succeeded',
+            quotaBucket,
+            tokens: { promptTokens, completionTokens, totalTokens },
+            latencyMs: Date.now() - startTime
+        });
+
+        const includedRemaining = Math.max(0, sub.includedAiLimit - sub.includedAiUsed);
+
+        res.json({
+            success: true,
+            data: {
+                text: aiResponse.text,
+                quota: {
+                    bucketUsed: quotaBucket,
+                    includedAiLimit: sub.includedAiLimit,
+                    includedAiUsed: sub.includedAiUsed,
+                    extraAiRemaining: sub.extraAiRemaining,
+                    totalRemaining: includedRemaining + sub.extraAiRemaining
+                }
+            }
+        });
+    } catch (error) {
+        console.error('CRM AI Chat Error:', error);
+        res.status(500).json({ success: false, message: 'Lỗi máy chủ khi xử lý AI Chat.' });
+    }
+});
+
+// ==========================================
+// 6. ADMIN CRM ENDPOINTS
+// ==========================================
+
+// GET /api/crm/admin/subscriptions
+router.get('/admin/subscriptions', authMiddleware, adminOnly, async (req, res) => {
+    try {
+        const { status, email } = req.query;
+        const query = {};
+        if (status) query.status = status;
+        if (email) {
+            const user = await User.findOne({ email });
+            if (user) query.userId = user._id;
+            else return res.json({ success: true, data: [] });
+        }
+
+        const subs = await CrmSubscription.find(query).populate('userId', 'name email').sort({ createdAt: -1 });
+        res.json({ success: true, data: subs });
+    } catch (error) {
+        console.error(error);
+        res.status(500).json({ success: false, message: 'Lỗi server.' });
+    }
+});
+
+// GET /api/crm/admin/devices
+router.get('/admin/devices', authMiddleware, adminOnly, async (req, res) => {
+    try {
+        const devices = await CrmDevice.find().populate('userId', 'name email').sort({ createdAt: -1 });
+        res.json({ success: true, data: devices });
+    } catch (error) {
+        console.error(error);
+        res.status(500).json({ success: false, message: 'Lỗi server.' });
+    }
+});
+
+// PATCH /api/crm/admin/devices/:id/disable
+router.patch('/admin/devices/:id/disable', authMiddleware, adminOnly, async (req, res) => {
+    try {
+        const device = await CrmDevice.findById(req.params.id);
+        if (!device) return res.status(404).json({ success: false, message: 'Không tìm thấy thiết bị.' });
+
+        device.status = 'disabled';
+        device.replacedAt = new Date();
+        await device.save();
+
+        res.json({ success: true, message: 'Đã vô hiệu hóa thiết bị.', data: device });
+    } catch (error) {
+        console.error(error);
+        res.status(500).json({ success: false, message: 'Lỗi server.' });
+    }
+});
+
+// GET /api/crm/admin/billing/orders
+router.get('/admin/billing/orders', authMiddleware, adminOnly, async (req, res) => {
+    try {
+        const orders = await CrmBillingOrder.find().populate('userId', 'name email').sort({ createdAt: -1 });
+        res.json({ success: true, data: orders });
+    } catch (error) {
+        console.error(error);
+        res.status(500).json({ success: false, message: 'Lỗi server.' });
+    }
+});
+
+// POST /api/crm/admin/billing/orders/:id/approve
+router.post('/admin/billing/orders/:id/approve', authMiddleware, adminOnly, async (req, res) => {
+    try {
+        const fulfillment = await fulfillCrmBillingOrder({
+            selector: { _id: req.params.id },
+            source: 'admin',
+            adminUserId: req.user._id
+        });
+
+        if (fulfillment.status === 'fulfilled') {
+            return res.json({
+                success: true,
+                message: 'Đơn hàng đã được duyệt thanh toán và kích hoạt dịch vụ thành công.'
+            });
+        }
+
+        if (fulfillment.status === 'already_paid') {
+            return res.status(400).json({ success: false, message: 'Đơn hàng này đã được xử lý.' });
+        }
+
+        if (fulfillment.status === 'already_fulfilling') {
+            return res.status(409).json({
+                success: false,
+                message: 'Đơn hàng đang ở trạng thái xử lý cũ và cần kiểm tra thủ công trước khi duyệt lại.'
+            });
+        }
+
+        if (fulfillment.status === 'not_found') {
+            return res.status(404).json({ success: false, message: 'Không tìm thấy đơn hàng.' });
+        }
+
+        return res.status(400).json({ success: false, message: 'Đơn hàng này không còn ở trạng thái chờ.' });
+    } catch (error) {
+        console.error(error);
+        res.status(500).json({ success: false, message: 'Lỗi server.' });
+    }
+});
+
+// GET /api/crm/admin/ai/usage
+router.get('/admin/ai/usage', authMiddleware, adminOnly, async (req, res) => {
+    try {
+        const { userId } = req.query;
+        const query = {};
+        if (userId) query.userId = userId;
+
+        const usage = await CrmAiUsage.find(query).populate('userId', 'name email').sort({ createdAt: -1 }).limit(100);
+        res.json({ success: true, data: usage });
+    } catch (error) {
+        console.error(error);
+        res.status(500).json({ success: false, message: 'Lỗi server.' });
+    }
+});
+
+// GET /api/crm/releases/latest
+router.get('/releases/latest', async (req, res) => {
+    try {
+        const setting = await SystemSetting.findOne({ key: 'crm_latest_release' });
+        if (setting && setting.value) {
+            return res.json({
+                success: true,
+                data: setting.value
+            });
+        }
+
+        // Dynamic fallback to GitHub latest release if not specified in DB
+        let githubData = null;
+        try {
+            const response = await fetch('https://api.github.com/repos/LittleKai/alpha-crm-app/releases/latest', {
+                headers: { 'Accept': 'application/vnd.github.v3+json', 'User-Agent': 'alpha-studio-backend' }
+            });
+            if (response.ok) {
+                const release = await response.json();
+                const windowsAsset = release.assets?.find(a => a.name.endsWith('.exe') || a.name.endsWith('.msix'));
+                const androidAsset = release.assets?.find(a => a.name.endsWith('.apk'));
+                githubData = {
+                    version: release.tag_name ? (release.tag_name.startsWith('v') ? release.tag_name.substring(1) : release.tag_name) : '1.0.0',
+                    windowsInstallerUrl: windowsAsset ? windowsAsset.browser_download_url : 'https://github.com/LittleKai/alpha-crm-app/releases/download/v1.0.0/alpha-crm-setup.exe',
+                    androidApkUrl: androidAsset ? androidAsset.browser_download_url : 'https://github.com/LittleKai/alpha-crm-app/releases/download/v1.0.0/alpha-crm-app.apk',
+                    releaseNotes: release.body || 'Bản phát hành chính thức Alpha CRM',
+                    sha256: 'mock-sha256-hash-value',
+                    publishedAt: release.published_at || new Date().toISOString()
+                };
+            }
+        } catch (fetchError) {
+            console.error('Failed to fetch from GitHub API:', fetchError.message);
+        }
+
+        // Return GitHub data or the hardcoded default
+        const latestRelease = githubData || {
+            version: '1.0.0',
+            windowsInstallerUrl: 'https://github.com/LittleKai/alpha-crm-app/releases/download/v1.0.0/alpha-crm-setup.exe',
+            androidApkUrl: 'https://github.com/LittleKai/alpha-crm-app/releases/download/v1.0.0/alpha-crm-app.apk',
+            releaseNotes: 'Bản phát hành chính thức Alpha CRM Production',
+            sha256: 'mock-sha256-hash-value',
+            publishedAt: new Date().toISOString()
+        };
+
+        res.json({
+            success: true,
+            data: latestRelease
+        });
+    } catch (error) {
+        console.error('Error fetching latest CRM release:', error);
+        res.status(500).json({ success: false, message: 'Lỗi server khi lấy thông tin bản phát hành mới nhất.' });
+    }
+});
+
+export default router;

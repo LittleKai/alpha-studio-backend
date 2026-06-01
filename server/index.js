@@ -26,6 +26,7 @@ import geminiRoutes from './routes/gemini.js';
 import chatRoutes from './routes/chat.js';
 import vocabRoutes from './routes/vocab.js';
 import interiorRoutes from './routes/interior.js';
+import crmRoutes from './routes/crm.js';
 import { configureBucketCors } from './utils/b2Storage.js';
 import cron from 'node-cron';
 import HostMachine from './models/HostMachine.js';
@@ -121,6 +122,7 @@ app.use('/api/gemini', geminiRoutes);
 app.use('/api/chat', chatRoutes);
 app.use('/api/vocab', vocabRoutes);
 app.use('/api/interior', interiorRoutes);
+app.use('/api/crm', crmRoutes);
 
 // Sitemap (no /api prefix — served at root)
 app.use('/sitemap.xml', sitemapRoutes);

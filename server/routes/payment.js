@@ -3,6 +3,7 @@ import crypto from 'crypto';
 import Transaction from '../models/Transaction.js';
 import User from '../models/User.js';
 import WebhookLog from '../models/WebhookLog.js';
+import { fulfillCrmBillingOrder } from '../utils/crmBilling.js';
 import { authMiddleware, adminOnly } from '../middleware/auth.js';
 
 const router = express.Router();
@@ -189,13 +190,13 @@ router.post('/webhook', async (req, res) => {
             headers: req.headers
         });
 
-        // Extract transfer content from description (format: ALPHAXXXXXX)
-        const contentMatch = description?.toUpperCase().match(/ALPHA[A-Z0-9]{6}/);
+        // Extract transfer content from description (format: ALPHAXXXXXX or CRMXXXXXX)
+        const contentMatch = description?.toUpperCase().match(/(ALPHA|CRM)[A-Z0-9]{6}/);
 
         if (!contentMatch) {
-            console.log(`No ALPHA code found in description: ${description}`);
+            console.log(`No matching ALPHA or CRM code found in description: ${description}`);
             webhookLog.status = 'unmatched';
-            webhookLog.processingNotes = `No ALPHA code found. Description: ${description}`;
+            webhookLog.processingNotes = `No ALPHA/CRM code found. Description: ${description}`;
             await webhookLog.save();
             return res.status(200).json({ success: true, message: 'No matching code found' });
         }
@@ -204,16 +205,63 @@ router.post('/webhook', async (req, res) => {
         webhookLog.parsedData.transactionCode = transferContent;
         console.log(`Found transfer content: ${transferContent}`);
 
-        // Find pending transaction with this transfer content
+        // Case A: CRM Order Checkout Fulfillments
+        if (transferContent.startsWith('CRM')) {
+            const fulfillment = await fulfillCrmBillingOrder({
+                selector: { transactionCode: transferContent },
+                expectedAmountVnd: amount,
+                source: 'webhook',
+                bankTxId,
+                webhookData: txData,
+                webhookLogId: webhookLog._id
+            });
+
+            if (fulfillment.status === 'fulfilled') {
+                webhookLog.status = 'matched';
+                webhookLog.matchedTransactionId = fulfillment.transaction._id;
+                webhookLog.matchedUserId = fulfillment.order.userId;
+                webhookLog.processingNotes = `Successfully matched and processed CRM Order. Product: ${fulfillment.order.productId}`;
+                await webhookLog.save();
+
+                console.log(`CRM Order ${transferContent} completed and fulfilled successfully`);
+                return res.status(200).json({ success: true, message: 'CRM webhook processed successfully' });
+            }
+
+            if (fulfillment.status === 'already_paid') {
+                console.log(`CRM order ${transferContent} already paid, skipping duplicate webhook`);
+                webhookLog.status = 'matched';
+                webhookLog.matchedUserId = fulfillment.order.userId;
+                webhookLog.processingNotes = 'Duplicate webhook skipped: CRM order already paid';
+                await webhookLog.save();
+                return res.status(200).json({ success: true, message: 'CRM order already processed' });
+            }
+
+            if (fulfillment.status === 'amount_mismatch' || fulfillment.status === 'already_fulfilling') {
+                console.error(fulfillment.message);
+                webhookLog.status = 'error';
+                webhookLog.errorMessage = fulfillment.message;
+                webhookLog.matchedUserId = fulfillment.order ? fulfillment.order.userId : null;
+                await webhookLog.save();
+                return res.status(200).json({ success: true, message: fulfillment.message });
+            }
+
+            console.log(`No pending CRM billing order found for: ${transferContent}`);
+            webhookLog.status = 'unmatched';
+            webhookLog.processingNotes = `${fulfillment.message} Code: ${transferContent}`;
+            await webhookLog.save();
+            return res.status(200).json({ success: true, message: fulfillment.message });
+        }
+
+        // Case B: General Wallet Topup Fulfillments
         const transaction = await Transaction.findOne({
             transactionCode: transferContent,
             status: 'pending'
         });
 
         if (!transaction) {
-            console.log(`No pending transaction found for: ${transferContent}`);
+            console.log(`No pending wallet transaction found for: ${transferContent}`);
             webhookLog.status = 'unmatched';
-            webhookLog.processingNotes = `No pending transaction found for code: ${transferContent}`;
+            webhookLog.processingNotes = `No pending wallet transaction found for code: ${transferContent}`;
             await webhookLog.save();
             return res.status(200).json({ success: true, message: 'No pending transaction found' });
         }

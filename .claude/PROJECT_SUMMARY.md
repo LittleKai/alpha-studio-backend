@@ -1,5 +1,7 @@
 # Project Summary
 
+**Phase 1/2 CRM Update (2026-06-01):** Alpha CRM SaaS Foundation and Windows agent bridge. Added Mongoose models (`CrmSubscription`, `CrmDevice`, `CrmPairingSession`, `CrmAgentCommand`, `CrmBillingOrder`, `CrmAiUsage`, `CrmCustomer`, `CrmContact`, `CrmTemplate`, `CrmCampaign`, `CrmExecutionLog`). Mounted route namespace `/api/crm` with full catalog, checkout, pairing, data CRUD, quota-enforced AI Chat, administrative endpoints, and agent endpoints for heartbeat, command polling, and command results. Extended Casso bank transfer webhooks for direct CRM billing order fulfillment. CRM bank/admin order fulfillment now runs through a MongoDB transaction helper so order claim, entitlement write, transaction record, and `paid` status commit or roll back together. CRM campaigns now validate user-owned templates/recipients before queueing Windows-agent execution and keep background campaign commands `running` until final agent results arrive.
+
 **Phase 15 Follow-up (2026-05-27):** VocabFlip private storage integration. Added MongoDB schemas `VocabPrivateDeck` and `VocabPrivateFlashcard` and implemented private deck & flashcard CRUD + search REST routes to route VocabFlip storage through the backend for web users (kIsWeb=true).
 
 **Phase 15 Follow-up (2026-05-22):** Interior template validation now whitelists curved `boxes[]` primitives: regular box, `roundedBox`, and `cylinder`. Unknown primitive types are rejected at import/edit time. Seed script was rerun and MongoDB now includes `cab-base-rounded-end@1` as a `seed` template with rounded/cylindrical geometry.
@@ -16,7 +18,7 @@ If selected templates already match the latest library version, the endpoint ret
 **Phase 12 Update (2026-05-19):** Backend now hosts the self-extending interior template library. New model `InteriorTemplate` (status: seed/pending/approved/deprecated). New endpoints: `GET /api/interior/templates` (engine catalog load, returns seed+approved deduped by highest version), `POST /api/interior/templates` (user commits a project inline template to pending), and `/api/admin/interior-templates` CRUD (list/getOne/approve/reject/edit/deprecate). `/api/interior/projects/:id/chat` now extracts AI-emitted `tplNew` blocks into `modelJson.inlineTemplates[id]`, replaces with `tpl: id`, and surfaces created ids in `data.meta.newInlineTemplates`. DSL validation lives in `server/utils/templateValidator.js` (AST whitelist mirror of the engine `expression.js`). Seed script `scripts/seed-interior-templates.mjs` upserts the 7 built-in templates from `tools/interior-design-engine/src/templates/` (idempotent).
 
 **Phase 11 Update (2026-05-19):** `server/routes/interior.js` now validates the compact template contract: top-level `palette`, optional `inlineTemplates`, and module/detail items using either legacy `width/height/depth` boxes or `tpl/style` template references. The default project model uses `sliding-2door` with `palette: "wood-oak"`, and `/api/interior` prompts include the built-in template catalog while no longer promoting CSG hints.
-**Last Updated:** 2026-05-27 (VocabFlip private storage)
+**Last Updated:** 2026-06-01 (Phase 1 Alpha CRM SaaS Foundation)
 **Updated By:** Claude Code
 
 ---

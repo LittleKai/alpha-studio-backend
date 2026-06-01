@@ -50,7 +50,7 @@ const transactionSchema = new mongoose.Schema({
     // Service usage tracking (for spend transactions)
     serviceType: {
         type: String,
-        enum: ['gpu_rental', 'course', 'job_post', 'partner_fee', 'other', null],
+        enum: ['gpu_rental', 'course', 'job_post', 'partner_fee', 'alpha_crm_subscription', 'alpha_crm_ai_pack', 'other', null],
         default: null
     },
     serviceDetails: {
