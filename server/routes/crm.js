@@ -1,4 +1,4 @@
-﻿import express from 'express';
+import express from 'express';
 import crypto from 'crypto';
 import { authMiddleware, adminOnly } from '../middleware/auth.js';
 import User from '../models/User.js';
@@ -1430,35 +1430,33 @@ router.get('/releases/latest', async (req, res) => {
             });
         }
 
-        // Dynamic fallback to GitHub latest release if not specified in DB
-        let githubData = null;
+        // Dynamic fallback to Backblaze B2 latest release if not specified in DB
+        let b2Data = null;
         try {
-            const response = await fetch('https://api.github.com/repos/LittleKai/alpha-crm-app/releases/latest', {
-                headers: { 'Accept': 'application/vnd.github.v3+json', 'User-Agent': 'alpha-studio-backend' }
-            });
+            const response = await fetch('https://cdn.giaiphapsangtao.com/file/alpha-studio/crm-app/version.json');
             if (response.ok) {
                 const release = await response.json();
                 const windowsAsset = release.assets?.find(a => a.name.endsWith('.exe') || a.name.endsWith('.msix'));
                 const androidAsset = release.assets?.find(a => a.name.endsWith('.apk'));
-                githubData = {
+                b2Data = {
                     version: release.tag_name ? (release.tag_name.startsWith('v') ? release.tag_name.substring(1) : release.tag_name) : '1.0.0',
-                    windowsInstallerUrl: windowsAsset ? windowsAsset.browser_download_url : 'https://github.com/LittleKai/alpha-crm-app/releases/download/v1.0.0/alpha-crm-setup.exe',
-                    androidApkUrl: androidAsset ? androidAsset.browser_download_url : 'https://github.com/LittleKai/alpha-crm-app/releases/download/v1.0.0/alpha-crm-app.apk',
-                    releaseNotes: release.body || 'Báº£n phĂ¡t hĂ nh chĂ­nh thá»©c Alpha CRM',
+                    windowsInstallerUrl: windowsAsset ? windowsAsset.browser_download_url : 'https://cdn.giaiphapsangtao.com/file/alpha-studio/crm-app/releases/alpha-crm-v1.0.0.exe',
+                    androidApkUrl: androidAsset ? androidAsset.browser_download_url : 'https://cdn.giaiphapsangtao.com/file/alpha-studio/crm-app/releases/alpha-crm-v1.0.0.apk',
+                    releaseNotes: release.body || 'Bản phát hành chính thức Alpha CRM',
                     sha256: 'mock-sha256-hash-value',
                     publishedAt: release.published_at || new Date().toISOString()
                 };
             }
         } catch (fetchError) {
-            console.error('Failed to fetch from GitHub API:', fetchError.message);
+            console.error('Failed to fetch from Backblaze B2:', fetchError.message);
         }
 
-        // Return GitHub data or the hardcoded default
-        const latestRelease = githubData || {
+        // Return B2 data or the hardcoded default
+        const latestRelease = b2Data || {
             version: '1.0.0',
-            windowsInstallerUrl: 'https://github.com/LittleKai/alpha-crm-app/releases/download/v1.0.0/alpha-crm-setup.exe',
-            androidApkUrl: 'https://github.com/LittleKai/alpha-crm-app/releases/download/v1.0.0/alpha-crm-app.apk',
-            releaseNotes: 'Báº£n phĂ¡t hĂ nh chĂ­nh thá»©c Alpha CRM Production',
+            windowsInstallerUrl: 'https://cdn.giaiphapsangtao.com/file/alpha-studio/crm-app/releases/alpha-crm-v1.0.0.exe',
+            androidApkUrl: 'https://cdn.giaiphapsangtao.com/file/alpha-studio/crm-app/releases/alpha-crm-v1.0.0.apk',
+            releaseNotes: 'Bản phát hành chính thức Alpha CRM Production',
             sha256: 'mock-sha256-hash-value',
             publishedAt: new Date().toISOString()
         };
