@@ -1,5 +1,9 @@
 # Project Summary
 
+**CRM AI Quota Update (2026-06-03):** Updated the monthly CRM subscription plan (`crm_monthly`) default AI quota limit to 1000 and doubled all top-up packages limits (+200, +1000, +2000) inside backend catalog, default billing configurations, and associated tests.
+
+**CRM Price Update (2026-06-03):** Updated the monthly CRM subscription plan (`crm_monthly`) price to 500,000 VND and its credits value to 525 credits in the catalog configuration and associated tests.
+
 **Phase 8-10 CRM Operations (2026-06-02):** Added production CRM live chat, chatbot rules/logs/settings, managed Zalo groups with checkpoints/summaries/insights, saved segments, follow-up tasks, analytics, import/export, and admin tenant-health automation controls. The desktop agent now reports inbound Zalo messages, filters managed group ingestion, supports account-specific sends, and returns group sync results to the backend.
 
 **CRM Release Packaging Update (2026-06-02):** `scripts/release-to-b2.js` now builds `tools/alpha-crm/integration/zalo-bot-service` and stages the compiled local Zalo backend into the Windows release folder with bundled `node.exe`, `node_modules`, `.env.example`, and `zalo-bot-service.cmd` before zipping. Public ZIPs still exclude build-machine `.env` and `.data` secrets.
@@ -28,7 +32,7 @@ If selected templates already match the latest library version, the endpoint ret
 **Phase 12 Update (2026-05-19):** Backend now hosts the self-extending interior template library. New model `InteriorTemplate` (status: seed/pending/approved/deprecated). New endpoints: `GET /api/interior/templates` (engine catalog load, returns seed+approved deduped by highest version), `POST /api/interior/templates` (user commits a project inline template to pending), and `/api/admin/interior-templates` CRUD (list/getOne/approve/reject/edit/deprecate). `/api/interior/projects/:id/chat` now extracts AI-emitted `tplNew` blocks into `modelJson.inlineTemplates[id]`, replaces with `tpl: id`, and surfaces created ids in `data.meta.newInlineTemplates`. DSL validation lives in `server/utils/templateValidator.js` (AST whitelist mirror of the engine `expression.js`). Seed script `scripts/seed-interior-templates.mjs` upserts the 7 built-in templates from `tools/interior-design-engine/src/templates/` (idempotent).
 
 **Phase 11 Update (2026-05-19):** `server/routes/interior.js` now validates the compact template contract: top-level `palette`, optional `inlineTemplates`, and module/detail items using either legacy `width/height/depth` boxes or `tpl/style` template references. The default project model uses `sliding-2door` with `palette: "wood-oak"`, and `/api/interior` prompts include the built-in template catalog while no longer promoting CSG hints.
-**Last Updated:** 2026-06-02 (CRM phases 8-10 live chat, chatbot, groups, operations, analytics)
+**Last Updated:** 2026-06-03 (CRM AI Quota and Top-up update)
 **Updated By:** Antigravity (Advanced AI Coding Assistant)
 
 

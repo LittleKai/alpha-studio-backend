@@ -41,8 +41,8 @@ test('fulfillCrmBillingOrder wraps claim, entitlement, transaction, and paid sta
         userId: 'user-1',
         productId: 'crm_monthly',
         orderType: 'subscription',
-        amountVnd: 200000,
-        credits: 210,
+        amountVnd: 500000,
+        credits: 525,
         transactionCode: 'CRMABC123',
         metadata: {},
         async save(options) {
@@ -94,7 +94,7 @@ test('fulfillCrmBillingOrder wraps claim, entitlement, transaction, and paid sta
 
     const result = await fulfillCrmBillingOrder({
         selector: { transactionCode: 'CRMABC123' },
-        expectedAmountVnd: 200000,
+        expectedAmountVnd: 500000,
         source: 'webhook',
         bankTxId: 'bank-1',
         webhookData: { id: 'bank-1' },

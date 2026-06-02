@@ -4,7 +4,7 @@ import CrmBillingOrder from '../models/CrmBillingOrder.js';
 import CrmSubscription from '../models/CrmSubscription.js';
 import { getCrmProduct } from './crmCatalog.js';
 
-const DEFAULT_INCLUDED_AI_LIMIT = 500;
+const DEFAULT_INCLUDED_AI_LIMIT = 1000;
 const DEFAULT_DEVICE_LIMIT = 1;
 const MONTH_MS = 30 * 24 * 60 * 60 * 1000;
 

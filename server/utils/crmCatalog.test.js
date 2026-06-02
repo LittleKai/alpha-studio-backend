@@ -7,15 +7,15 @@ test('CRM Catalog Plans & Packs structure', (t) => {
     const monthly = CRM_PLANS.crm_monthly;
     assert.ok(monthly);
     assert.strictEqual(monthly.id, 'crm_monthly');
-    assert.strictEqual(monthly.priceVnd, 200000);
-    assert.strictEqual(monthly.priceCredits, 210);
-    assert.strictEqual(monthly.includedAiLimit, 500);
+    assert.strictEqual(monthly.priceVnd, 500000);
+    assert.strictEqual(monthly.priceCredits, 525);
+    assert.strictEqual(monthly.includedAiLimit, 1000);
 
     // Test pack details
     const pack100 = CRM_AI_PACKS.crm_ai_pack_100;
     assert.ok(pack100);
     assert.strictEqual(pack100.priceVnd, 50000);
-    assert.strictEqual(pack100.extraAiLimit, 100);
+    assert.strictEqual(pack100.extraAiLimit, 200);
 
     // Test catalog product getter helper
     const subProduct = getCrmProduct('crm_monthly');
