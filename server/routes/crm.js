@@ -15,6 +15,17 @@ import CrmTemplate from '../models/CrmTemplate.js';
 import CrmCampaign from '../models/CrmCampaign.js';
 import CrmExecutionLog from '../models/CrmExecutionLog.js';
 import CrmAuditLog from '../models/CrmAuditLog.js';
+import CrmConversation from '../models/CrmConversation.js';
+import CrmMessage from '../models/CrmMessage.js';
+import CrmChatbotRule from '../models/CrmChatbotRule.js';
+import CrmChatbotLog from '../models/CrmChatbotLog.js';
+import CrmZaloGroup from '../models/CrmZaloGroup.js';
+import CrmGroupMessage from '../models/CrmGroupMessage.js';
+import CrmGroupCheckpoint from '../models/CrmGroupCheckpoint.js';
+import CrmGroupSummary from '../models/CrmGroupSummary.js';
+import CrmGroupInsight from '../models/CrmGroupInsight.js';
+import CrmSegment from '../models/CrmSegment.js';
+import CrmTask from '../models/CrmTask.js';
 import SystemSetting from '../models/SystemSetting.js';
 
 import { crmPairingLimiter, crmDeviceLimiter, crmAiLimiter } from '../middleware/crmRateLimit.js';
@@ -23,8 +34,328 @@ import { CRM_PLANS, CRM_AI_PACKS, getCrmProduct } from '../utils/crmCatalog.js';
 import { hasQuota, consumeQuota, refundQuota } from '../utils/crmQuota.js';
 import { fulfillCrmBillingOrder } from '../utils/crmBilling.js';
 import { callConfiguredAiProvider } from '../utils/aiProvider.js';
+import { calculateCrmLeadScore } from '../utils/crmLeadScoring.js';
+import { buildGroupSummaryPrompt, extractSimpleInsights, redactPhoneLikeStrings } from '../utils/crmGroupSummary.js';
 
 const router = express.Router();
+
+const mapAgentExecutionStatus = (status) => {
+    if (status === 'succeeded' || status === 'success') return 'success';
+    if (status === 'cancelled') return 'cancelled';
+    if (status === 'failed') return 'failed';
+    if (status === 'running') return 'running';
+    return 'queued';
+};
+
+const buildCampaignMessagePreview = (templateText, recipientName) => {
+    const text = (templateText || 'Tin nhan chien dich')
+        .replace(/\{\{name\}\}/g, recipientName || 'Anh/Chi');
+    return text.length > 240 ? `${text.slice(0, 237)}...` : text;
+};
+
+const previewText = (value = '', max = 240) => {
+    const clean = String(value || '').replace(/\s+/g, ' ').trim();
+    return clean.length > max ? `${clean.slice(0, max - 3)}...` : clean;
+};
+
+const sanitizeUpdate = (body, allowedFields) => {
+    const data = {};
+    for (const field of allowedFields) {
+        if (Object.prototype.hasOwnProperty.call(body, field)) {
+            data[field] = body[field];
+        }
+    }
+    return data;
+};
+
+const getChatbotSettingsKey = (userId) => `crmChatbotSettings:${userId}`;
+
+const defaultChatbotSettings = {
+    aiEnabled: true,
+    aiModel: 'gcli-default',
+    systemPrompt: 'Ban la tro ly CSKH Zalo CRM. Tra loi ngan gon, lich su va de nghi nhan vien tiep quan khi co yeu cau nhay cam.',
+    temperature: 0.7,
+    knowledgeSnippets: []
+};
+
+async function getChatbotSettings(userId) {
+    const setting = await SystemSetting.findOne({ key: getChatbotSettingsKey(userId) }).lean();
+    return { ...defaultChatbotSettings, ...(setting?.value || {}) };
+}
+
+async function saveChatbotSettings(userId, value) {
+    const safeValue = {
+        ...defaultChatbotSettings,
+        aiEnabled: value.aiEnabled !== false,
+        aiModel: value.aiModel || value.model || defaultChatbotSettings.aiModel,
+        systemPrompt: String(value.systemPrompt || defaultChatbotSettings.systemPrompt).slice(0, 8000),
+        temperature: Number.isFinite(Number(value.temperature)) ? Number(value.temperature) : defaultChatbotSettings.temperature,
+        knowledgeSnippets: Array.isArray(value.knowledgeSnippets)
+            ? value.knowledgeSnippets.map((item) => String(item).slice(0, 4000)).slice(0, 20)
+            : []
+    };
+    await SystemSetting.findOneAndUpdate(
+        { key: getChatbotSettingsKey(userId) },
+        { $set: { key: getChatbotSettingsKey(userId), value: safeValue, description: 'Per-user Alpha CRM chatbot settings' } },
+        { upsert: true, new: true }
+    );
+    return safeValue;
+}
+
+function getQuotaPayload(subscription, quotaBucket = 'none') {
+    const includedRemaining = Math.max(0, subscription.includedAiLimit - subscription.includedAiUsed);
+    return {
+        bucketUsed: quotaBucket,
+        includedAiLimit: subscription.includedAiLimit,
+        includedAiUsed: subscription.includedAiUsed,
+        extraAiRemaining: subscription.extraAiRemaining,
+        totalRemaining: includedRemaining + subscription.extraAiRemaining
+    };
+}
+
+async function runCrmAiWithQuota(req, {
+    promptContent,
+    sessionId,
+    requestType,
+    messages,
+    systemPrompt
+}) {
+    const startTime = Date.now();
+    const sub = req.crmSubscription;
+    let quotaBucket = 'none';
+
+    if (!hasQuota(sub)) {
+        const error = new Error('Het han muc AI quota. Vui long mua them goi AI top-up.');
+        error.statusCode = 403;
+        throw error;
+    }
+
+    quotaBucket = consumeQuota(sub);
+    await sub.save();
+
+    try {
+        const aiResponse = await callConfiguredAiProvider(promptContent, sessionId, { messages, systemPrompt });
+        const usageDoc = await CrmAiUsage.create({
+            userId: req.user._id,
+            subscriptionId: sub._id,
+            requestType,
+            provider: 'gcli',
+            model: aiResponse.model,
+            status: 'succeeded',
+            quotaBucket,
+            tokens: {
+                promptTokens: aiResponse.usage?.promptTokens || 0,
+                completionTokens: aiResponse.usage?.completionTokens || 0,
+                totalTokens: aiResponse.usage?.totalTokens || 0
+            },
+            latencyMs: Date.now() - startTime
+        });
+
+        return {
+            aiResponse,
+            usageDoc,
+            quota: getQuotaPayload(sub, quotaBucket)
+        };
+    } catch (aiError) {
+        refundQuota(sub, quotaBucket);
+        await sub.save();
+        await CrmAiUsage.create({
+            userId: req.user._id,
+            subscriptionId: sub._id,
+            requestType,
+            provider: 'gcli',
+            status: 'failed',
+            quotaBucket,
+            latencyMs: Date.now() - startTime,
+            errorMessage: aiError.message
+        });
+        throw aiError;
+    }
+}
+
+function normalizeThreadType(value) {
+    return value === 'group' ? 'group' : 'user';
+}
+
+function matchChatbotRule(rule, message) {
+    const text = String(message || '').toLowerCase();
+    const keywords = Array.isArray(rule.keywords) ? rule.keywords : [];
+    return keywords.some((keyword) => {
+        const key = String(keyword || '').toLowerCase().trim();
+        if (!key) return false;
+        if (rule.matchMode === 'exact') return text === key;
+        if (rule.matchMode === 'startsWith') return text.startsWith(key);
+        return text.includes(key);
+    });
+}
+
+function hasHandoffKeyword(settingsOrRule, message) {
+    const handoffKeywords = settingsOrRule?.handoffKeywords || ['nhan vien', 'nguoi that', 'tu van vien', 'gap admin', 'human'];
+    const text = String(message || '').toLowerCase();
+    return handoffKeywords.some((keyword) => text.includes(String(keyword).toLowerCase()));
+}
+
+async function upsertConversationFromInbound({ userId, deviceId, event, enforceManagedGroup = false }) {
+    const accountId = String(event.accountId || '').trim();
+    const threadId = String(event.threadId || '').trim();
+    const threadType = normalizeThreadType(event.threadType);
+    const content = String(event.content || '').trim();
+    const providerMessageId = String(event.providerMessageId || '').trim();
+    const receivedAt = event.timestamp ? new Date(event.timestamp) : new Date();
+
+    if (!accountId || !threadId || !content) {
+        const error = new Error('accountId, threadId va content la bat buoc.');
+        error.statusCode = 400;
+        throw error;
+    }
+
+    let managedGroup = null;
+    if (threadType === 'group') {
+        managedGroup = await CrmZaloGroup.findOne({ userId, accountId, groupId: threadId });
+        if (enforceManagedGroup && (!managedGroup || !managedGroup.isManaged)) {
+            return { ignored: true, reason: 'group_not_managed' };
+        }
+    }
+
+    let customer = null;
+    if (threadType === 'user') {
+        customer = await CrmCustomer.findOne({
+            userId,
+            $or: [
+                { zaloThreadId: threadId },
+                { zaloUserId: event.senderId || threadId }
+            ]
+        });
+    }
+
+    const conversation = await CrmConversation.findOneAndUpdate(
+        { userId, accountId, threadId, threadType },
+        {
+            $set: {
+                userId,
+                deviceId,
+                accountId,
+                threadId,
+                threadType,
+                customerId: customer?._id || null,
+                displayName: event.senderName || event.displayName || managedGroup?.name || threadId,
+                avatarUrl: event.avatarUrl || managedGroup?.avatarUrl || '',
+                lastMessagePreview: previewText(content),
+                lastMessageAt: receivedAt,
+                lastInboundAt: receivedAt
+            },
+            $inc: { unreadCount: 1 },
+            $setOnInsert: { tags: [], notes: '', assignedStatus: 'open' }
+        },
+        { upsert: true, new: true, setDefaultsOnInsert: true }
+    );
+
+    let message = null;
+    if (providerMessageId) {
+        message = await CrmMessage.findOne({ userId, accountId, providerMessageId });
+    }
+    if (!message) {
+        message = await CrmMessage.create({
+            userId,
+            conversationId: conversation._id,
+            deviceId,
+            accountId,
+            threadId,
+            threadType,
+            direction: 'inbound',
+            senderId: event.senderId || '',
+            senderName: event.senderName || '',
+            content,
+            messageType: event.messageType || 'text',
+            providerMessageId,
+            status: 'received',
+            receivedAt
+        });
+    }
+
+    if (customer) {
+        customer.lastMessageAt = receivedAt;
+        customer.lastInteractionAt = receivedAt;
+        await customer.save();
+    }
+
+    if (managedGroup?.isManaged) {
+        const groupMessageQuery = providerMessageId
+            ? { userId, accountId, providerMessageId }
+            : null;
+        const existingGroupMessage = groupMessageQuery ? await CrmGroupMessage.findOne(groupMessageQuery) : null;
+        if (!existingGroupMessage) {
+            await CrmGroupMessage.create({
+                userId,
+                groupId: managedGroup._id,
+                accountId,
+                providerMessageId,
+                senderId: event.senderId || '',
+                senderName: event.senderName || '',
+                content,
+                messageType: event.messageType || 'text',
+                sentAt: receivedAt,
+                capturedAt: new Date()
+            });
+        }
+        managedGroup.lastMessageAt = receivedAt;
+        await managedGroup.save();
+    }
+
+    return { conversation, message, ignored: false };
+}
+
+function buildSegmentQuery(userId, filters = {}) {
+    const query = { userId };
+    const tags = Array.isArray(filters.tags) ? filters.tags.filter(Boolean) : [];
+    if (tags.length > 0) query.tags = { $in: tags };
+    if (filters.lifecycleStage) query.lifecycleStage = filters.lifecycleStage;
+    if (filters.consentStatus) query.consentStatus = filters.consentStatus;
+    if (filters.source) query.source = filters.source;
+    if (filters.lastInteractionFrom || filters.lastInteractionTo) {
+        query.lastInteractionAt = {};
+        if (filters.lastInteractionFrom) query.lastInteractionAt.$gte = new Date(filters.lastInteractionFrom);
+        if (filters.lastInteractionTo) query.lastInteractionAt.$lte = new Date(filters.lastInteractionTo);
+    }
+    if (filters.search) {
+        query.$or = [
+            { name: { $regex: filters.search, $options: 'i' } },
+            { phone: { $regex: filters.search, $options: 'i' } },
+            { email: { $regex: filters.search, $options: 'i' } },
+            { company: { $regex: filters.search, $options: 'i' } }
+        ];
+    }
+    return query;
+}
+
+function parseCsvRows(csvText = '') {
+    const lines = String(csvText).split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+    if (lines.length === 0) return [];
+    const headers = lines[0].split(',').map((item) => item.trim());
+    return lines.slice(1).map((line) => {
+        const values = line.split(',').map((item) => item.trim());
+        return headers.reduce((row, header, index) => {
+            row[header] = values[index] || '';
+            return row;
+        }, {});
+    });
+}
+
+function csvEscape(value) {
+    const text = value === null || value === undefined
+        ? ''
+        : value instanceof Date
+            ? value.toISOString()
+            : String(value);
+    const escaped = text.replace(/"/g, '""');
+    return /[",\r\n]/.test(escaped) ? `"${escaped}"` : escaped;
+}
+
+function serializeCsv(headers, rows) {
+    const headerLine = headers.map((header) => csvEscape(header.label)).join(',');
+    const bodyLines = rows.map((row) => headers.map((header) => csvEscape(row[header.key])).join(','));
+    return [headerLine, ...bodyLines].join('\n');
+}
 
 // Helper to generate a random 6-character uppercase string
 const generateOrderContent = () => {
@@ -196,7 +527,221 @@ router.get('/quota', authMiddleware, async (req, res) => {
         });
     } catch (error) {
         console.error('Error fetching CRM quota:', error);
-        res.status(500).json({ success: false, message: 'Lá»—i mĂ¡y chá»§.' });
+        res.status(500).json({ success: false, message: 'Lỗi máy chủ.' });
+    }
+});
+
+// ==========================================
+// 1.5. CRM DASHBOARD & METRICS ROUTES
+// ==========================================
+
+// GET /api/crm/dashboard/overview
+router.get('/dashboard/overview', authMiddleware, async (req, res) => {
+    try {
+        const sub = await CrmSubscription.findOne({ userId: req.user._id }).sort({ createdAt: -1 });
+        
+        let subSummary = { active: false, plan: 'none', periodEnd: null };
+        let totalAiRemaining = 0;
+        let includedAiLimit = 0;
+        let includedAiUsed = 0;
+        let extraAiRemaining = 0;
+
+        if (sub) {
+            if (sub.status === 'active' && new Date() > new Date(sub.periodEnd)) {
+                sub.status = 'expired';
+                await sub.save();
+            }
+
+            subSummary = {
+                active: sub.status === 'active',
+                plan: sub.plan,
+                periodEnd: sub.periodEnd
+            };
+
+            includedAiLimit = sub.includedAiLimit;
+            includedAiUsed = sub.includedAiUsed;
+            extraAiRemaining = sub.extraAiRemaining;
+            totalAiRemaining = Math.max(0, includedAiLimit - includedAiUsed) + extraAiRemaining;
+        }
+
+        const activeDevices = await CrmDevice.countDocuments({ userId: req.user._id, status: 'active' });
+        const todayStart = new Date();
+        todayStart.setHours(0, 0, 0, 0);
+        const todayEnd = new Date(todayStart);
+        todayEnd.setDate(todayEnd.getDate() + 1);
+        const taskStats = {
+            dueToday: await CrmTask.countDocuments({ userId: req.user._id, status: 'open', dueAt: { $gte: todayStart, $lt: todayEnd } }),
+            overdue: await CrmTask.countDocuments({ userId: req.user._id, status: 'open', dueAt: { $lt: todayStart } }),
+            highPriority: await CrmTask.countDocuments({ userId: req.user._id, status: 'open', priority: 'high' })
+        };
+
+        // Aggregate customer stats by lifecycleStage
+        const customerLifecycleStats = await CrmCustomer.aggregate([
+            { $match: { userId: req.user._id } },
+            { $group: { _id: "$lifecycleStage", count: { $sum: 1 } } }
+        ]);
+
+        const customerStatusStats = await CrmCustomer.aggregate([
+            { $match: { userId: req.user._id } },
+            { $group: { _id: "$status", count: { $sum: 1 } } }
+        ]);
+
+        const customerStats = {
+            total: await CrmCustomer.countDocuments({ userId: req.user._id }),
+            byLifecycle: {},
+            byStatus: {}
+        };
+        
+        customerLifecycleStats.forEach(item => {
+            customerStats.byLifecycle[item._id || 'lead'] = item.count;
+        });
+        customerStatusStats.forEach(item => {
+            customerStats.byStatus[item._id || 'lead'] = item.count;
+        });
+
+        // Campaign stats
+        const campaignStatsRaw = await CrmCampaign.aggregate([
+            { $match: { userId: req.user._id } },
+            { $group: { _id: "$status", count: { $sum: 1 } } }
+        ]);
+        const campaignStats = {
+            total: await CrmCampaign.countDocuments({ userId: req.user._id }),
+            byStatus: {}
+        };
+        campaignStatsRaw.forEach(item => {
+            campaignStats.byStatus[item._id || 'draft'] = item.count;
+        });
+
+        // Last 7/30 days execution totals
+        const date30d = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+        const date7d = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+
+        const sendStats30d = await CrmExecutionLog.aggregate([
+            { $match: { userId: req.user._id, createdAt: { $gte: date30d } } },
+            { $group: { _id: "$status", count: { $sum: 1 } } }
+        ]);
+
+        const sendStats7d = await CrmExecutionLog.aggregate([
+            { $match: { userId: req.user._id, createdAt: { $gte: date7d } } },
+            { $group: { _id: "$status", count: { $sum: 1 } } }
+        ]);
+
+        const processStats = (rawStats) => {
+            let success = 0;
+            let failed = 0;
+            let queued = 0;
+            rawStats.forEach(item => {
+                if (item._id === 'success') success = item.count;
+                else if (['failed', 'cancelled'].includes(item._id)) failed += item.count;
+                else if (['queued', 'running'].includes(item._id)) queued = item.count;
+            });
+            const total = success + failed + queued;
+            return { total, success, failed, queued };
+        };
+
+        const totals30d = processStats(sendStats30d);
+        const totals7d = processStats(sendStats7d);
+
+        const failedSendRate30d = totals30d.total > 0 ? (totals30d.failed / totals30d.total) : 0;
+        const failedSendRate7d = totals7d.total > 0 ? (totals7d.failed / totals7d.total) : 0;
+
+        res.json({
+            success: true,
+            data: {
+                subscription: subSummary,
+                aiQuota: {
+                    includedAiLimit,
+                    includedAiUsed,
+                    extraAiRemaining,
+                    totalRemaining: totalAiRemaining
+                },
+                activeDevices,
+                connectedAccounts: activeDevices, // Fallback/approximation
+                customerStats,
+                campaignStats,
+                taskStats,
+                sendHistoryStats: {
+                    last7Days: {
+                        ...totals7d,
+                        failedSendRate: failedSendRate7d
+                    },
+                    last30Days: {
+                        ...totals30d,
+                        failedSendRate: failedSendRate30d
+                    }
+                }
+            }
+        });
+    } catch (error) {
+        console.error('Error fetching CRM overview:', error);
+        res.status(500).json({ success: false, message: 'Lỗi server khi lấy dữ liệu tổng quan.' });
+    }
+});
+
+// GET /api/crm/dashboard/campaign-performance
+router.get('/dashboard/campaign-performance', authMiddleware, async (req, res) => {
+    try {
+        const range = req.query.range === '30d' ? 30 : 7;
+        const startDate = new Date();
+        startDate.setHours(0,0,0,0);
+        startDate.setDate(startDate.getDate() - range + 1);
+
+        const dailyPerformance = await CrmExecutionLog.aggregate([
+            {
+                $match: {
+                    userId: req.user._id,
+                    createdAt: { $gte: startDate }
+                }
+            },
+            {
+                $group: {
+                    _id: {
+                        $dateToString: { format: "%Y-%m-%d", date: "$createdAt" }
+                    },
+                    success: {
+                        $sum: { $cond: [ { $eq: ["$status", "success"] }, 1, 0 ] }
+                    },
+                    failure: {
+                        $sum: { $cond: [ { $in: ["$status", ["failed", "cancelled"]] }, 1, 0 ] }
+                    }
+                }
+            },
+            { $sort: { _id: 1 } }
+        ]);
+
+        // Create map from performance
+        const perfMap = {};
+        dailyPerformance.forEach(item => {
+            perfMap[item._id] = {
+                success: item.success,
+                failure: item.failure
+            };
+        });
+
+        // Fill in missing days
+        const chartData = [];
+        for (let i = 0; i < range; i++) {
+            const d = new Date(startDate);
+            d.setDate(startDate.getDate() + i);
+            const dateStr = d.toISOString().split('T')[0];
+            const friendlyLabel = `${d.getDate()}/${d.getMonth() + 1}`;
+
+            const dayData = perfMap[dateStr] || { success: 0, failure: 0 };
+            chartData.push({
+                date: dateStr,
+                label: friendlyLabel,
+                success: dayData.success,
+                failure: dayData.failure
+            });
+        }
+
+        res.json({
+            success: true,
+            data: chartData
+        });
+    } catch (error) {
+        console.error('Error fetching campaign performance:', error);
+        res.status(500).json({ success: false, message: 'Lỗi server khi lấy hiệu suất chiến dịch.' });
     }
 });
 
@@ -777,9 +1322,52 @@ router.post('/agent/commands/:id/result', agentAuthMiddleware, async (req, res) 
             command.startedAt = command.startedAt || new Date();
             await command.save();
 
+            // Merge intermediate progress into execution logs for START_CAMPAIGN
+            if (command.type === 'START_CAMPAIGN' && result.campaignId) {
+                const campaignId = result.campaignId;
+                const campaign = await CrmCampaign.findById(campaignId);
+                if (campaign) {
+                    const latestResult = result.latestResult;
+                    const processed = result.processed || 0;
+                    const total = result.total || 0;
+
+                    // Update the specific recipient's execution log if we have a latest result
+                    if (latestResult && latestResult.phone) {
+                        const executionStatus = mapAgentExecutionStatus(latestResult.status);
+                        const now = new Date();
+                        await CrmExecutionLog.findOneAndUpdate(
+                            {
+                                campaignId,
+                                recipientPhone: latestResult.phone,
+                                status: { $in: ['queued', 'running'] }
+                            },
+                            {
+                                $set: {
+                                    status: executionStatus,
+                                    details: latestResult,
+                                    errorMessage: latestResult.error || '',
+                                    providerMessageId: latestResult.messageId || '',
+                                    attemptedAt: now,
+                                    sentAt: executionStatus === 'success' ? now : null,
+                                    failedAt: executionStatus === 'failed' ? now : null
+                                }
+                            }
+                        );
+                    }
+
+                    // Update campaign metrics from aggregate counts
+                    campaign.metrics.totalSent = processed;
+                    campaign.metrics.successCount = result.successCount || 0;
+                    campaign.metrics.failedCount = result.failedCount || 0;
+                    campaign.metrics.cancelledCount = result.cancelledCount || 0;
+                    campaign.lastProgressAt = new Date();
+                    await campaign.save();
+                }
+            }
+
             return res.json({
                 success: true,
-                message: 'Cap nhat trang thai lenh dang chay thanh cong.'
+                message: 'Cập nhật trạng thái lệnh đang chạy thành công.'
             });
         }
 
@@ -789,7 +1377,67 @@ router.post('/agent/commands/:id/result', agentAuthMiddleware, async (req, res) 
         command.finishedAt = new Date();
         await command.save();
 
-        // Auto-update CrmCampaign status based on command result
+        if (command.type === 'zalo.message.send' && command.payload?.crmMessageId) {
+            const messageStatus = success && result?.success !== false ? 'sent' : 'failed';
+            const message = await CrmMessage.findOneAndUpdate(
+                { _id: command.payload.crmMessageId, userId: command.userId },
+                {
+                    $set: {
+                        status: messageStatus,
+                        providerMessageId: result?.messageId || '',
+                        errorMessage: result?.error || errorMessage || '',
+                        sentAt: messageStatus === 'sent' ? new Date() : null
+                    }
+                },
+                { new: true }
+            );
+            if (message) {
+                await CrmConversation.findOneAndUpdate(
+                    { _id: message.conversationId, userId: command.userId },
+                    {
+                        $set: {
+                            lastMessagePreview: previewText(message.content),
+                            lastMessageAt: message.sentAt || new Date()
+                        }
+                    }
+                );
+            }
+        }
+
+        if (command.type === 'zalo.groups.sync') {
+            const groups = Array.isArray(result) ? result : (Array.isArray(result?.groups) ? result.groups : []);
+            const now = new Date();
+            for (const group of groups) {
+                const groupId = String(group.id || group.groupId || '').trim();
+                const accountId = String(group.accountId || command.payload?.accountId || 'default').trim();
+                if (!groupId || !accountId) continue;
+                await CrmZaloGroup.findOneAndUpdate(
+                    { userId: command.userId, accountId, groupId },
+                    {
+                        $set: {
+                            userId: command.userId,
+                            deviceId: command.deviceId,
+                            accountId,
+                            groupId,
+                            name: group.name || group.displayName || groupId,
+                            avatarUrl: group.avatar || group.avatarUrl || '',
+                            memberCount: Number(group.memberCount || group.totalMember || 0),
+                            role: group.role || 'member',
+                            lastSyncedAt: now
+                        },
+                        $setOnInsert: {
+                            isManaged: false,
+                            tags: [],
+                            notes: '',
+                            summaryCadence: 'manual'
+                        }
+                    },
+                    { upsert: true, new: true, setDefaultsOnInsert: true }
+                );
+            }
+        }
+
+        // Persist execution logs and auto-update CrmCampaign status based on command result.
         if (command.type === 'START_CAMPAIGN') {
             const campaignId = command.payload?.campaignId;
             if (campaignId) {
@@ -797,8 +1445,99 @@ router.post('/agent/commands/:id/result', agentAuthMiddleware, async (req, res) 
                 if (campaign) {
                     const results = (result && Array.isArray(result.results)) ? result.results : [];
                     const wasCancelled = results.some(r => r.status === 'cancelled');
+                    const recipients = Array.isArray(command.payload?.recipients) ? command.payload.recipients : [];
+                    const recipientMap = new Map(
+                        recipients.map((recipient) => [String(recipient.customerId), recipient])
+                    );
+                    const messageText = command.payload?.message || '';
+                    const now = new Date();
+                    let successCount = 0;
+                    let failedCount = 0;
+                    let cancelledCount = 0;
+
+                    if (results.length > 0) {
+                        for (const item of results) {
+                            const customerId = String(item.customerId || '');
+                            const recipient = recipientMap.get(customerId) || {};
+                            const executionStatus = mapAgentExecutionStatus(item.status);
+
+                            if (executionStatus === 'success') successCount += 1;
+                            if (executionStatus === 'failed') failedCount += 1;
+                            if (executionStatus === 'cancelled') cancelledCount += 1;
+
+                            const logUpdate = {
+                                status: executionStatus,
+                                details: item,
+                                errorMessage: item.error || item.message || '',
+                                providerMessageId: item.messageId || '',
+                                attemptedAt: now,
+                                sentAt: executionStatus === 'success' ? now : null,
+                                failedAt: (executionStatus === 'failed' || executionStatus === 'cancelled') ? now : null
+                            };
+
+                            // Try to update pre-created log by recipientPhone, fallback to insert
+                            const phone = item.phone || recipient.phone || '';
+                            const updated = phone ? await CrmExecutionLog.findOneAndUpdate(
+                                { campaignId: campaign._id, recipientPhone: phone },
+                                { $set: logUpdate }
+                            ) : null;
+
+                            if (!updated) {
+                                await CrmExecutionLog.create({
+                                    userId: command.userId,
+                                    campaignId: campaign._id,
+                                    customerId: item.customerId || undefined,
+                                    channel: campaign.channel,
+                                    ...logUpdate,
+                                    deviceId: command.deviceId,
+                                    accountId: campaign.selectedAccountId,
+                                    templateId: campaign.templateId,
+                                    recipientId: item.customerId || undefined,
+                                    recipientPhone: phone,
+                                    recipientName: recipient.name || '',
+                                    threadType: campaign.channel,
+                                    messagePreview: buildCampaignMessagePreview(messageText, recipient.name),
+                                    campaignSnapshot: {
+                                        id: campaign._id,
+                                        name: campaign.name,
+                                        channel: campaign.channel,
+                                        templateId: campaign.templateId
+                                    }
+                                });
+                            }
+                        }
+
+                        // Update lastInteractionAt for successfully contacted customers
+                        const successfulCustomerIds = results
+                            .filter(r => mapAgentExecutionStatus(r.status) === 'success' && r.customerId)
+                            .map(r => r.customerId);
+                        if (successfulCustomerIds.length > 0) {
+                            await CrmCustomer.updateMany(
+                                { _id: { $in: successfulCustomerIds }, userId: command.userId },
+                                { $set: { lastInteractionAt: now, lastMessageAt: now } }
+                            );
+                        }
+                    }
+
+                    // Mark any remaining queued/running logs as cancelled if campaign was cancelled
+                    if (wasCancelled) {
+                        await CrmExecutionLog.updateMany(
+                            { campaignId: campaign._id, status: { $in: ['queued', 'running'] } },
+                            { $set: { status: 'cancelled', failedAt: now } }
+                        );
+                    }
+
+                    // Finalize campaign metrics and status
+                    campaign.metrics = {
+                        totalSent: results.length,
+                        totalTargets: campaign.metrics.totalTargets || results.length,
+                        successCount,
+                        failedCount,
+                        cancelledCount
+                    };
                     campaign.status = wasCancelled ? 'cancelled' : 'completed';
                     campaign.finishedAt = new Date();
+                    campaign.lastProgressAt = new Date();
                     await campaign.save();
                     console.log(`[crm-agent] Automatically updated Campaign ${campaignId} status to ${campaign.status}`);
                 }
@@ -822,11 +1561,61 @@ router.post('/agent/commands/:id/result', agentAuthMiddleware, async (req, res) 
 // --- CUSTOMERS ---
 router.get('/customers', authMiddleware, async (req, res) => {
     try {
-        const customers = await CrmCustomer.find({ userId: req.user._id }).sort({ createdAt: -1 });
-        res.json({ success: true, data: customers });
+        const { search, status, tag, lifecycleStage, segmentId } = req.query;
+        
+        // Pagination handling
+        const page = Math.max(1, parseInt(req.query.page) || 1);
+        const limit = Math.min(100, Math.max(1, parseInt(req.query.limit) || 20));
+        const skip = (page - 1) * limit;
+
+        let query = { userId: req.user._id };
+
+        if (segmentId) {
+            const segment = await CrmSegment.findOne({ _id: segmentId, userId: req.user._id });
+            if (!segment) return res.status(404).json({ success: false, message: 'Khong tim thay segment.' });
+            query = buildSegmentQuery(req.user._id, segment.filters || {});
+        }
+
+        if (status && status !== 'Tất cả') {
+            query.status = status;
+        }
+
+        if (tag && tag !== 'Tất cả') {
+            query.tags = tag;
+        }
+
+        if (lifecycleStage && lifecycleStage !== 'Tất cả') {
+            query.lifecycleStage = lifecycleStage;
+        }
+
+        if (search) {
+            query.$or = [
+                { name: { $regex: search, $options: 'i' } },
+                { phone: { $regex: search, $options: 'i' } },
+                { email: { $regex: search, $options: 'i' } },
+                { company: { $regex: search, $options: 'i' } }
+            ];
+        }
+
+        const total = await CrmCustomer.countDocuments(query);
+        const customers = await CrmCustomer.find(query)
+            .sort({ createdAt: -1 })
+            .skip(skip)
+            .limit(limit);
+
+        res.json({
+            success: true,
+            data: customers,
+            pagination: {
+                total,
+                page,
+                limit,
+                pages: Math.ceil(total / limit)
+            }
+        });
     } catch (error) {
         console.error(error);
-        res.status(500).json({ success: false, message: 'Lá»—i server.' });
+        res.status(500).json({ success: false, message: 'Lỗi server.' });
     }
 });
 
@@ -947,11 +1736,32 @@ router.delete('/contacts/:id', authMiddleware, requireActiveSubscription, async 
 // --- TEMPLATES ---
 router.get('/templates', authMiddleware, async (req, res) => {
     try {
-        const templates = await CrmTemplate.find({ userId: req.user._id }).sort({ createdAt: -1 });
+        const { search, type, category, isQuick } = req.query;
+        const query = { userId: req.user._id };
+
+        if (type) {
+            query.type = type;
+        }
+        if (category) {
+            query.category = category;
+        }
+        if (isQuick !== undefined) {
+            query.isQuick = isQuick === 'true';
+        }
+
+        if (search) {
+            query.$or = [
+                { name: { $regex: search, $options: 'i' } },
+                { body: { $regex: search, $options: 'i' } },
+                { subject: { $regex: search, $options: 'i' } }
+            ];
+        }
+
+        const templates = await CrmTemplate.find(query).sort({ createdAt: -1 });
         res.json({ success: true, data: templates });
     } catch (error) {
         console.error(error);
-        res.status(500).json({ success: false, message: 'Lá»—i server.' });
+        res.status(500).json({ success: false, message: 'Lỗi server.' });
     }
 });
 
@@ -1004,25 +1814,95 @@ router.delete('/templates/:id', authMiddleware, requireActiveSubscription, async
 // --- CAMPAIGNS ---
 router.get('/campaigns', authMiddleware, async (req, res) => {
     try {
-        const campaigns = await CrmCampaign.find({ userId: req.user._id }).sort({ createdAt: -1 });
-        res.json({ success: true, data: campaigns });
+        const { status } = req.query;
+        const page = Math.max(1, parseInt(req.query.page) || 1);
+        const limit = Math.min(100, Math.max(1, parseInt(req.query.limit) || 20));
+        const skip = (page - 1) * limit;
+
+        const query = { userId: req.user._id };
+        if (status) {
+            query.status = status;
+        }
+
+        const total = await CrmCampaign.countDocuments(query);
+        const campaigns = await CrmCampaign.find(query)
+            .sort({ createdAt: -1 })
+            .skip(skip)
+            .limit(limit);
+
+        res.json({
+            success: true,
+            data: campaigns,
+            pagination: {
+                total,
+                page,
+                limit,
+                pages: Math.ceil(total / limit)
+            }
+        });
     } catch (error) {
         console.error(error);
-        res.status(500).json({ success: false, message: 'Lá»—i server.' });
+        res.status(500).json({ success: false, message: 'Lỗi server.' });
     }
 });
 
 router.post('/campaigns', authMiddleware, requireActiveSubscription, async (req, res) => {
     try {
+        const {
+            name, templateId, channel, audienceType,
+            targetCustomerIds, targetGroupIds, manualRecipients,
+            selectedDeviceId, selectedAccountId,
+            rateLimit, requireHumanApproval, scheduledAt
+        } = req.body;
+
+        if (!name || !name.trim()) {
+            return res.status(400).json({ success: false, message: 'Tên chiến dịch là bắt buộc.' });
+        }
+        if (!templateId) {
+            return res.status(400).json({ success: false, message: 'Mẫu tin nhắn là bắt buộc.' });
+        }
+
+        // Validate template exists and belongs to user
+        const template = await CrmTemplate.findOne({ _id: templateId, userId: req.user._id });
+        if (!template) {
+            return res.status(400).json({ success: false, message: 'Không tìm thấy mẫu tin nhắn.' });
+        }
+
+        // Build rate limit with defaults
+        const rateLimitObj = {
+            minDelaySeconds: Math.max(1, parseInt(rateLimit?.minDelaySeconds) || 3),
+            maxDelaySeconds: Math.max(1, parseInt(rateLimit?.maxDelaySeconds) || 5),
+            dailyCap: Math.max(1, parseInt(rateLimit?.dailyCap) || 500)
+        };
+        if (rateLimitObj.minDelaySeconds > rateLimitObj.maxDelaySeconds) {
+            rateLimitObj.maxDelaySeconds = rateLimitObj.minDelaySeconds;
+        }
+
         const newCampaign = new CrmCampaign({
-            ...req.body,
-            userId: req.user._id
+            userId: req.user._id,
+            name: name.trim(),
+            templateId,
+            channel: channel || 'zalo',
+            audienceType: audienceType || 'custom',
+            targetCustomerIds: Array.isArray(targetCustomerIds) ? targetCustomerIds : [],
+            targetGroupIds: Array.isArray(targetGroupIds) ? targetGroupIds : [],
+            manualRecipients: Array.isArray(manualRecipients) ? manualRecipients : [],
+            selectedDeviceId: selectedDeviceId || null,
+            selectedAccountId: selectedAccountId || null,
+            rateLimit: rateLimitObj,
+            requireHumanApproval: !!requireHumanApproval,
+            scheduledAt: scheduledAt || null
         });
         await newCampaign.save();
-        res.json({ success: true, data: newCampaign });
+
+        res.json({
+            success: true,
+            message: 'Da tao chien dich CRM.',
+            data: newCampaign
+        });
     } catch (error) {
-        console.error(error);
-        res.status(500).json({ success: false, message: 'Lá»—i server.' });
+        console.error('Campaign create error:', error);
+        res.status(500).json({ success: false, message: 'Loi may chu khi tao chien dich.' });
     }
 });
 
@@ -1052,19 +1932,33 @@ router.post('/campaigns/:id/start', authMiddleware, requireActiveSubscription, a
     try {
         const campaign = await CrmCampaign.findOne({ _id: req.params.id, userId: req.user._id });
         if (!campaign) {
-            return res.status(404).json({ success: false, message: 'KhĂ´ng tĂ¬m tháº¥y chiáº¿n dá»‹ch.' });
+            return res.status(404).json({ success: false, message: 'Không tìm thấy chiến dịch.' });
         }
 
-        if (campaign.status === 'running' || campaign.status === 'completed') {
-            return res.status(400).json({ success: false, message: 'Chiáº¿n dá»‹ch Ä‘Ă£/Ä‘ang cháº¡y.' });
+        if (campaign.status === 'running' || campaign.status === 'completed' || campaign.status === 'cancelled') {
+            return res.status(400).json({ success: false, message: 'Chiến dịch đã/đang chạy.' });
         }
 
-        // Find active device for enqueuing commands
-        const activeDevice = await CrmDevice.findOne({ userId: req.user._id, status: 'active' });
+        // Require human approval for high-risk campaigns
+        if (campaign.requireHumanApproval && !req.body.humanApprovedAt) {
+            return res.status(403).json({
+                success: false,
+                message: 'Chiến dịch yêu cầu xác nhận thủ công trước khi bắt đầu. Vui lòng gửi humanApprovedAt.'
+            });
+        }
+
+        // Find active device - prefer campaign's selectedDeviceId, fallback to any active
+        let activeDevice;
+        if (campaign.selectedDeviceId) {
+            activeDevice = await CrmDevice.findOne({ _id: campaign.selectedDeviceId, userId: req.user._id, status: 'active' });
+        }
         if (!activeDevice) {
-            return res.status(400).json({ 
-                success: false, 
-                message: 'Báº¡n cáº§n ghĂ©p Ä‘Ă´i thiáº¿t bá»‹ Windows Ä‘ang hoáº¡t Ä‘á»™ng trÆ°á»›c khi báº¯t Ä‘áº§u chiáº¿n dá»‹ch.' 
+            activeDevice = await CrmDevice.findOne({ userId: req.user._id, status: 'active' });
+        }
+        if (!activeDevice) {
+            return res.status(400).json({
+                success: false,
+                message: 'Không có thiết bị Windows đang hoạt động. Vui lòng ghép đôi và kích hoạt thiết bị trước khi bắt đầu chiến dịch.'
             });
         }
 
@@ -1073,33 +1967,134 @@ router.post('/campaigns/:id/start', authMiddleware, requireActiveSubscription, a
         if (!template) {
             return res.status(400).json({
                 success: false,
-                message: 'Khong tim thay mau tin nhan cua chien dich.'
+                message: 'Không tìm thấy mẫu tin nhắn của chiến dịch.'
             });
         }
-        const templateMessageText = template ? template.body : 'Tin nháº¯n chiáº¿n dá»‹ch';
+        const templateMessageText = template.body || 'Tin nhắn chiến dịch';
 
-        // Fetch recipients details (Zalo phone, name, ID)
-        const customers = await CrmCustomer.find({ _id: { $in: campaign.targetCustomerIds }, userId: req.user._id });
-        const targetRecipients = customers
-            .map(c => ({
-                customerId: c._id,
-                phone: c.phone ? c.phone.trim() : '',
-                name: c.name
-            }))
-            .filter(c => c.phone !== '');
+        // --- Resolve recipients from all audience sources ---
+        const targetRecipients = [];
+
+        // 1. Customer IDs → phone/name
+        if (Array.isArray(campaign.targetCustomerIds) && campaign.targetCustomerIds.length > 0) {
+            const customers = await CrmCustomer.find({ _id: { $in: campaign.targetCustomerIds }, userId: req.user._id });
+            for (const c of customers) {
+                const phone = (c.phone || '').trim();
+                // Check consent status for customers if not test/mock mode
+                if (phone && c.consentStatus === 'granted') {
+                    targetRecipients.push({
+                        customerId: c._id,
+                        phone,
+                        name: c.name || '',
+                        threadType: 'user'
+                    });
+                }
+            }
+        }
+
+        // 2. Group IDs → group thread targets
+        if (Array.isArray(campaign.targetGroupIds) && campaign.targetGroupIds.length > 0) {
+            for (const groupId of campaign.targetGroupIds) {
+                const gid = (groupId || '').trim();
+                if (gid) {
+                    targetRecipients.push({
+                        customerId: null,
+                        phone: gid,
+                        name: `Nhóm ${gid}`,
+                        threadType: 'group'
+                    });
+                }
+            }
+        }
+
+        // 3. Manual recipients → normalize phone
+        if (Array.isArray(campaign.manualRecipients) && campaign.manualRecipients.length > 0) {
+            for (const mr of campaign.manualRecipients) {
+                const phone = (mr.phone || '').trim();
+                if (phone) {
+                    targetRecipients.push({
+                        customerId: null,
+                        phone,
+                        name: mr.name || '',
+                        threadType: 'user'
+                    });
+                }
+            }
+        }
 
         if (targetRecipients.length === 0) {
             return res.status(400).json({
                 success: false,
-                message: 'Chien dich khong co khach hang nao co so dien thoai/Zalo hop le.'
+                message: 'Chiến dịch không có người nhận hợp lệ nào (thiếu số điện thoại/Zalo hoặc ID nhóm, hoặc đã từ chối nhận tin).'
             });
+        }
+
+        // --- Backend Compliance & Constraint Checks ---
+        const targetCount = targetRecipients.length;
+        
+        // 1. Target count thresholds
+        if (targetCount > 500) {
+            return res.status(400).json({
+                success: false,
+                message: `Quy mô chiến dịch vượt quá giới hạn hệ thống (tối đa 500). Hiện tại: ${targetCount}.`
+            });
+        }
+        
+        if (targetCount > 50 && !req.body.humanApprovedAt) {
+            return res.status(403).json({
+                success: false,
+                message: `Chiến dịch gửi trên 50 tin nhắn (${targetCount}) yêu cầu xác nhận rủi ro thủ công. Vui lòng gửi humanApprovedAt.`
+            });
+        }
+
+        // 2. Rate limits validation
+        const minDelay = campaign.rateLimit?.minDelaySeconds || 3;
+        const maxDelay = campaign.rateLimit?.maxDelaySeconds || 5;
+        if (minDelay < 1 || maxDelay < 1 || minDelay > maxDelay) {
+            return res.status(400).json({
+                success: false,
+                message: 'Cấu hình delay không hợp lệ. minDelay và maxDelay phải lớn hơn 0, và min <= max.'
+            });
+        }
+
+        // Save human approval timestamp if provided
+        if (req.body.humanApprovedAt) {
+            campaign.humanApprovedAt = new Date(req.body.humanApprovedAt);
         }
 
         campaign.status = 'running';
         campaign.startedAt = new Date();
+        campaign.metrics.totalTargets = targetRecipients.length;
         await campaign.save();
 
-        // Enqueue command tasks to active Windows agent (rather than calling agent directly)
+        // Create initial CrmExecutionLog entries with status 'queued' so UI shows progress immediately
+        const now = new Date();
+        const initialLogs = targetRecipients.map((r, idx) => ({
+            userId: req.user._id,
+            campaignId: campaign._id,
+            customerId: r.customerId || undefined,
+            channel: campaign.channel,
+            status: 'queued',
+            deviceId: activeDevice._id,
+            accountId: campaign.selectedAccountId,
+            templateId: campaign.templateId,
+            recipientPhone: r.phone,
+            recipientName: r.name,
+            threadType: r.threadType || campaign.channel,
+            messagePreview: buildCampaignMessagePreview(templateMessageText, r.name),
+            attemptedAt: null,
+            campaignSnapshot: {
+                id: campaign._id,
+                name: campaign.name,
+                channel: campaign.channel,
+                templateId: campaign.templateId
+            }
+        }));
+        if (initialLogs.length > 0) {
+            await CrmExecutionLog.insertMany(initialLogs);
+        }
+
+        // Enqueue command to active Windows agent
         const agentCommand = new CrmAgentCommand({
             userId: req.user._id,
             subscriptionId: req.crmSubscription._id,
@@ -1110,7 +2105,8 @@ router.post('/campaigns/:id/start', authMiddleware, requireActiveSubscription, a
                 templateId: campaign.templateId,
                 message: templateMessageText,
                 channel: campaign.channel,
-                recipients: targetRecipients
+                recipients: targetRecipients,
+                rateLimit: campaign.rateLimit
             },
             status: 'queued',
             idempotencyKey: `campaign-start:${campaign._id}`,
@@ -1120,12 +2116,64 @@ router.post('/campaigns/:id/start', authMiddleware, requireActiveSubscription, a
 
         res.json({
             success: true,
-            message: 'ÄĂ£ Ä‘Æ°a lá»‡nh báº¯t Ä‘áº§u chiáº¿n dá»‹ch vĂ o hĂ ng Ä‘á»£i lá»‡nh cá»§a thiáº¿t bá»‹.',
+            message: 'Đã đưa lệnh bắt đầu chiến dịch vào hàng đợi lệnh của thiết bị.',
             data: { campaign, agentCommand }
         });
     } catch (error) {
         console.error('Campaign start error:', error);
-        res.status(500).json({ success: false, message: 'Lá»—i mĂ¡y chá»§.' });
+        res.status(500).json({ success: false, message: 'Lỗi máy chủ.' });
+    }
+});
+
+// GET /api/crm/campaigns/:id/status
+router.get('/campaigns/:id/status', authMiddleware, async (req, res) => {
+    try {
+        const campaign = await CrmCampaign.findOne({ _id: req.params.id, userId: req.user._id });
+        if (!campaign) {
+            return res.status(404).json({ success: false, message: 'Khong tim thay chien dich.' });
+        }
+
+        const [command, latestLogs, rawCounts] = await Promise.all([
+            CrmAgentCommand.findOne({
+                userId: req.user._id,
+                type: 'START_CAMPAIGN',
+                'payload.campaignId': campaign._id
+            }).sort({ createdAt: -1 }),
+            CrmExecutionLog.find({ userId: req.user._id, campaignId: campaign._id })
+                .sort({ updatedAt: -1, createdAt: -1 })
+                .limit(20),
+            CrmExecutionLog.aggregate([
+                { $match: { userId: req.user._id, campaignId: campaign._id } },
+                { $group: { _id: '$status', count: { $sum: 1 } } }
+            ])
+        ]);
+
+        const statusCounts = {
+            queued: 0,
+            running: 0,
+            success: 0,
+            failed: 0,
+            cancelled: 0
+        };
+        rawCounts.forEach((item) => {
+            if (Object.prototype.hasOwnProperty.call(statusCounts, item._id)) {
+                statusCounts[item._id] = item.count;
+            }
+        });
+
+        res.json({
+            success: true,
+            data: {
+                campaign,
+                commandStatus: command?.status || null,
+                commandResult: command?.result || null,
+                statusCounts,
+                latestLogs
+            }
+        });
+    } catch (error) {
+        console.error('Campaign status error:', error);
+        res.status(500).json({ success: false, message: 'Loi may chu khi lay trang thai chien dich.' });
     }
 });
 
@@ -1133,19 +2181,47 @@ router.post('/campaigns/:id/start', authMiddleware, requireActiveSubscription, a
 router.post('/campaigns/:id/cancel', authMiddleware, requireActiveSubscription, async (req, res) => {
     try {
         const campaign = await CrmCampaign.findOne({ _id: req.params.id, userId: req.user._id });
-        if (!campaign) return res.status(404).json({ success: false, message: 'KhĂ´ng tĂ¬m tháº¥y chiáº¿n dá»‹ch.' });
+        if (!campaign) return res.status(404).json({ success: false, message: 'Không tìm thấy chiến dịch.' });
+
+        // Reject cancellation of already-completed campaigns
+        if (campaign.status === 'completed') {
+            return res.status(400).json({ success: false, message: 'Không thể hủy chiến dịch đã hoàn thành.' });
+        }
+        if (campaign.status === 'cancelled') {
+            return res.status(400).json({ success: false, message: 'Chiến dịch đã bị hủy trước đó.' });
+        }
 
         campaign.status = 'cancelled';
         campaign.finishedAt = new Date();
         await campaign.save();
 
-        // Send cancel command to agent
-        const activeDevice = await CrmDevice.findOne({ userId: req.user._id, status: 'active' });
-        if (activeDevice) {
+        // Update queued/running execution logs to cancelled
+        await CrmExecutionLog.updateMany(
+            { campaignId: campaign._id, status: { $in: ['queued', 'running'] } },
+            { $set: { status: 'cancelled', failedAt: new Date() } }
+        );
+
+        // Send cancel command to the same agent that owns the campaign when possible.
+        const startCommand = await CrmAgentCommand.findOne({
+            userId: req.user._id,
+            type: 'START_CAMPAIGN',
+            'payload.campaignId': campaign._id
+        }).sort({ createdAt: -1 });
+        let cancelDevice = null;
+        if (startCommand?.deviceId) {
+            cancelDevice = await CrmDevice.findOne({ _id: startCommand.deviceId, userId: req.user._id, status: 'active' });
+        }
+        if (!cancelDevice && campaign.selectedDeviceId) {
+            cancelDevice = await CrmDevice.findOne({ _id: campaign.selectedDeviceId, userId: req.user._id, status: 'active' });
+        }
+        if (!cancelDevice) {
+            cancelDevice = await CrmDevice.findOne({ userId: req.user._id, status: 'active' });
+        }
+        if (cancelDevice) {
             await CrmAgentCommand.create({
                 userId: req.user._id,
                 subscriptionId: req.crmSubscription._id,
-                deviceId: activeDevice._id,
+                deviceId: cancelDevice._id,
                 type: 'CANCEL_CAMPAIGN',
                 payload: { campaignId: campaign._id },
                 status: 'queued',
@@ -1154,21 +2230,82 @@ router.post('/campaigns/:id/cancel', authMiddleware, requireActiveSubscription, 
             });
         }
 
-        res.json({ success: true, message: 'ÄĂ£ há»§y chiáº¿n dá»‹ch thĂ nh cĂ´ng.', data: campaign });
+        res.json({
+            success: true,
+            message: 'Da huy chien dich.',
+            data: campaign
+        });
     } catch (error) {
-        console.error(error);
-        res.status(500).json({ success: false, message: 'Lá»—i server.' });
+        console.error('Campaign cancel error:', error);
+        res.status(500).json({ success: false, message: 'Loi may chu khi huy chien dich.' });
     }
 });
 
 // --- EXECUTION LOGS ---
 router.get('/execution-logs', authMiddleware, async (req, res) => {
     try {
-        const logs = await CrmExecutionLog.find({ userId: req.user._id }).sort({ createdAt: -1 });
-        res.json({ success: true, data: logs });
+        const { campaignId, status, customerId, search, accountId, dateFrom, dateTo } = req.query;
+        const page = Math.max(1, parseInt(req.query.page) || 1);
+        const limit = Math.min(100, Math.max(1, parseInt(req.query.limit) || 20));
+        const skip = (page - 1) * limit;
+
+        const query = { userId: req.user._id };
+        if (campaignId) {
+            query.campaignId = campaignId;
+        }
+        if (status && status !== 'Tất cả') {
+            if (status === 'Thành công' || status === 'success') {
+                query.status = 'success';
+            } else if (status === 'Thất bại' || status === 'failed') {
+                query.status = 'failed';
+            } else if (status === 'Đang chờ' || status === 'queued') {
+                query.status = { $in: ['queued', 'running'] };
+            } else if (status === 'cancelled') {
+                query.status = 'cancelled';
+            } else {
+                query.status = status;
+            }
+        }
+        if (customerId) {
+            query.customerId = customerId;
+        }
+        if (accountId) {
+            query.accountId = accountId;
+        }
+        // Date range filter
+        if (dateFrom || dateTo) {
+            query.createdAt = {};
+            if (dateFrom) query.createdAt.$gte = new Date(dateFrom);
+            if (dateTo) query.createdAt.$lte = new Date(dateTo);
+        }
+
+        if (search) {
+            query.$or = [
+                { recipientPhone: { $regex: search, $options: 'i' } },
+                { recipientName: { $regex: search, $options: 'i' } },
+                { messagePreview: { $regex: search, $options: 'i' } }
+            ];
+        }
+
+        const total = await CrmExecutionLog.countDocuments(query);
+        const logs = await CrmExecutionLog.find(query)
+            .sort({ createdAt: -1 })
+            .skip(skip)
+            .limit(limit);
+
+        res.json({
+            success: true,
+            data: logs,
+            pagination: {
+                total,
+                page,
+                limit,
+                pages: Math.ceil(total / limit)
+            }
+        });
     } catch (error) {
         console.error(error);
-        res.status(500).json({ success: false, message: 'Lá»—i server.' });
+        res.status(500).json({ success: false, message: 'Lỗi server.' });
     }
 });
 
@@ -1274,7 +2411,1080 @@ router.post('/ai/chat', crmAiLimiter, authMiddleware, requireActiveSubscription,
 });
 
 // ==========================================
-// 6. ADMIN CRM ENDPOINTS
+// 6. LIVE CHAT AND CHATBOT ENDPOINTS
+// ==========================================
+
+router.get('/conversations', authMiddleware, async (req, res) => {
+    try {
+        const { accountId, threadType, search } = req.query;
+        const page = Math.max(1, parseInt(req.query.page) || 1);
+        const limit = Math.min(100, Math.max(1, parseInt(req.query.limit) || 30));
+        const query = { userId: req.user._id };
+
+        if (accountId) query.accountId = accountId;
+        if (threadType) query.threadType = normalizeThreadType(threadType);
+        if (search) {
+            query.$or = [
+                { displayName: { $regex: search, $options: 'i' } },
+                { threadId: { $regex: search, $options: 'i' } },
+                { lastMessagePreview: { $regex: search, $options: 'i' } }
+            ];
+        }
+
+        const [total, conversations] = await Promise.all([
+            CrmConversation.countDocuments(query),
+            CrmConversation.find(query)
+                .sort({ lastMessageAt: -1, updatedAt: -1 })
+                .skip((page - 1) * limit)
+                .limit(limit)
+        ]);
+
+        res.json({
+            success: true,
+            data: conversations,
+            pagination: { total, page, limit, pages: Math.ceil(total / limit) }
+        });
+    } catch (error) {
+        console.error('Conversation list error:', error);
+        res.status(500).json({ success: false, message: 'Loi server khi tai hoi thoai.' });
+    }
+});
+
+router.get('/conversations/:id/messages', authMiddleware, async (req, res) => {
+    try {
+        const conversation = await CrmConversation.findOne({ _id: req.params.id, userId: req.user._id });
+        if (!conversation) return res.status(404).json({ success: false, message: 'Khong tim thay hoi thoai.' });
+
+        const limit = Math.min(100, Math.max(1, parseInt(req.query.limit) || 50));
+        const query = { userId: req.user._id, conversationId: conversation._id };
+        if (req.query.before) {
+            query.createdAt = { $lt: new Date(req.query.before) };
+        }
+
+        const messages = await CrmMessage.find(query)
+            .sort({ createdAt: -1 })
+            .limit(limit);
+
+        res.json({ success: true, data: messages.reverse() });
+    } catch (error) {
+        console.error('Conversation messages error:', error);
+        res.status(500).json({ success: false, message: 'Loi server khi tai tin nhan.' });
+    }
+});
+
+router.post('/conversations/:id/send', authMiddleware, requireActiveSubscription, async (req, res) => {
+    try {
+        const content = String(req.body.content || req.body.message || '').trim();
+        if (!content) return res.status(400).json({ success: false, message: 'Noi dung tin nhan la bat buoc.' });
+        if (content.length > 5000) return res.status(400).json({ success: false, message: 'Tin nhan qua dai.' });
+
+        const conversation = await CrmConversation.findOne({ _id: req.params.id, userId: req.user._id });
+        if (!conversation) return res.status(404).json({ success: false, message: 'Khong tim thay hoi thoai.' });
+
+        let activeDevice = null;
+        if (req.body.deviceId) {
+            activeDevice = await CrmDevice.findOne({ _id: req.body.deviceId, userId: req.user._id, status: 'active' });
+        }
+        if (!activeDevice && conversation.deviceId) {
+            activeDevice = await CrmDevice.findOne({ _id: conversation.deviceId, userId: req.user._id, status: 'active' });
+        }
+        if (!activeDevice) {
+            activeDevice = await CrmDevice.findOne({ userId: req.user._id, status: 'active' });
+        }
+        if (!activeDevice) {
+            return res.status(400).json({ success: false, message: 'Khong co thiet bi Windows dang hoat dong de gui tin.' });
+        }
+
+        const message = await CrmMessage.create({
+            userId: req.user._id,
+            conversationId: conversation._id,
+            deviceId: activeDevice._id,
+            accountId: conversation.accountId,
+            threadId: conversation.threadId,
+            threadType: conversation.threadType,
+            direction: 'outbound',
+            senderId: conversation.accountId,
+            senderName: 'Operator',
+            content,
+            messageType: 'text',
+            status: 'queued',
+            sentAt: null
+        });
+
+        const command = await CrmAgentCommand.create({
+            userId: req.user._id,
+            subscriptionId: req.crmSubscription._id,
+            deviceId: activeDevice._id,
+            type: 'zalo.message.send',
+            payload: {
+                crmMessageId: message._id,
+                accountId: conversation.accountId,
+                recipientId: conversation.threadId,
+                threadType: conversation.threadType,
+                message: content,
+                messageType: 'text'
+            },
+            status: 'queued',
+            idempotencyKey: `live-send:${message._id}`,
+            expiresAt: new Date(Date.now() + 60 * 60 * 1000)
+        });
+
+        conversation.lastMessagePreview = previewText(content);
+        conversation.lastMessageAt = new Date();
+        conversation.deviceId = activeDevice._id;
+        await conversation.save();
+
+        if (conversation.customerId) {
+            await CrmCustomer.updateOne(
+                { _id: conversation.customerId, userId: req.user._id },
+                { $set: { lastMessageAt: conversation.lastMessageAt, lastInteractionAt: conversation.lastMessageAt } }
+            );
+        }
+
+        res.json({ success: true, data: { message, command } });
+    } catch (error) {
+        console.error('Conversation send error:', error);
+        res.status(500).json({ success: false, message: 'Loi server khi gui tin nhan.' });
+    }
+});
+
+router.put('/conversations/:id', authMiddleware, requireActiveSubscription, async (req, res) => {
+    try {
+        const updateData = sanitizeUpdate(req.body, ['tags', 'notes', 'assignedStatus', 'chatbotEnabled', 'customerId']);
+        const conversation = await CrmConversation.findOneAndUpdate(
+            { _id: req.params.id, userId: req.user._id },
+            { $set: updateData },
+            { new: true }
+        );
+        if (!conversation) return res.status(404).json({ success: false, message: 'Khong tim thay hoi thoai.' });
+        res.json({ success: true, data: conversation });
+    } catch (error) {
+        console.error('Conversation update error:', error);
+        res.status(500).json({ success: false, message: 'Loi server khi cap nhat hoi thoai.' });
+    }
+});
+
+router.post('/conversations/:id/read', authMiddleware, async (req, res) => {
+    try {
+        const conversation = await CrmConversation.findOneAndUpdate(
+            { _id: req.params.id, userId: req.user._id },
+            { $set: { unreadCount: 0 } },
+            { new: true }
+        );
+        if (!conversation) return res.status(404).json({ success: false, message: 'Khong tim thay hoi thoai.' });
+        res.json({ success: true, data: conversation });
+    } catch (error) {
+        console.error('Conversation read error:', error);
+        res.status(500).json({ success: false, message: 'Loi server khi danh dau da doc.' });
+    }
+});
+
+router.post('/agent/events/message', agentAuthMiddleware, async (req, res) => {
+    try {
+        const result = await upsertConversationFromInbound({
+            userId: req.crmDevice.userId,
+            deviceId: req.crmDevice._id,
+            event: req.body,
+            enforceManagedGroup: normalizeThreadType(req.body.threadType) === 'group'
+        });
+        res.json({ success: true, data: result });
+    } catch (error) {
+        console.error('Agent message event error:', error);
+        res.status(error.statusCode || 500).json({ success: false, message: error.message || 'Loi server khi ghi nhan tin nhan agent.' });
+    }
+});
+
+router.get('/chatbot/settings', authMiddleware, async (req, res) => {
+    try {
+        const settings = await getChatbotSettings(req.user._id);
+        res.json({ success: true, data: settings });
+    } catch (error) {
+        console.error('Chatbot settings get error:', error);
+        res.status(500).json({ success: false, message: 'Loi server khi tai cau hinh chatbot.' });
+    }
+});
+
+router.put('/chatbot/settings', authMiddleware, requireActiveSubscription, async (req, res) => {
+    try {
+        const settings = await saveChatbotSettings(req.user._id, req.body || {});
+        res.json({ success: true, data: settings });
+    } catch (error) {
+        console.error('Chatbot settings save error:', error);
+        res.status(500).json({ success: false, message: 'Loi server khi luu cau hinh chatbot.' });
+    }
+});
+
+router.get('/chatbot/rules', authMiddleware, async (req, res) => {
+    try {
+        const rules = await CrmChatbotRule.find({ userId: req.user._id }).sort({ priority: 1, createdAt: -1 });
+        res.json({ success: true, data: rules });
+    } catch (error) {
+        console.error('Chatbot rules list error:', error);
+        res.status(500).json({ success: false, message: 'Loi server khi tai kich ban chatbot.' });
+    }
+});
+
+router.post('/chatbot/rules', authMiddleware, requireActiveSubscription, async (req, res) => {
+    try {
+        const keywords = Array.isArray(req.body.keywords)
+            ? req.body.keywords
+            : String(req.body.keyword || '').split(',').map((item) => item.trim()).filter(Boolean);
+        if (!req.body.name && keywords.length === 0) return res.status(400).json({ success: false, message: 'Can ten hoac tu khoa kich ban.' });
+        if (!req.body.response) return res.status(400).json({ success: false, message: 'Can noi dung phan hoi.' });
+
+        const rule = await CrmChatbotRule.create({
+            userId: req.user._id,
+            name: req.body.name || keywords[0],
+            keywords,
+            matchMode: req.body.matchMode || 'contains',
+            response: req.body.response,
+            isActive: req.body.isActive !== false,
+            priority: Number(req.body.priority) || 100,
+            channelScope: req.body.channelScope || 'user',
+            handoffKeywords: Array.isArray(req.body.handoffKeywords) ? req.body.handoffKeywords : []
+        });
+        res.json({ success: true, data: rule });
+    } catch (error) {
+        console.error('Chatbot rule create error:', error);
+        res.status(500).json({ success: false, message: 'Loi server khi tao kich ban chatbot.' });
+    }
+});
+
+router.put('/chatbot/rules/:id', authMiddleware, requireActiveSubscription, async (req, res) => {
+    try {
+        const updateData = sanitizeUpdate(req.body, ['name', 'keywords', 'matchMode', 'response', 'isActive', 'priority', 'channelScope', 'handoffKeywords', 'businessHours']);
+        const rule = await CrmChatbotRule.findOneAndUpdate(
+            { _id: req.params.id, userId: req.user._id },
+            { $set: updateData },
+            { new: true }
+        );
+        if (!rule) return res.status(404).json({ success: false, message: 'Khong tim thay kich ban chatbot.' });
+        res.json({ success: true, data: rule });
+    } catch (error) {
+        console.error('Chatbot rule update error:', error);
+        res.status(500).json({ success: false, message: 'Loi server khi cap nhat kich ban chatbot.' });
+    }
+});
+
+router.delete('/chatbot/rules/:id', authMiddleware, requireActiveSubscription, async (req, res) => {
+    try {
+        const result = await CrmChatbotRule.findOneAndDelete({ _id: req.params.id, userId: req.user._id });
+        if (!result) return res.status(404).json({ success: false, message: 'Khong tim thay kich ban chatbot.' });
+        res.json({ success: true, message: 'Da xoa kich ban chatbot.' });
+    } catch (error) {
+        console.error('Chatbot rule delete error:', error);
+        res.status(500).json({ success: false, message: 'Loi server khi xoa kich ban chatbot.' });
+    }
+});
+
+router.get('/chatbot/logs', authMiddleware, async (req, res) => {
+    try {
+        const limit = Math.min(100, Math.max(1, parseInt(req.query.limit) || 50));
+        const query = { userId: req.user._id };
+        if (req.query.status) query.status = req.query.status;
+        const logs = await CrmChatbotLog.find(query)
+            .populate('ruleId', 'name keywords')
+            .sort({ createdAt: -1 })
+            .limit(limit);
+        res.json({ success: true, data: logs });
+    } catch (error) {
+        console.error('Chatbot logs error:', error);
+        res.status(500).json({ success: false, message: 'Loi server khi tai nhat ky chatbot.' });
+    }
+});
+
+router.post('/chatbot/test', crmAiLimiter, authMiddleware, requireActiveSubscription, async (req, res) => {
+    try {
+        const message = String(req.body.message || '').trim();
+        const threadType = normalizeThreadType(req.body.threadType);
+        if (!message) return res.status(400).json({ success: false, message: 'Can tin nhan de test chatbot.' });
+
+        const settings = await getChatbotSettings(req.user._id);
+        if (hasHandoffKeyword(settings, message)) {
+            const log = await CrmChatbotLog.create({
+                userId: req.user._id,
+                mode: 'handoff',
+                promptPreview: previewText(message),
+                responsePreview: 'Human handoff requested.',
+                status: 'skipped'
+            });
+            return res.json({ success: true, data: { mode: 'handoff', text: '', log, quota: getQuotaPayload(req.crmSubscription) } });
+        }
+
+        const rules = await CrmChatbotRule.find({ userId: req.user._id, isActive: true, channelScope: { $in: ['all', threadType] } }).sort({ priority: 1, createdAt: -1 });
+        const matchedRule = rules.find((rule) => !hasHandoffKeyword(rule, message) && matchChatbotRule(rule, message));
+        if (matchedRule) {
+            const log = await CrmChatbotLog.create({
+                userId: req.user._id,
+                ruleId: matchedRule._id,
+                mode: 'keyword',
+                promptPreview: previewText(message),
+                responsePreview: previewText(matchedRule.response),
+                status: 'succeeded'
+            });
+            return res.json({ success: true, data: { mode: 'keyword', text: matchedRule.response, rule: matchedRule, log, quota: getQuotaPayload(req.crmSubscription) } });
+        }
+
+        if (!settings.aiEnabled) {
+            const log = await CrmChatbotLog.create({
+                userId: req.user._id,
+                mode: 'none',
+                promptPreview: previewText(message),
+                status: 'skipped',
+                errorMessage: 'AI disabled and no keyword rule matched.'
+            });
+            return res.json({ success: true, data: { mode: 'none', text: '', log, quota: getQuotaPayload(req.crmSubscription) } });
+        }
+
+        const knowledge = settings.knowledgeSnippets?.length ? `\nKien thuc noi bo:\n${settings.knowledgeSnippets.join('\n---\n')}` : '';
+        const promptContent = `${settings.systemPrompt}${knowledge}\n\nTin nhan khach hang: ${message}`;
+        const { aiResponse, usageDoc, quota } = await runCrmAiWithQuota(req, {
+            promptContent,
+            sessionId: `crm-chatbot-test:${req.user._id}`,
+            requestType: 'chatbot_test',
+            systemPrompt: settings.systemPrompt
+        });
+        const log = await CrmChatbotLog.create({
+            userId: req.user._id,
+            mode: 'ai',
+            aiUsageId: usageDoc._id,
+            promptPreview: previewText(message),
+            responsePreview: previewText(aiResponse.text),
+            status: 'succeeded'
+        });
+
+        res.json({ success: true, data: { mode: 'ai', text: aiResponse.text, log, quota } });
+    } catch (error) {
+        console.error('Chatbot test error:', error);
+        res.status(error.statusCode || 500).json({ success: false, message: error.message || 'Loi server khi test chatbot.' });
+    }
+});
+
+// ==========================================
+// 7. MANAGED GROUPS, SEGMENTS, TASKS, ANALYTICS
+// ==========================================
+
+router.get('/groups/accounts', authMiddleware, async (req, res) => {
+    try {
+        const [devices, groups] = await Promise.all([
+            CrmDevice.find({ userId: req.user._id, status: 'active' }).sort({ lastSeenAt: -1 }),
+            CrmZaloGroup.aggregate([
+                { $match: { userId: req.user._id } },
+                { $group: { _id: '$accountId', managedCount: { $sum: { $cond: ['$isManaged', 1, 0] } }, totalGroups: { $sum: 1 } } }
+            ])
+        ]);
+        res.json({
+            success: true,
+            data: {
+                devices,
+                accounts: groups.map((item) => ({
+                    accountId: item._id,
+                    label: item._id,
+                    totalGroups: item.totalGroups,
+                    managedCount: item.managedCount
+                }))
+            }
+        });
+    } catch (error) {
+        console.error('Group accounts error:', error);
+        res.status(500).json({ success: false, message: 'Loi server khi tai tai khoan nhom.' });
+    }
+});
+
+router.post('/groups/sync', authMiddleware, requireActiveSubscription, async (req, res) => {
+    try {
+        let device = null;
+        if (req.body.deviceId) {
+            device = await CrmDevice.findOne({ _id: req.body.deviceId, userId: req.user._id, status: 'active' });
+        }
+        if (!device) {
+            device = await CrmDevice.findOne({ userId: req.user._id, status: 'active' }).sort({ lastSeenAt: -1 });
+        }
+        if (!device) return res.status(400).json({ success: false, message: 'Khong co thiet bi agent dang hoat dong de dong bo nhom.' });
+
+        const command = await CrmAgentCommand.create({
+            userId: req.user._id,
+            subscriptionId: req.crmSubscription._id,
+            deviceId: device._id,
+            type: 'zalo.groups.sync',
+            payload: { accountId: req.body.accountId || null },
+            status: 'queued',
+            idempotencyKey: `groups-sync:${device._id}:${Date.now()}`,
+            expiresAt: new Date(Date.now() + 60 * 60 * 1000)
+        });
+        res.json({ success: true, data: { command } });
+    } catch (error) {
+        console.error('Groups sync error:', error);
+        res.status(500).json({ success: false, message: 'Loi server khi tao lenh dong bo nhom.' });
+    }
+});
+
+router.get('/groups', authMiddleware, async (req, res) => {
+    try {
+        const query = { userId: req.user._id };
+        if (req.query.accountId) query.accountId = req.query.accountId;
+        if (req.query.managed !== undefined) query.isManaged = req.query.managed === 'true';
+        const groups = await CrmZaloGroup.find(query).sort({ isManaged: -1, lastMessageAt: -1, name: 1 });
+        res.json({ success: true, data: groups });
+    } catch (error) {
+        console.error('Groups list error:', error);
+        res.status(500).json({ success: false, message: 'Loi server khi tai danh sach nhom.' });
+    }
+});
+
+router.get('/groups/insights', authMiddleware, async (req, res) => {
+    try {
+        const query = { userId: req.user._id };
+        if (req.query.status) query.status = req.query.status;
+        if (req.query.type) query.type = req.query.type;
+        if (req.query.groupId) query.groupId = req.query.groupId;
+        const insights = await CrmGroupInsight.find(query).populate('groupId', 'name accountId groupId').sort({ priority: -1, createdAt: -1 }).limit(200);
+        res.json({ success: true, data: insights });
+    } catch (error) {
+        console.error('Group insights error:', error);
+        res.status(500).json({ success: false, message: 'Loi server khi tai insight nhom.' });
+    }
+});
+
+router.put('/groups/insights/:id', authMiddleware, requireActiveSubscription, async (req, res) => {
+    try {
+        const insight = await CrmGroupInsight.findOneAndUpdate(
+            { _id: req.params.id, userId: req.user._id },
+            { $set: sanitizeUpdate(req.body, ['status', 'priority', 'recommendedAction']) },
+            { new: true }
+        );
+        if (!insight) return res.status(404).json({ success: false, message: 'Khong tim thay insight.' });
+        res.json({ success: true, data: insight });
+    } catch (error) {
+        console.error('Group insight update error:', error);
+        res.status(500).json({ success: false, message: 'Loi server khi cap nhat insight.' });
+    }
+});
+
+router.put('/groups/:id/manage', authMiddleware, requireActiveSubscription, async (req, res) => {
+    try {
+        const isManaged = req.body.isManaged !== false;
+        const updateData = sanitizeUpdate(req.body, ['summaryCadence', 'tags', 'notes']);
+        updateData.isManaged = isManaged;
+        updateData.managedSince = isManaged ? new Date() : null;
+        const group = await CrmZaloGroup.findOneAndUpdate(
+            { _id: req.params.id, userId: req.user._id },
+            { $set: updateData },
+            { new: true }
+        );
+        if (!group) return res.status(404).json({ success: false, message: 'Khong tim thay nhom.' });
+        await CrmAuditLog.create({
+            userId: req.user._id,
+            subscriptionId: req.crmSubscription._id,
+            action: isManaged ? 'crm_group_management_enabled' : 'crm_group_management_disabled',
+            details: { groupId: group.groupId, accountId: group.accountId, name: group.name }
+        });
+        res.json({ success: true, data: group });
+    } catch (error) {
+        console.error('Group manage error:', error);
+        res.status(500).json({ success: false, message: 'Loi server khi cap nhat quan ly nhom.' });
+    }
+});
+
+router.get('/groups/:id/messages', authMiddleware, async (req, res) => {
+    try {
+        const group = await CrmZaloGroup.findOne({ _id: req.params.id, userId: req.user._id });
+        if (!group) return res.status(404).json({ success: false, message: 'Khong tim thay nhom.' });
+        const query = { userId: req.user._id, groupId: group._id };
+        if (req.query.from || req.query.to) {
+            query.sentAt = {};
+            if (req.query.from) query.sentAt.$gte = new Date(req.query.from);
+            if (req.query.to) query.sentAt.$lte = new Date(req.query.to);
+        }
+        const limit = Math.min(500, Math.max(1, parseInt(req.query.limit) || 100));
+        const messages = await CrmGroupMessage.find(query).sort({ sentAt: -1, createdAt: -1 }).limit(limit);
+        res.json({ success: true, data: messages.reverse() });
+    } catch (error) {
+        console.error('Group messages error:', error);
+        res.status(500).json({ success: false, message: 'Loi server khi tai tin nhan nhom.' });
+    }
+});
+
+router.post('/groups/:id/checkpoints', authMiddleware, requireActiveSubscription, async (req, res) => {
+    try {
+        const group = await CrmZaloGroup.findOne({ _id: req.params.id, userId: req.user._id });
+        if (!group) return res.status(404).json({ success: false, message: 'Khong tim thay nhom.' });
+        const fromAt = req.body.fromAt ? new Date(req.body.fromAt) : new Date(Date.now() - 24 * 60 * 60 * 1000);
+        const toAt = req.body.toAt ? new Date(req.body.toAt) : new Date();
+        const messageCount = await CrmGroupMessage.countDocuments({ userId: req.user._id, groupId: group._id, sentAt: { $gte: fromAt, $lte: toAt } });
+        const checkpoint = await CrmGroupCheckpoint.create({
+            userId: req.user._id,
+            groupId: group._id,
+            name: req.body.name || `Checkpoint ${new Date().toLocaleDateString('vi-VN')}`,
+            fromAt,
+            toAt,
+            messageCount,
+            createdBy: req.user._id
+        });
+        res.json({ success: true, data: checkpoint });
+    } catch (error) {
+        console.error('Group checkpoint create error:', error);
+        res.status(500).json({ success: false, message: 'Loi server khi tao checkpoint.' });
+    }
+});
+
+router.get('/groups/:id/checkpoints', authMiddleware, async (req, res) => {
+    try {
+        const group = await CrmZaloGroup.findOne({ _id: req.params.id, userId: req.user._id });
+        if (!group) return res.status(404).json({ success: false, message: 'Khong tim thay nhom.' });
+        const checkpoints = await CrmGroupCheckpoint.find({ userId: req.user._id, groupId: group._id }).sort({ createdAt: -1 });
+        res.json({ success: true, data: checkpoints });
+    } catch (error) {
+        console.error('Group checkpoints list error:', error);
+        res.status(500).json({ success: false, message: 'Loi server khi tai checkpoint.' });
+    }
+});
+
+router.post('/groups/:id/summarize', crmAiLimiter, authMiddleware, requireActiveSubscription, async (req, res) => {
+    try {
+        const group = await CrmZaloGroup.findOne({ _id: req.params.id, userId: req.user._id });
+        if (!group) return res.status(404).json({ success: false, message: 'Khong tim thay nhom.' });
+        if (!group.isManaged) return res.status(403).json({ success: false, message: 'Chi tom tat nhom da bat quan ly.' });
+
+        let checkpoint = null;
+        let fromAt = req.body.fromAt ? new Date(req.body.fromAt) : new Date(Date.now() - 24 * 60 * 60 * 1000);
+        let toAt = req.body.toAt ? new Date(req.body.toAt) : new Date();
+        if (req.body.checkpointId) {
+            checkpoint = await CrmGroupCheckpoint.findOne({ _id: req.body.checkpointId, userId: req.user._id, groupId: group._id });
+            if (!checkpoint) return res.status(404).json({ success: false, message: 'Khong tim thay checkpoint.' });
+            fromAt = checkpoint.fromAt;
+            toAt = checkpoint.toAt;
+        }
+
+        const messages = await CrmGroupMessage.find({ userId: req.user._id, groupId: group._id, sentAt: { $gte: fromAt, $lte: toAt } })
+            .sort({ sentAt: 1 })
+            .limit(300);
+        if (messages.length === 0) {
+            return res.json({ success: true, data: { empty: true, messageCount: 0, quota: getQuotaPayload(req.crmSubscription) } });
+        }
+
+        const promptContent = buildGroupSummaryPrompt({ group, messages });
+        const { aiResponse, usageDoc, quota } = await runCrmAiWithQuota(req, {
+            promptContent,
+            sessionId: `crm-group-summary:${req.user._id}:${group._id}`,
+            requestType: 'group_summary'
+        });
+
+        const summaryText = redactPhoneLikeStrings(aiResponse.text);
+
+        const keyTopics = [];
+        const decisions = [];
+        const questions = [];
+        const risks = [];
+        const opportunities = [];
+        let currentSection = null;
+
+        summaryText.split('\n').forEach(line => {
+            const trimmed = line.trim();
+            if (!trimmed) return;
+            const lower = trimmed.toLowerCase();
+            if (lower.includes('chu de chinh') || lower.includes('chủ đề chính') || lower.includes('chủ đề')) currentSection = keyTopics;
+            else if (lower.includes('quyet dinh') || lower.includes('quyết định')) currentSection = decisions;
+            else if (lower.includes('cau hoi') || lower.includes('câu hỏi')) currentSection = questions;
+            else if (lower.includes('rui ro') || lower.includes('rủi ro')) currentSection = risks;
+            else if (lower.includes('co hoi') || lower.includes('cơ hội')) currentSection = opportunities;
+            else if (currentSection && trimmed.match(/^[-*\d.\s]+(.*)/)) {
+                const item = trimmed.replace(/^[-*\d.\s]+/, '').trim();
+                if (item && item.length > 2) currentSection.push(item.slice(0, 500));
+            }
+        });
+
+        let sentiment = 'neutral';
+        const lowerSummary = summaryText.toLowerCase();
+        if (lowerSummary.includes('tich cuc') || lowerSummary.includes('tích cực')) sentiment = 'positive';
+        else if (lowerSummary.includes('tieu cuc') || lowerSummary.includes('tiêu cực')) sentiment = 'negative';
+
+        const summary = await CrmGroupSummary.create({
+            userId: req.user._id,
+            groupId: group._id,
+            checkpointId: checkpoint?._id || null,
+            summaryText,
+            aiUsageId: usageDoc._id,
+            model: aiResponse.model,
+            keyTopics,
+            decisions,
+            questions,
+            risks,
+            opportunities,
+            sentiment
+        });
+
+        const insightPayloads = extractSimpleInsights(summary.summaryText).map((item) => ({
+            ...item,
+            userId: req.user._id,
+            groupId: group._id,
+            summaryId: summary._id
+        }));
+        const insights = insightPayloads.length > 0 ? await CrmGroupInsight.insertMany(insightPayloads) : [];
+        if (checkpoint) {
+            checkpoint.status = 'summarized';
+            checkpoint.messageCount = messages.length;
+            await checkpoint.save();
+        }
+
+        res.json({ success: true, data: { summary, insights, quota } });
+    } catch (error) {
+        console.error('Group summarize error:', error);
+        res.status(error.statusCode || 500).json({ success: false, message: error.message || 'Loi server khi tom tat nhom.' });
+    }
+});
+
+router.get('/groups/:id/summaries', authMiddleware, async (req, res) => {
+    try {
+        const group = await CrmZaloGroup.findOne({ _id: req.params.id, userId: req.user._id });
+        if (!group) return res.status(404).json({ success: false, message: 'Khong tim thay nhom.' });
+        const summaries = await CrmGroupSummary.find({ userId: req.user._id, groupId: group._id }).sort({ createdAt: -1 }).limit(100);
+        res.json({ success: true, data: summaries });
+    } catch (error) {
+        console.error('Group summaries list error:', error);
+        res.status(500).json({ success: false, message: 'Loi server khi tai tom tat nhom.' });
+    }
+});
+
+router.get('/agent/groups/managed', agentAuthMiddleware, async (req, res) => {
+    try {
+        const groups = await CrmZaloGroup.find({ userId: req.crmDevice.userId, isManaged: true }).select('accountId groupId name');
+        res.json({ success: true, data: groups });
+    } catch (error) {
+        console.error('Agent managed groups error:', error);
+        res.status(500).json({ success: false, message: 'Loi server khi tai nhom managed.' });
+    }
+});
+
+router.get('/segments', authMiddleware, async (req, res) => {
+    try {
+        const segments = await CrmSegment.find({ userId: req.user._id }).sort({ updatedAt: -1 });
+        res.json({ success: true, data: segments });
+    } catch (error) {
+        console.error('Segments list error:', error);
+        res.status(500).json({ success: false, message: 'Loi server khi tai segment.' });
+    }
+});
+
+router.post('/segments', authMiddleware, requireActiveSubscription, async (req, res) => {
+    try {
+        if (!req.body.name) return res.status(400).json({ success: false, message: 'Ten segment la bat buoc.' });
+        const segment = await CrmSegment.create({
+            userId: req.user._id,
+            name: req.body.name,
+            description: req.body.description || '',
+            filters: req.body.filters || {}
+        });
+        res.json({ success: true, data: segment });
+    } catch (error) {
+        console.error('Segment create error:', error);
+        res.status(500).json({ success: false, message: 'Loi server khi tao segment.' });
+    }
+});
+
+router.put('/segments/:id', authMiddleware, requireActiveSubscription, async (req, res) => {
+    try {
+        const segment = await CrmSegment.findOneAndUpdate(
+            { _id: req.params.id, userId: req.user._id },
+            { $set: sanitizeUpdate(req.body, ['name', 'description', 'filters']) },
+            { new: true }
+        );
+        if (!segment) return res.status(404).json({ success: false, message: 'Khong tim thay segment.' });
+        res.json({ success: true, data: segment });
+    } catch (error) {
+        console.error('Segment update error:', error);
+        res.status(500).json({ success: false, message: 'Loi server khi cap nhat segment.' });
+    }
+});
+
+router.delete('/segments/:id', authMiddleware, requireActiveSubscription, async (req, res) => {
+    try {
+        const result = await CrmSegment.findOneAndDelete({ _id: req.params.id, userId: req.user._id });
+        if (!result) return res.status(404).json({ success: false, message: 'Khong tim thay segment.' });
+        res.json({ success: true, message: 'Da xoa segment.' });
+    } catch (error) {
+        console.error('Segment delete error:', error);
+        res.status(500).json({ success: false, message: 'Loi server khi xoa segment.' });
+    }
+});
+
+router.post('/segments/:id/preview', authMiddleware, async (req, res) => {
+    try {
+        const segment = await CrmSegment.findOne({ _id: req.params.id, userId: req.user._id });
+        if (!segment) return res.status(404).json({ success: false, message: 'Khong tim thay segment.' });
+        const query = buildSegmentQuery(req.user._id, segment.filters || {});
+        const customers = await CrmCustomer.find(query).sort({ updatedAt: -1 }).limit(200);
+        const total = await CrmCustomer.countDocuments(query);
+        res.json({ success: true, data: { segment, customers, total } });
+    } catch (error) {
+        console.error('Segment preview error:', error);
+        res.status(500).json({ success: false, message: 'Loi server khi preview segment.' });
+    }
+});
+
+router.get('/tasks', authMiddleware, async (req, res) => {
+    try {
+        const query = { userId: req.user._id };
+        if (req.query.status) query.status = req.query.status;
+        if (req.query.priority) query.priority = req.query.priority;
+        const tasks = await CrmTask.find(query).populate('customerId', 'name phone lifecycleStage').sort({ status: 1, dueAt: 1, createdAt: -1 }).limit(300);
+        res.json({ success: true, data: tasks });
+    } catch (error) {
+        console.error('Tasks list error:', error);
+        res.status(500).json({ success: false, message: 'Loi server khi tai task.' });
+    }
+});
+
+router.post('/tasks', authMiddleware, requireActiveSubscription, async (req, res) => {
+    try {
+        if (!req.body.title) return res.status(400).json({ success: false, message: 'Tieu de task la bat buoc.' });
+        let leadScoreSnapshot = 0;
+        if (req.body.customerId) {
+            const customer = await CrmCustomer.findOne({ _id: req.body.customerId, userId: req.user._id });
+            const recentInboundCount = await CrmMessage.countDocuments({ userId: req.user._id, direction: 'inbound', createdAt: { $gte: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000) }, ...(req.body.conversationId ? { conversationId: req.body.conversationId } : {}) });
+            leadScoreSnapshot = calculateCrmLeadScore({ customer, recentInboundCount, manualAdjustment: req.body.manualScoreAdjustment || 0 });
+        }
+        const task = await CrmTask.create({
+            userId: req.user._id,
+            title: req.body.title,
+            description: req.body.description || '',
+            relatedType: req.body.relatedType || 'manual',
+            customerId: req.body.customerId || null,
+            groupId: req.body.groupId || null,
+            conversationId: req.body.conversationId || null,
+            insightId: req.body.insightId || null,
+            dueAt: req.body.dueAt || null,
+            priority: req.body.priority || 'medium',
+            status: req.body.status || 'open',
+            ownerNote: req.body.ownerNote || '',
+            leadScoreSnapshot,
+            manualScoreAdjustment: Number(req.body.manualScoreAdjustment) || 0
+        });
+        res.json({ success: true, data: task });
+    } catch (error) {
+        console.error('Task create error:', error);
+        res.status(500).json({ success: false, message: 'Loi server khi tao task.' });
+    }
+});
+
+router.put('/tasks/:id', authMiddleware, requireActiveSubscription, async (req, res) => {
+    try {
+        const task = await CrmTask.findOneAndUpdate(
+            { _id: req.params.id, userId: req.user._id },
+            { $set: sanitizeUpdate(req.body, ['title', 'description', 'dueAt', 'priority', 'status', 'ownerNote', 'manualScoreAdjustment']) },
+            { new: true }
+        );
+        if (!task) return res.status(404).json({ success: false, message: 'Khong tim thay task.' });
+        res.json({ success: true, data: task });
+    } catch (error) {
+        console.error('Task update error:', error);
+        res.status(500).json({ success: false, message: 'Loi server khi cap nhat task.' });
+    }
+});
+
+router.delete('/tasks/:id', authMiddleware, requireActiveSubscription, async (req, res) => {
+    try {
+        const result = await CrmTask.findOneAndDelete({ _id: req.params.id, userId: req.user._id });
+        if (!result) return res.status(404).json({ success: false, message: 'Khong tim thay task.' });
+        res.json({ success: true, message: 'Da xoa task.' });
+    } catch (error) {
+        console.error('Task delete error:', error);
+        res.status(500).json({ success: false, message: 'Loi server khi xoa task.' });
+    }
+});
+
+router.get('/analytics/funnel', authMiddleware, async (req, res) => {
+    try {
+        const raw = await CrmCustomer.aggregate([
+            { $match: { userId: req.user._id } },
+            { $group: { _id: '$lifecycleStage', count: { $sum: 1 } } }
+        ]);
+        res.json({ success: true, data: raw.map((item) => ({ label: item._id || 'other', value: item.count })) });
+    } catch (error) {
+        console.error('Analytics funnel error:', error);
+        res.status(500).json({ success: false, message: 'Loi server khi tai funnel.' });
+    }
+});
+
+router.get('/analytics/campaigns', authMiddleware, async (req, res) => {
+    try {
+        const raw = await CrmExecutionLog.aggregate([
+            { $match: { userId: req.user._id, createdAt: { $gte: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000) } } },
+            { $group: { _id: { day: { $dateToString: { date: '$createdAt', format: '%Y-%m-%d' } }, status: '$status' }, count: { $sum: 1 } } },
+            { $sort: { '_id.day': 1 } }
+        ]);
+        res.json({ success: true, data: raw.map((item) => ({ date: item._id.day, status: item._id.status, count: item.count })) });
+    } catch (error) {
+        console.error('Analytics campaigns error:', error);
+        res.status(500).json({ success: false, message: 'Loi server khi tai analytics chien dich.' });
+    }
+});
+
+router.get('/analytics/chatbot', authMiddleware, async (req, res) => {
+    try {
+        const raw = await CrmChatbotLog.aggregate([
+            { $match: { userId: req.user._id } },
+            { $group: { _id: '$mode', count: { $sum: 1 } } }
+        ]);
+        res.json({ success: true, data: raw.map((item) => ({ mode: item._id, count: item.count })) });
+    } catch (error) {
+        console.error('Analytics chatbot error:', error);
+        res.status(500).json({ success: false, message: 'Loi server khi tai analytics chatbot.' });
+    }
+});
+
+router.get('/analytics/groups', authMiddleware, async (req, res) => {
+    try {
+        const [managedGroups, summaries, openInsights] = await Promise.all([
+            CrmZaloGroup.countDocuments({ userId: req.user._id, isManaged: true }),
+            CrmGroupSummary.countDocuments({ userId: req.user._id }),
+            CrmGroupInsight.countDocuments({ userId: req.user._id, status: 'open' })
+        ]);
+        res.json({ success: true, data: { managedGroups, summaries, openInsights } });
+    } catch (error) {
+        console.error('Analytics groups error:', error);
+        res.status(500).json({ success: false, message: 'Loi server khi tai analytics nhom.' });
+    }
+});
+
+router.get('/exports/customers', authMiddleware, async (req, res) => {
+    try {
+        let query = {
+            userId: req.user._id,
+            ...(req.query.status ? { status: req.query.status } : {}),
+            ...(req.query.lifecycleStage ? { lifecycleStage: req.query.lifecycleStage } : {}),
+            ...(req.query.tag ? { tags: req.query.tag } : {})
+        };
+
+        if (req.query.segmentId) {
+            const segment = await CrmSegment.findOne({ _id: req.query.segmentId, userId: req.user._id });
+            if (!segment) return res.status(404).json({ success: false, message: 'Khong tim thay segment.' });
+            query = buildSegmentQuery(req.user._id, segment.filters || {});
+        }
+
+        const customers = await CrmCustomer.find(query).sort({ createdAt: -1 }).limit(10000);
+        const rows = customers.map((customer) => ({
+            name: customer.name || '',
+            phone: customer.phone || '',
+            email: customer.email || '',
+            company: customer.company || '',
+            lifecycleStage: customer.lifecycleStage || '',
+            status: customer.status || '',
+            tags: Array.isArray(customer.tags) ? customer.tags.join(';') : '',
+            source: customer.source || '',
+            consentStatus: customer.consentStatus || '',
+            leadScore: customer.leadScore || 0,
+            lastInteractionAt: customer.lastInteractionAt || '',
+            createdAt: customer.createdAt || ''
+        }));
+        const csv = serializeCsv([
+            { key: 'name', label: 'Name' },
+            { key: 'phone', label: 'Phone' },
+            { key: 'email', label: 'Email' },
+            { key: 'company', label: 'Company' },
+            { key: 'lifecycleStage', label: 'Lifecycle Stage' },
+            { key: 'status', label: 'Status' },
+            { key: 'tags', label: 'Tags' },
+            { key: 'source', label: 'Source' },
+            { key: 'consentStatus', label: 'Consent Status' },
+            { key: 'leadScore', label: 'Lead Score' },
+            { key: 'lastInteractionAt', label: 'Last Interaction At' },
+            { key: 'createdAt', label: 'Created At' }
+        ], rows);
+        res.json({ success: true, data: { filename: 'crm-customers.csv', csv, count: rows.length } });
+    } catch (error) {
+        console.error('Customers export error:', error);
+        res.status(500).json({ success: false, message: 'Loi server khi export khach hang.' });
+    }
+});
+
+router.get('/exports/campaign-logs', authMiddleware, async (req, res) => {
+    try {
+        const logs = await CrmExecutionLog.find({ userId: req.user._id })
+            .populate('campaignId', 'name channel')
+            .sort({ createdAt: -1 })
+            .limit(10000);
+        const rows = logs.map((log) => ({
+            campaignName: log.campaignId?.name || '',
+            channel: log.channel || log.campaignId?.channel || '',
+            recipientName: log.recipientName || '',
+            recipientPhone: log.recipientPhone || '',
+            status: log.status || '',
+            messagePreview: log.messagePreview || '',
+            providerMessageId: log.providerMessageId || '',
+            errorMessage: log.errorMessage || '',
+            sentAt: log.sentAt || '',
+            createdAt: log.createdAt || ''
+        }));
+        const csv = serializeCsv([
+            { key: 'campaignName', label: 'Campaign' },
+            { key: 'channel', label: 'Channel' },
+            { key: 'recipientName', label: 'Recipient Name' },
+            { key: 'recipientPhone', label: 'Recipient Phone' },
+            { key: 'status', label: 'Status' },
+            { key: 'messagePreview', label: 'Message Preview' },
+            { key: 'providerMessageId', label: 'Provider Message ID' },
+            { key: 'errorMessage', label: 'Error Message' },
+            { key: 'sentAt', label: 'Sent At' },
+            { key: 'createdAt', label: 'Created At' }
+        ], rows);
+        res.json({ success: true, data: { filename: 'crm-campaign-logs.csv', csv, count: rows.length } });
+    } catch (error) {
+        console.error('Campaign logs export error:', error);
+        res.status(500).json({ success: false, message: 'Loi server khi export log chien dich.' });
+    }
+});
+
+router.get('/exports/group-summaries', authMiddleware, async (req, res) => {
+    try {
+        const query = {
+            userId: req.user._id,
+            ...(req.query.groupId ? { groupId: req.query.groupId } : {})
+        };
+        const summaries = await CrmGroupSummary.find(query).sort({ createdAt: -1 }).limit(10000);
+        const rows = summaries.map((summary) => ({
+            groupId: summary.groupId || '',
+            summaryText: summary.summaryText || '',
+            keyTopics: Array.isArray(summary.keyTopics) ? summary.keyTopics.join(';') : '',
+            decisions: Array.isArray(summary.decisions) ? summary.decisions.join(';') : '',
+            sentiment: summary.sentiment || '',
+            aiUsageId: summary.aiUsageId || '',
+            createdAt: summary.createdAt || ''
+        }));
+        const csv = serializeCsv([
+            { key: 'groupId', label: 'Group ID' },
+            { key: 'summaryText', label: 'Summary' },
+            { key: 'keyTopics', label: 'Key Topics' },
+            { key: 'decisions', label: 'Decisions' },
+            { key: 'sentiment', label: 'Sentiment' },
+            { key: 'aiUsageId', label: 'AI Usage ID' },
+            { key: 'createdAt', label: 'Created At' }
+        ], rows);
+        res.json({ success: true, data: { filename: 'crm-group-summaries.csv', csv, count: rows.length } });
+    } catch (error) {
+        console.error('Group summaries export error:', error);
+        res.status(500).json({ success: false, message: 'Loi server khi export tom tat nhom.' });
+    }
+});
+
+router.post('/customers/import', authMiddleware, requireActiveSubscription, async (req, res) => {
+    try {
+        const rows = Array.isArray(req.body.rows) ? req.body.rows : parseCsvRows(req.body.csv || '');
+        if (rows.length === 0) return res.status(400).json({ success: false, message: 'Khong co dong import hop le.' });
+
+        const validationErrors = [];
+        let createdCount = 0;
+        let updatedCount = 0;
+        let skippedDuplicates = 0;
+
+        for (let index = 0; index < rows.length; index++) {
+            const row = rows[index];
+            const name = String(row.name || row.ten || '').trim();
+            const phone = String(row.phone || row.sdt || '').trim();
+            const email = String(row.email || '').trim().toLowerCase();
+            const zaloUserId = String(row.zaloUserId || '').trim();
+            if (!name || (!phone && !email && !zaloUserId)) {
+                validationErrors.push({ row: index + 1, message: 'Can name va it nhat phone/email/zaloUserId.' });
+                continue;
+            }
+            const duplicateQuery = {
+                userId: req.user._id,
+                $or: [
+                    ...(phone ? [{ phone }] : []),
+                    ...(email ? [{ email }] : []),
+                    ...(zaloUserId ? [{ zaloUserId }] : [])
+                ]
+            };
+            const existing = duplicateQuery.$or.length > 0 ? await CrmCustomer.findOne(duplicateQuery) : null;
+            const tags = String(row.tags || '').split(/[;|,]/).map((item) => item.trim()).filter(Boolean);
+            if (existing) {
+                existing.name = name || existing.name;
+                existing.phone = phone || existing.phone;
+                existing.email = email || existing.email;
+                existing.company = row.company || existing.company || '';
+                existing.tags = tags.length > 0 ? tags : existing.tags;
+                existing.consentStatus = row.consentStatus || existing.consentStatus || 'pending';
+                await existing.save();
+                updatedCount += 1;
+            } else {
+                await CrmCustomer.create({
+                    userId: req.user._id,
+                    name,
+                    phone,
+                    email,
+                    company: row.company || '',
+                    tags,
+                    consentStatus: row.consentStatus || 'pending',
+                    source: row.source || 'CSV Import',
+                    lifecycleStage: row.lifecycleStage || 'lead',
+                    zaloUserId,
+                    consentEvidence: row.consentEvidence || 'CSV import'
+                });
+                createdCount += 1;
+            }
+        }
+
+        res.json({ success: true, data: { createdCount, updatedCount, skippedDuplicates, validationErrors } });
+    } catch (error) {
+        console.error('Customers import error:', error);
+        res.status(500).json({ success: false, message: 'Loi server khi import khach hang.' });
+    }
+});
+
+router.get('/admin/tenant-health', authMiddleware, adminOnly, async (req, res) => {
+    try {
+        const [
+            activeSubscriptions,
+            activeDevices,
+            commandBacklog,
+            failedCampaigns,
+            aiUsageByType,
+            groupSummaryUsage
+        ] = await Promise.all([
+            CrmSubscription.countDocuments({ status: 'active' }),
+            CrmDevice.countDocuments({ status: 'active' }),
+            CrmAgentCommand.countDocuments({ status: { $in: ['queued', 'sent', 'running'] } }),
+            CrmCampaign.countDocuments({ status: { $in: ['cancelled'] } }),
+            CrmAiUsage.aggregate([{ $group: { _id: '$requestType', count: { $sum: 1 } } }]),
+            CrmGroupSummary.countDocuments()
+        ]);
+        res.json({
+            success: true,
+            data: {
+                activeSubscriptions,
+                activeDevices,
+                commandBacklog,
+                failedCampaigns,
+                aiUsageByType: aiUsageByType.map((item) => ({ requestType: item._id, count: item.count })),
+                groupSummaryUsage
+            }
+        });
+    } catch (error) {
+        console.error('Admin tenant health error:', error);
+        res.status(500).json({ success: false, message: 'Loi server khi tai tenant health.' });
+    }
+});
+
+router.post('/admin/automation/disable', authMiddleware, adminOnly, async (req, res) => {
+    try {
+        const { userId, deviceId, reason } = req.body;
+        if (!userId && !deviceId) return res.status(400).json({ success: false, message: 'Can userId hoac deviceId.' });
+        const deviceQuery = deviceId ? { _id: deviceId } : { userId, status: 'active' };
+        const result = await CrmDevice.updateMany(deviceQuery, { $set: { status: 'disabled' } });
+        await CrmAuditLog.create({
+            userId: userId || req.user._id,
+            action: 'admin_automation_disabled',
+            details: { adminUserId: req.user._id, deviceId, reason: reason || '' }
+        });
+        res.json({ success: true, data: { modifiedCount: result.modifiedCount } });
+    } catch (error) {
+        console.error('Admin automation disable error:', error);
+        res.status(500).json({ success: false, message: 'Loi server khi tat automation.' });
+    }
+});
+
+// ==========================================
+// 8. ADMIN CRM ENDPOINTS
 // ==========================================
 
 // GET /api/crm/admin/subscriptions

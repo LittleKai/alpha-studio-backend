@@ -28,7 +28,39 @@ const crmTemplateSchema = new mongoose.Schema({
     },
     variables: [{
         type: String
-    }]
+    }],
+    category: {
+        type: String,
+        default: 'general',
+        trim: true
+    },
+    shortcut: {
+        type: String,
+        default: '',
+        trim: true
+    },
+    isQuick: {
+        type: Boolean,
+        default: false,
+        index: true
+    },
+    status: {
+        type: String,
+        enum: ['active', 'inactive'],
+        default: 'active'
+    },
+    language: {
+        type: String,
+        default: 'vi'
+    },
+    lastUsedAt: {
+        type: Date,
+        default: null
+    },
+    usageCount: {
+        type: Number,
+        default: 0
+    }
 }, {
     timestamps: true
 });
