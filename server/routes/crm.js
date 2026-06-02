@@ -379,7 +379,7 @@ const requireActiveSubscription = async (req, res, next) => {
         if (!sub) {
             return res.status(403).json({
                 success: false,
-                message: 'YĂªu cáº§u gĂ³i Ä‘Äƒng kĂ½ Alpha CRM Ä‘ang hoáº¡t Ä‘á»™ng.'
+                message: 'Yêu cầu gói đăng ký Alpha CRM đang hoạt động.'
             });
         }
         
@@ -389,7 +389,7 @@ const requireActiveSubscription = async (req, res, next) => {
             await sub.save();
             return res.status(403).json({
                 success: false,
-                message: 'GĂ³i Ä‘Äƒng kĂ½ Alpha CRM cá»§a báº¡n Ä‘Ă£ háº¿t háº¡n.'
+                message: 'Gói đăng ký Alpha CRM của bạn đã hết hạn.'
             });
         }
         
@@ -406,17 +406,17 @@ const agentAuthMiddleware = async (req, res, next) => {
         const agentSecret = req.headers['x-agent-secret'] || req.body.agentSecret;
 
         if (!deviceId || !agentSecret) {
-            return res.status(401).json({ success: false, message: 'Thiáº¿u deviceId hoáº·c agentSecret.' });
+            return res.status(401).json({ success: false, message: 'Thiếu deviceId hoặc agentSecret.' });
         }
 
         const device = await CrmDevice.findOne({ _id: deviceId, status: 'active' });
         if (!device) {
-            return res.status(403).json({ success: false, message: 'Thiáº¿t bá»‹ khĂ´ng tá»“n táº¡i hoáº·c Ä‘Ă£ bá»‹ vĂ´ hiá»‡u hĂ³a.' });
+            return res.status(403).json({ success: false, message: 'Thiết bị không tồn tại hoặc đã bị vô hiệu hóa.' });
         }
 
         const incomingSecretHash = crypto.createHash('sha256').update(agentSecret).digest('hex');
         if (device.agentSecretHash !== incomingSecretHash) {
-            return res.status(403).json({ success: false, message: 'Sai máº­t kháº©u thiáº¿t bá»‹.' });
+            return res.status(403).json({ success: false, message: 'Sai mật khẩu thiết bị.' });
         }
 
         req.crmDevice = device;
@@ -772,7 +772,7 @@ router.post('/billing/checkout', authMiddleware, async (req, res) => {
             if (!activeSub) {
                 return res.status(400).json({ 
                     success: false, 
-                    message: 'Báº¡n pháº£i cĂ³ gĂ³i CRM Ä‘ang hoáº¡t Ä‘á»™ng Ä‘á»ƒ mua gĂ³i AI top-up.' 
+                    message: 'Bạn phải có gói CRM đang hoạt động để mua gói AI top-up.' 
                 });
             }
             if (new Date() > new Date(activeSub.periodEnd)) {
@@ -780,7 +780,7 @@ router.post('/billing/checkout', authMiddleware, async (req, res) => {
                 await activeSub.save();
                 return res.status(400).json({ 
                     success: false, 
-                    message: 'GĂ³i Ä‘Äƒng kĂ½ CRM cá»§a báº¡n Ä‘Ă£ háº¿t háº¡n. HĂ£y gia háº¡n trÆ°á»›c khi mua gĂ³i AI top-up.' 
+                    message: 'Gói đăng ký CRM của bạn đã hết hạn. Hãy gia hạn trước khi mua gói AI top-up.' 
                 });
             }
         }
@@ -797,7 +797,7 @@ router.post('/billing/checkout', authMiddleware, async (req, res) => {
             );
 
             if (!user) {
-                return res.status(400).json({ success: false, message: 'Sá»‘ dÆ° credit cá»§a báº¡n khĂ´ng Ä‘á»§.' });
+                return res.status(400).json({ success: false, message: 'Số dư credit của bạn không đủ.' });
             }
 
             // Generate unique transaction code
@@ -879,7 +879,7 @@ router.post('/billing/checkout', authMiddleware, async (req, res) => {
                     // AI pack purchase (subscription check already passed at checkout top)
                     subscription = await CrmSubscription.findOne({ userId: user._id, status: 'active' });
                     if (!subscription) {
-                        throw new Error('Báº¡n pháº£i cĂ³ gĂ³i CRM Ä‘ang hoáº¡t Ä‘á»™ng Ä‘á»ƒ mua gĂ³i AI top-up.');
+                        throw new Error('Bạn phải có gói CRM đang hoạt động để mua gói AI top-up.');
                     }
                     subscription.extraAiRemaining += product.extraAiLimit;
                     await subscription.save();
@@ -894,7 +894,7 @@ router.post('/billing/checkout', authMiddleware, async (req, res) => {
 
                 return res.json({
                     success: true,
-                    message: `${product.name} Ä‘Ă£ Ä‘Æ°á»£c thanh toĂ¡n thĂ nh cĂ´ng qua Credits.`,
+                    message: `${product.name} đã được thanh toán thành công qua Credits.`,
                     data: {
                         fulfilled: true,
                         subscription
@@ -931,7 +931,7 @@ router.post('/billing/checkout', authMiddleware, async (req, res) => {
             } while (attempts < 10);
 
             if (attempts >= 10) {
-                return res.status(500).json({ success: false, message: 'KhĂ´ng thá»ƒ táº¡o mĂ£ Ä‘Æ¡n hĂ ng duy nháº¥t.' });
+                return res.status(500).json({ success: false, message: 'Không thể tạo mã đơn hàng duy nhất.' });
             }
 
             const billingOrder = new CrmBillingOrder({
@@ -973,10 +973,10 @@ router.post('/billing/checkout', authMiddleware, async (req, res) => {
             });
         }
 
-        res.status(400).json({ success: false, message: 'PhÆ°Æ¡ng thá»©c thanh toĂ¡n khĂ´ng Ä‘Æ°á»£c há»— trá»£.' });
+        res.status(400).json({ success: false, message: 'Phương thức thanh toán không được hỗ trợ.' });
     } catch (error) {
         console.error('Checkout error:', error);
-        res.status(500).json({ success: false, message: 'Lá»—i mĂ¡y chá»§ khi táº¡o Ä‘Æ¡n hĂ ng.' });
+        res.status(500).json({ success: false, message: 'Lỗi máy chủ khi tạo đơn hàng.' });
     }
 });
 
@@ -1073,7 +1073,7 @@ router.post('/devices/register', crmDeviceLimiter, authMiddleware, requireActive
             });
         }
         console.error('Device registration error:', error);
-        res.status(500).json({ success: false, message: 'Lá»—i mĂ¡y chá»§ khi Ä‘Äƒng kĂ½ thiáº¿t bá»‹.' });
+        res.status(500).json({ success: false, message: 'Lỗi máy chủ khi đăng ký thiết bị.' });
     }
 });
 
@@ -1082,7 +1082,7 @@ router.post('/devices/:id/disable', authMiddleware, async (req, res) => {
     try {
         const device = await CrmDevice.findOne({ _id: req.params.id, userId: req.user._id });
         if (!device) {
-            return res.status(404).json({ success: false, message: 'KhĂ´ng tĂ¬m tháº¥y thiáº¿t bá»‹ cá»§a báº¡n.' });
+            return res.status(404).json({ success: false, message: 'Không tìm thấy thiết bị của bạn.' });
         }
 
         device.status = 'disabled';
@@ -1110,7 +1110,7 @@ router.post('/pairing/start', crmPairingLimiter, userOrAgentAuth, requireActiveS
 
         const device = await CrmDevice.findOne({ _id: deviceId, userId: req.user._id, status: 'active' });
         if (!device) {
-            return res.status(404).json({ success: false, message: 'KhĂ´ng tĂ¬m tháº¥y thiáº¿t bá»‹ hoáº¡t Ä‘á»™ng tÆ°Æ¡ng á»©ng.' });
+            return res.status(404).json({ success: false, message: 'Không tìm thấy thiết bị hoạt động tương ứng.' });
         }
 
         // Generate 6-digit pairing code
@@ -1150,7 +1150,7 @@ router.post('/pairing/start', crmPairingLimiter, userOrAgentAuth, requireActiveS
         });
     } catch (error) {
         console.error('Pairing start error:', error);
-        res.status(500).json({ success: false, message: 'Lá»—i mĂ¡y chá»§ khi thiáº¿t láº­p ghĂ©p Ä‘Ă´i.' });
+        res.status(500).json({ success: false, message: 'Lỗi máy chủ khi thiết lập ghép đôi.' });
     }
 });
 
@@ -1160,7 +1160,7 @@ router.post('/pairing/confirm', crmPairingLimiter, authMiddleware, requireActive
         const { pairingCode, qrToken } = req.body;
 
         if (!pairingCode && !qrToken) {
-            return res.status(400).json({ success: false, message: 'Cáº§n mĂ£ ghĂ©p Ä‘Ă´i (pairingCode) hoáº·c mĂ£ QR (qrToken).' });
+            return res.status(400).json({ success: false, message: 'Cần mã ghép đôi (pairingCode) hoặc mã QR (qrToken).' });
         }
 
         let query = { status: 'pending', expiresAt: { $gt: new Date() } };
@@ -1176,7 +1176,7 @@ router.post('/pairing/confirm', crmPairingLimiter, authMiddleware, requireActive
         const session = await CrmPairingSession.findOne(query);
 
         if (!session) {
-            return res.status(404).json({ success: false, message: 'MĂ£ ghĂ©p Ä‘Ă´i khĂ´ng há»£p lá»‡ hoáº·c Ä‘Ă£ háº¿t háº¡n.' });
+            return res.status(404).json({ success: false, message: 'Mã ghép đôi không hợp lệ hoặc đã hết hạn.' });
         }
 
         // Verify cross-account security: confirming user must match pairing owner
@@ -2336,7 +2336,7 @@ router.post('/ai/chat', crmAiLimiter, authMiddleware, requireActiveSubscription,
         if (!hasQuota(sub)) {
             return res.status(403).json({
                 success: false,
-                message: 'Háº¿t háº¡n má»©c AI quota. Vui lĂ²ng mua thĂªm gĂ³i AI top-up.'
+                message: 'Hết hạn mức AI quota. Vui lòng mua thêm gói AI top-up.'
             });
         }
 

@@ -7,8 +7,8 @@ export const crmPairingLimiter = rateLimit({
 });
 
 export const crmDeviceLimiter = rateLimit({
-  windowMs: 60 * 60 * 1000,
-  max: 5,
+  windowMs: 15 * 60 * 1000, // 15 mins
+  max: 100, // 100 requests (development-friendly)
   message: { success: false, message: 'Quá nhiều yêu cầu đăng ký thiết bị.' }
 });
 
