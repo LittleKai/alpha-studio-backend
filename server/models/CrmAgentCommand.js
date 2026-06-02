@@ -60,6 +60,11 @@ const crmAgentCommandSchema = new mongoose.Schema({
     finishedAt: {
         type: Date,
         default: null
+    },
+    expiresAt: {
+        type: Date,
+        default: () => new Date(Date.now() + 24 * 60 * 60 * 1000),
+        index: true
     }
 }, {
     timestamps: true
@@ -67,6 +72,13 @@ const crmAgentCommandSchema = new mongoose.Schema({
 
 // Composite index for fetching queued commands for a specific device
 crmAgentCommandSchema.index({ deviceId: 1, status: 1, createdAt: 1 });
+crmAgentCommandSchema.index(
+    { deviceId: 1, idempotencyKey: 1 },
+    {
+        unique: true,
+        partialFilterExpression: { idempotencyKey: { $type: 'string' } }
+    }
+);
 
 const CrmAgentCommand = mongoose.model('CrmAgentCommand', crmAgentCommandSchema);
 

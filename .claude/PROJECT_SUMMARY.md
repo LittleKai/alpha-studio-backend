@@ -1,4 +1,6 @@
-# Project Summary
+﻿# Project Summary
+
+**Phase 5 CRM Hardening (2026-06-02):** CRM billing checkout now accepts both legacy `credits` and canonical `credit` payment methods. Agent command polling expires stale queued commands, returns only non-expired work, rejects duplicate terminal result writes, and command models now include `expiresAt` plus idempotency indexing. Added append-only `CrmAuditLog` admin timeline endpoint (`GET /api/crm/admin/audit-logs`) and safe rerunnable CRM index script `scripts/migrate-crm-indexes.mjs`.
 
 **Phase 1/2 CRM Update (2026-06-01):** Alpha CRM SaaS Foundation and Windows agent bridge. Added Mongoose models (`CrmSubscription`, `CrmDevice`, `CrmPairingSession`, `CrmAgentCommand`, `CrmBillingOrder`, `CrmAiUsage`, `CrmCustomer`, `CrmContact`, `CrmTemplate`, `CrmCampaign`, `CrmExecutionLog`). Mounted route namespace `/api/crm` with full catalog, checkout, pairing, data CRUD, quota-enforced AI Chat, administrative endpoints, and agent endpoints for heartbeat, command polling, and command results. Extended Casso bank transfer webhooks for direct CRM billing order fulfillment. CRM bank/admin order fulfillment now runs through a MongoDB transaction helper so order claim, entitlement write, transaction record, and `paid` status commit or roll back together. CRM campaigns now validate user-owned templates/recipients before queueing Windows-agent execution and keep background campaign commands `running` until final agent results arrive.
 
@@ -18,8 +20,9 @@ If selected templates already match the latest library version, the endpoint ret
 **Phase 12 Update (2026-05-19):** Backend now hosts the self-extending interior template library. New model `InteriorTemplate` (status: seed/pending/approved/deprecated). New endpoints: `GET /api/interior/templates` (engine catalog load, returns seed+approved deduped by highest version), `POST /api/interior/templates` (user commits a project inline template to pending), and `/api/admin/interior-templates` CRUD (list/getOne/approve/reject/edit/deprecate). `/api/interior/projects/:id/chat` now extracts AI-emitted `tplNew` blocks into `modelJson.inlineTemplates[id]`, replaces with `tpl: id`, and surfaces created ids in `data.meta.newInlineTemplates`. DSL validation lives in `server/utils/templateValidator.js` (AST whitelist mirror of the engine `expression.js`). Seed script `scripts/seed-interior-templates.mjs` upserts the 7 built-in templates from `tools/interior-design-engine/src/templates/` (idempotent).
 
 **Phase 11 Update (2026-05-19):** `server/routes/interior.js` now validates the compact template contract: top-level `palette`, optional `inlineTemplates`, and module/detail items using either legacy `width/height/depth` boxes or `tpl/style` template references. The default project model uses `sliding-2door` with `palette: "wood-oak"`, and `/api/interior` prompts include the built-in template catalog while no longer promoting CSG hints.
-**Last Updated:** 2026-06-01 (Phase 1 Alpha CRM SaaS Foundation)
-**Updated By:** Claude Code
+**Last Updated:** 2026-06-02 (Phase 5: CRM hardening and audit timeline)
+**Updated By:** Antigravity (Advanced AI Coding Assistant)
+
 
 ---
 
@@ -42,237 +45,237 @@ If selected templates already match the latest library version, the endpoint ret
 ### File Structure
 ```
 alpha-studio-backend/
-├── server/
-│   ├── index.js                   # Express server entry point
-│   ├── db/
-│   │   ├── connection.js          # MongoDB connection
-│   │   ├── init-collections.js    # Database initialization
-│   │   ├── test-connection.js     # Connection test script
-│   │   └── migrate-passwords.js   # Password hashing migration
-│   ├── models/
-│   │   ├── User.js                # User model with bcrypt + balance field
-│   │   ├── Course.js              # Course model with multilingual support + lesson videoUrl/documents
-│   │   ├── Enrollment.js          # Course enrollment with progress tracking
-│   │   ├── Review.js              # Course reviews with ratings
-│   │   ├── Job.js                 # Job listings with multilingual support
-│   │   ├── Partner.js             # Partner profiles with skills array
-│   │   ├── Transaction.js         # Payment transactions (topup, spend, etc.)
-│   │   ├── WebhookLog.js          # Casso webhook logging
-│   │   ├── Prompt.js              # Shared prompts with multiple contents, ratings
-│   │   ├── Resource.js            # Resource hub with file upload (50MB)
-│   │   ├── Comment.js             # Comments for prompts/resources
-│   │   ├── Article.js             # Articles for About & Services pages (bilingual)
-│   │   ├── HostMachine.js         # Cloud host machine registry
-│   │   ├── CloudSession.js        # Cloud desktop sessions
-│   │   ├── InteriorAiLog.js       # Raw AI request/response per Interior /chat call (TTL 30 days)
-│   │   ├── WorkflowProject.js     # Workflow projects (team, tasks, chatHistory, expenseLog)
-│   │   ├── WorkflowDocument.js    # Workflow documents (file metadata, status, comments)
-│   │   ├── FeaturedStudent.js     # Featured students (userId ref, order, label, hired)
-│   │   └── ChatMessage.js         # AI consultation chat history (userId, role, content) — display only; OpenClaw maintains session memory via x-openclaw-session-key
-│   ├── middleware/
-│   │   └── auth.js                # JWT auth + adminOnly + modOnly middleware
-│   └── routes/
-│       ├── auth.js                # Auth API routes
-│       ├── courses.js             # Course CRUD + publish/archive routes
-│       ├── jobs.js                # Job CRUD + publish/close routes
-│       ├── partners.js            # Partner CRUD + publish/unpublish routes
-│       ├── payment.js             # Payment API (create, confirm, cancel, webhook)
-│       ├── admin.js               # Admin API (users, transactions, webhook management)
-│       ├── prompts.js             # Prompts API (CRUD, like, bookmark, rate, download)
-│       ├── resources.js           # Resources API (CRUD, like, bookmark, rate, download)
-│       ├── comments.js            # Comments API for prompts/resources
-│       ├── enrollments.js         # Course enrollment API (enroll, progress, check)
-│       ├── reviews.js             # Course reviews API (CRUD, like, helpful, rating distribution)
-│       ├── articles.js            # Articles API (CRUD, publish/unpublish, public + admin)
-│       ├── cloud.js              # Cloud desktop API (connect, disconnect, admin machines/sessions, heartbeat)
-│       ├── upload.js             # B2 presigned URL endpoint (POST /presign, DELETE /file)
-│       ├── workflow.js           # Workflow API (CRUD projects + documents, auth required)
-│       ├── featuredStudents.js   # Featured students API (public GET, admin CRUD + reorder)
-│       └── chat.js               # AI consultation API (auth required) — GET /history, POST /send, DELETE /history; forwards to OpenClaw via OPENCLAW_URL
-│   └── utils/
-│       └── b2Storage.js          # B2 S3 client + generatePresignedUploadUrl + deleteFile + listAllFiles (paginated)
+â”œâ”€â”€ server/
+â”‚   â”œâ”€â”€ index.js                   # Express server entry point
+â”‚   â”œâ”€â”€ db/
+â”‚   â”‚   â”œâ”€â”€ connection.js          # MongoDB connection
+â”‚   â”‚   â”œâ”€â”€ init-collections.js    # Database initialization
+â”‚   â”‚   â”œâ”€â”€ test-connection.js     # Connection test script
+â”‚   â”‚   â””â”€â”€ migrate-passwords.js   # Password hashing migration
+â”‚   â”œâ”€â”€ models/
+â”‚   â”‚   â”œâ”€â”€ User.js                # User model with bcrypt + balance field
+â”‚   â”‚   â”œâ”€â”€ Course.js              # Course model with multilingual support + lesson videoUrl/documents
+â”‚   â”‚   â”œâ”€â”€ Enrollment.js          # Course enrollment with progress tracking
+â”‚   â”‚   â”œâ”€â”€ Review.js              # Course reviews with ratings
+â”‚   â”‚   â”œâ”€â”€ Job.js                 # Job listings with multilingual support
+â”‚   â”‚   â”œâ”€â”€ Partner.js             # Partner profiles with skills array
+â”‚   â”‚   â”œâ”€â”€ Transaction.js         # Payment transactions (topup, spend, etc.)
+â”‚   â”‚   â”œâ”€â”€ WebhookLog.js          # Casso webhook logging
+â”‚   â”‚   â”œâ”€â”€ Prompt.js              # Shared prompts with multiple contents, ratings
+â”‚   â”‚   â”œâ”€â”€ Resource.js            # Resource hub with file upload (50MB)
+â”‚   â”‚   â”œâ”€â”€ Comment.js             # Comments for prompts/resources
+â”‚   â”‚   â”œâ”€â”€ Article.js             # Articles for About & Services pages (bilingual)
+â”‚   â”‚   â”œâ”€â”€ HostMachine.js         # Cloud host machine registry
+â”‚   â”‚   â”œâ”€â”€ CloudSession.js        # Cloud desktop sessions
+â”‚   â”‚   â”œâ”€â”€ InteriorAiLog.js       # Raw AI request/response per Interior /chat call (TTL 30 days)
+â”‚   â”‚   â”œâ”€â”€ WorkflowProject.js     # Workflow projects (team, tasks, chatHistory, expenseLog)
+â”‚   â”‚   â”œâ”€â”€ WorkflowDocument.js    # Workflow documents (file metadata, status, comments)
+â”‚   â”‚   â”œâ”€â”€ FeaturedStudent.js     # Featured students (userId ref, order, label, hired)
+â”‚   â”‚   â””â”€â”€ ChatMessage.js         # AI consultation chat history (userId, role, content) â€” display only; OpenClaw maintains session memory via x-openclaw-session-key
+â”‚   â”œâ”€â”€ middleware/
+â”‚   â”‚   â””â”€â”€ auth.js                # JWT auth + adminOnly + modOnly middleware
+â”‚   â””â”€â”€ routes/
+â”‚       â”œâ”€â”€ auth.js                # Auth API routes
+â”‚       â”œâ”€â”€ courses.js             # Course CRUD + publish/archive routes
+â”‚       â”œâ”€â”€ jobs.js                # Job CRUD + publish/close routes
+â”‚       â”œâ”€â”€ partners.js            # Partner CRUD + publish/unpublish routes
+â”‚       â”œâ”€â”€ payment.js             # Payment API (create, confirm, cancel, webhook)
+â”‚       â”œâ”€â”€ admin.js               # Admin API (users, transactions, webhook management)
+â”‚       â”œâ”€â”€ prompts.js             # Prompts API (CRUD, like, bookmark, rate, download)
+â”‚       â”œâ”€â”€ resources.js           # Resources API (CRUD, like, bookmark, rate, download)
+â”‚       â”œâ”€â”€ comments.js            # Comments API for prompts/resources
+â”‚       â”œâ”€â”€ enrollments.js         # Course enrollment API (enroll, progress, check)
+â”‚       â”œâ”€â”€ reviews.js             # Course reviews API (CRUD, like, helpful, rating distribution)
+â”‚       â”œâ”€â”€ articles.js            # Articles API (CRUD, publish/unpublish, public + admin)
+â”‚       â”œâ”€â”€ cloud.js              # Cloud desktop API (connect, disconnect, admin machines/sessions, heartbeat)
+â”‚       â”œâ”€â”€ upload.js             # B2 presigned URL endpoint (POST /presign, DELETE /file)
+â”‚       â”œâ”€â”€ workflow.js           # Workflow API (CRUD projects + documents, auth required)
+â”‚       â”œâ”€â”€ featuredStudents.js   # Featured students API (public GET, admin CRUD + reorder)
+â”‚       â””â”€â”€ chat.js               # AI consultation API (auth required) â€” GET /history, POST /send, DELETE /history; forwards to OpenClaw via OPENCLAW_URL
+â”‚   â””â”€â”€ utils/
+â”‚       â””â”€â”€ b2Storage.js          # B2 S3 client + generatePresignedUploadUrl + deleteFile + listAllFiles (paginated)
 
-├── .claude/                       # Documentation
-│   ├── PROJECT_SUMMARY.md
-│   ├── CONVENTIONS.md
-│   ├── DATABASE.md
-│   ├── INSTRUCTIONS_FOR_CLAUDE.md
-│   └── history/
-├── package.json
-├── .env.example
-├── .gitignore
-└── README.md
+â”œâ”€â”€ .claude/                       # Documentation
+â”‚   â”œâ”€â”€ PROJECT_SUMMARY.md
+â”‚   â”œâ”€â”€ CONVENTIONS.md
+â”‚   â”œâ”€â”€ DATABASE.md
+â”‚   â”œâ”€â”€ INSTRUCTIONS_FOR_CLAUDE.md
+â”‚   â””â”€â”€ history/
+â”œâ”€â”€ package.json
+â”œâ”€â”€ .env.example
+â”œâ”€â”€ .gitignore
+â””â”€â”€ README.md
 ```
 
 ### API Routes
 ```
 /api
-├── /auth
-│   ├── POST /register    # User registration
-│   ├── POST /login       # User login
-│   ├── POST /logout      # Logout (clears cookie)
-│   ├── GET  /me          # Get current user (auth required)
-│   ├── PUT  /profile     # Update profile (auth required)
-│   └── PUT  /password    # Change password (auth required)
-├── /courses (admin only)
-│   ├── GET    /           # List courses (pagination, filters, search)
-│   ├── GET    /stats      # Course statistics
-│   ├── GET    /:id        # Get single course
-│   ├── POST   /           # Create course
-│   ├── PUT    /:id        # Update course
-│   ├── DELETE /:id        # Delete course
-│   ├── PATCH  /:id/publish    # Publish course
-│   ├── PATCH  /:id/unpublish  # Unpublish course
-│   └── PATCH  /:id/archive    # Archive course
-├── /jobs (admin for write, public for read)
-│   ├── GET    /           # List jobs (pagination, filters, search)
-│   ├── GET    /stats      # Job statistics
-│   ├── GET    /:id        # Get single job
-│   ├── POST   /           # Create job (admin)
-│   ├── PUT    /:id        # Update job (admin)
-│   ├── DELETE /:id        # Delete job (admin)
-│   ├── PATCH  /:id/publish    # Publish job (admin)
-│   └── PATCH  /:id/close      # Close job (admin)
-├── /partners (admin for write, public for read)
-│   ├── GET    /           # List partners (pagination, filters, search)
-│   ├── GET    /stats      # Partner statistics
-│   ├── GET    /:id        # Get single partner
-│   ├── POST   /           # Create partner (admin)
-│   ├── PUT    /:id        # Update partner (admin)
-│   ├── DELETE /:id        # Delete partner (admin)
-│   ├── PATCH  /:id/publish    # Publish partner (admin)
-│   └── PATCH  /:id/unpublish  # Unpublish partner (admin)
-├── /payment
-│   ├── GET    /pricing           # Get credit packages (public)
-│   ├── GET    /bank-info         # Get bank info (public)
-│   ├── POST   /create            # Create payment request (auth)
-│   ├── POST   /confirm/:id       # Confirm payment (auth)
-│   ├── DELETE /cancel/:id        # Cancel payment (auth)
-│   ├── GET    /history           # Get payment history (auth)
-│   ├── GET    /pending           # Get pending payments (auth)
-│   ├── GET    /status/:id        # Check payment status (auth)
-│   ├── POST   /webhook           # Casso webhook (no auth)
-│   ├── POST   /verify            # Admin verify payment (admin)
-│   └── GET    /admin/transactions # Admin get all transactions (admin)
-├── /admin (admin only)
-│   ├── GET    /users             # List users with search
-│   ├── GET    /users/:id         # Get user details + stats
-│   ├── GET    /users/:id/transactions  # Get user transactions
-│   ├── POST   /users/:id/topup   # Manual top-up
-│   ├── GET    /transactions      # List all transactions
-│   ├── POST   /transactions/check-timeout  # Check timeout transactions
-│   ├── GET    /webhook-logs      # List webhook logs
-│   ├── GET    /webhook-logs/:id  # Get webhook log detail
-│   ├── POST   /webhook-logs/:id/reprocess  # Reprocess webhook
-│   ├── POST   /webhook-logs/:id/assign-user  # Assign user to webhook
-│   ├── POST   /webhook-logs/:id/ignore  # Ignore webhook
-│   ├── GET    /stats             # Dashboard statistics
-│   ├── GET    /storage/orphaned  # List B2 files not referenced in MongoDB (super admin only)
-│   └── DELETE /storage/orphaned  # Delete orphaned B2 file by key (super admin only)
-├── /prompts
-│   ├── GET    /                  # List prompts (pagination, filters, search)
-│   ├── GET    /featured          # Get featured prompts
-│   ├── GET    /my/created        # Get user's created prompts (auth)
-│   ├── GET    /my/bookmarked     # Get user's bookmarked prompts (auth)
-│   ├── GET    /:slug             # Get single prompt by slug
-│   ├── POST   /                  # Create prompt (auth)
-│   ├── PUT    /:id               # Update prompt (auth, owner)
-│   ├── DELETE /:id               # Delete prompt (auth, owner)
-│   ├── POST   /:id/like          # Toggle like (auth)
-│   ├── POST   /:id/bookmark      # Toggle bookmark (auth)
-│   ├── POST   /:id/download      # Track download (auth)
-│   ├── POST   /:id/rate          # Rate 1-5 stars (auth)
-│   ├── PATCH  /:id/hide          # Hide content (mod/admin)
-│   ├── PATCH  /:id/unhide        # Restore content (mod/admin)
-│   └── PATCH  /:id/feature       # Toggle featured (admin)
-├── /resources
-│   ├── GET    /                  # List resources (pagination, filters, search)
-│   ├── GET    /featured          # Get featured resources
-│   ├── GET    /my/created        # Get user's created resources (auth)
-│   ├── GET    /my/bookmarked     # Get user's bookmarked resources (auth)
-│   ├── GET    /:slug             # Get single resource by slug
-│   ├── POST   /                  # Create resource (auth)
-│   ├── PUT    /:id               # Update resource (auth, owner)
-│   ├── DELETE /:id               # Delete resource (auth, owner)
-│   ├── POST   /:id/like          # Toggle like (auth)
-│   ├── POST   /:id/bookmark      # Toggle bookmark (auth)
-│   ├── POST   /:id/download      # Track download + get file URL (auth)
-│   ├── POST   /:id/rate          # Rate 1-5 stars (auth)
-│   ├── PATCH  /:id/hide          # Hide content (mod/admin)
-│   ├── PATCH  /:id/unhide        # Restore content (mod/admin)
-│   └── PATCH  /:id/feature       # Toggle featured (admin)
-├── /comments
-│   ├── GET    /                  # Get comments for target (prompt/resource)
-│   ├── POST   /                  # Create comment (auth)
-│   ├── PUT    /:id               # Update comment (auth, owner)
-│   ├── DELETE /:id               # Delete comment (auth, owner/mod)
-│   └── POST   /:id/like          # Toggle like on comment (auth)
-├── /enrollments (auth required)
-│   ├── GET    /my-courses        # Get user's enrolled courses
-│   ├── GET    /check/:courseId   # Check enrollment status
-│   ├── POST   /:courseId         # Enroll in course
-│   ├── GET    /:courseId/progress    # Get enrollment progress
-│   ├── PUT    /:courseId/progress    # Update lesson progress
-│   └── DELETE /:courseId         # Unenroll from course
-├── /reviews
-│   ├── GET    /course/:courseId  # Get reviews for course (with rating distribution)
-│   ├── GET    /my-review/:courseId   # Get user's review (auth)
-│   ├── POST   /:courseId         # Create review (auth)
-│   ├── PUT    /:reviewId         # Update review (auth, owner)
-│   ├── DELETE /:reviewId         # Delete review (auth, owner/admin)
-│   ├── POST   /:reviewId/helpful # Toggle helpful mark (auth)
-│   └── POST   /:reviewId/reply   # Admin reply to review (admin)
-├── /articles (public read, mod/admin write)
-│   ├── GET    /             # List published articles (filter: category, search, pagination)
-│   ├── GET    /admin/list   # List all articles inc. drafts (mod/admin)
-│   ├── POST   /             # Create article (mod/admin)
-│   ├── PUT    /:id          # Update article (mod/admin)
-│   ├── DELETE /:id          # Delete article (mod/admin)
-│   ├── PATCH  /:id/publish  # Publish article (mod/admin)
-│   ├── PATCH  /:id/unpublish # Unpublish article (mod/admin)
-│   └── GET    /:slug        # Get single article by slug (public)
-├── /cloud
-│   ├── POST   /connect           # Connect to cloud desktop (auth)
-│   ├── POST   /disconnect        # Disconnect from cloud desktop (auth)
-│   ├── GET    /session           # Get active session (auth)
-│   ├── POST   /heartbeat         # Agent heartbeat (secret-based)
-│   ├── GET    /admin/machines    # List machines (admin)
-│   ├── POST   /admin/machines    # Register machine (admin)
-│   ├── PUT    /admin/machines/:id    # Update machine (admin)
-│   ├── PATCH  /admin/machines/:id/toggle  # Toggle machine (admin)
-│   ├── GET    /admin/sessions    # List sessions (admin)
-│   └── POST   /admin/sessions/:id/force-end  # Force end session (admin)
-├── /upload
-│   ├── POST   /presign           # Generate B2 presigned upload URL (auth)
-│   └── DELETE /file              # Delete file from B2 (admin)
-├── /interior
-│   ├── GET    /projects                    # List user's interior projects (auth)
-│   ├── POST   /projects                    # Create project (auth)
-│   ├── GET    /projects/:id                # Get project (auth, owner)
-│   ├── PATCH  /projects/:id                # Rename project (auth, owner)
-│   ├── DELETE /projects/:id                # Soft delete project (auth, owner)
-│   ├── POST   /projects/:id/chat           # AI chat — proposal or apply stage (auth, charges credit)
-│   ├── POST   /projects/:id/rollback       # Move currentVersionIndex to target version (auth, owner)
-│   ├── POST   /analyze-image               # Image → design model JSON (auth + quota)
-│   ├── POST   /generate-render             # 3D view + style prompt → render placeholder (auth + quota)
-│   ├── POST   /workshop/components/delete  # Local/dev Workshop source JSON delete + bundle regen (localhost only)
-│   └── GET    /admin/logs                  # List InteriorAiLog (auth + adminOnly); filters projectId/userId/stage/status
-├── /workflow
-│   │   ├── GET    /projects          # List user's projects (auth)
-│   │   ├── POST   /projects          # Create project (auth)
-│   │   ├── PUT    /projects/:id      # Update project (auth, creator/admin)
-│   │   ├── DELETE /projects/:id      # Delete project + docs (auth, creator/admin)
-│   │   ├── GET    /users/search      # Search users by name (auth)
-│   │   ├── GET    /users/:id         # Get user public profile (auth)
-│   │   ├── GET    /documents         # List user's docs, ?projectId=xxx (auth)
-│   │   ├── POST   /documents         # Create document record (auth)
-│   │   ├── PUT    /documents/:id     # Update document (auth, creator/admin)
-│   │   └── DELETE /documents/:id     # Delete document (auth, creator/admin)
-├── /chat (auth required)
-│   ├── GET    /history          # User's chat history (?limit=50, max 200, oldest→newest)
-│   ├── POST   /send             # Send single message → save user msg + forward to OpenClaw + save reply
-│   └── DELETE /history          # Clear user's chat history (DB only; OpenClaw session memory persists)
-└── /health               # Health check endpoint
+â”œâ”€â”€ /auth
+â”‚   â”œâ”€â”€ POST /register    # User registration
+â”‚   â”œâ”€â”€ POST /login       # User login
+â”‚   â”œâ”€â”€ POST /logout      # Logout (clears cookie)
+â”‚   â”œâ”€â”€ GET  /me          # Get current user (auth required)
+â”‚   â”œâ”€â”€ PUT  /profile     # Update profile (auth required)
+â”‚   â””â”€â”€ PUT  /password    # Change password (auth required)
+â”œâ”€â”€ /courses (admin only)
+â”‚   â”œâ”€â”€ GET    /           # List courses (pagination, filters, search)
+â”‚   â”œâ”€â”€ GET    /stats      # Course statistics
+â”‚   â”œâ”€â”€ GET    /:id        # Get single course
+â”‚   â”œâ”€â”€ POST   /           # Create course
+â”‚   â”œâ”€â”€ PUT    /:id        # Update course
+â”‚   â”œâ”€â”€ DELETE /:id        # Delete course
+â”‚   â”œâ”€â”€ PATCH  /:id/publish    # Publish course
+â”‚   â”œâ”€â”€ PATCH  /:id/unpublish  # Unpublish course
+â”‚   â””â”€â”€ PATCH  /:id/archive    # Archive course
+â”œâ”€â”€ /jobs (admin for write, public for read)
+â”‚   â”œâ”€â”€ GET    /           # List jobs (pagination, filters, search)
+â”‚   â”œâ”€â”€ GET    /stats      # Job statistics
+â”‚   â”œâ”€â”€ GET    /:id        # Get single job
+â”‚   â”œâ”€â”€ POST   /           # Create job (admin)
+â”‚   â”œâ”€â”€ PUT    /:id        # Update job (admin)
+â”‚   â”œâ”€â”€ DELETE /:id        # Delete job (admin)
+â”‚   â”œâ”€â”€ PATCH  /:id/publish    # Publish job (admin)
+â”‚   â””â”€â”€ PATCH  /:id/close      # Close job (admin)
+â”œâ”€â”€ /partners (admin for write, public for read)
+â”‚   â”œâ”€â”€ GET    /           # List partners (pagination, filters, search)
+â”‚   â”œâ”€â”€ GET    /stats      # Partner statistics
+â”‚   â”œâ”€â”€ GET    /:id        # Get single partner
+â”‚   â”œâ”€â”€ POST   /           # Create partner (admin)
+â”‚   â”œâ”€â”€ PUT    /:id        # Update partner (admin)
+â”‚   â”œâ”€â”€ DELETE /:id        # Delete partner (admin)
+â”‚   â”œâ”€â”€ PATCH  /:id/publish    # Publish partner (admin)
+â”‚   â””â”€â”€ PATCH  /:id/unpublish  # Unpublish partner (admin)
+â”œâ”€â”€ /payment
+â”‚   â”œâ”€â”€ GET    /pricing           # Get credit packages (public)
+â”‚   â”œâ”€â”€ GET    /bank-info         # Get bank info (public)
+â”‚   â”œâ”€â”€ POST   /create            # Create payment request (auth)
+â”‚   â”œâ”€â”€ POST   /confirm/:id       # Confirm payment (auth)
+â”‚   â”œâ”€â”€ DELETE /cancel/:id        # Cancel payment (auth)
+â”‚   â”œâ”€â”€ GET    /history           # Get payment history (auth)
+â”‚   â”œâ”€â”€ GET    /pending           # Get pending payments (auth)
+â”‚   â”œâ”€â”€ GET    /status/:id        # Check payment status (auth)
+â”‚   â”œâ”€â”€ POST   /webhook           # Casso webhook (no auth)
+â”‚   â”œâ”€â”€ POST   /verify            # Admin verify payment (admin)
+â”‚   â””â”€â”€ GET    /admin/transactions # Admin get all transactions (admin)
+â”œâ”€â”€ /admin (admin only)
+â”‚   â”œâ”€â”€ GET    /users             # List users with search
+â”‚   â”œâ”€â”€ GET    /users/:id         # Get user details + stats
+â”‚   â”œâ”€â”€ GET    /users/:id/transactions  # Get user transactions
+â”‚   â”œâ”€â”€ POST   /users/:id/topup   # Manual top-up
+â”‚   â”œâ”€â”€ GET    /transactions      # List all transactions
+â”‚   â”œâ”€â”€ POST   /transactions/check-timeout  # Check timeout transactions
+â”‚   â”œâ”€â”€ GET    /webhook-logs      # List webhook logs
+â”‚   â”œâ”€â”€ GET    /webhook-logs/:id  # Get webhook log detail
+â”‚   â”œâ”€â”€ POST   /webhook-logs/:id/reprocess  # Reprocess webhook
+â”‚   â”œâ”€â”€ POST   /webhook-logs/:id/assign-user  # Assign user to webhook
+â”‚   â”œâ”€â”€ POST   /webhook-logs/:id/ignore  # Ignore webhook
+â”‚   â”œâ”€â”€ GET    /stats             # Dashboard statistics
+â”‚   â”œâ”€â”€ GET    /storage/orphaned  # List B2 files not referenced in MongoDB (super admin only)
+â”‚   â””â”€â”€ DELETE /storage/orphaned  # Delete orphaned B2 file by key (super admin only)
+â”œâ”€â”€ /prompts
+â”‚   â”œâ”€â”€ GET    /                  # List prompts (pagination, filters, search)
+â”‚   â”œâ”€â”€ GET    /featured          # Get featured prompts
+â”‚   â”œâ”€â”€ GET    /my/created        # Get user's created prompts (auth)
+â”‚   â”œâ”€â”€ GET    /my/bookmarked     # Get user's bookmarked prompts (auth)
+â”‚   â”œâ”€â”€ GET    /:slug             # Get single prompt by slug
+â”‚   â”œâ”€â”€ POST   /                  # Create prompt (auth)
+â”‚   â”œâ”€â”€ PUT    /:id               # Update prompt (auth, owner)
+â”‚   â”œâ”€â”€ DELETE /:id               # Delete prompt (auth, owner)
+â”‚   â”œâ”€â”€ POST   /:id/like          # Toggle like (auth)
+â”‚   â”œâ”€â”€ POST   /:id/bookmark      # Toggle bookmark (auth)
+â”‚   â”œâ”€â”€ POST   /:id/download      # Track download (auth)
+â”‚   â”œâ”€â”€ POST   /:id/rate          # Rate 1-5 stars (auth)
+â”‚   â”œâ”€â”€ PATCH  /:id/hide          # Hide content (mod/admin)
+â”‚   â”œâ”€â”€ PATCH  /:id/unhide        # Restore content (mod/admin)
+â”‚   â””â”€â”€ PATCH  /:id/feature       # Toggle featured (admin)
+â”œâ”€â”€ /resources
+â”‚   â”œâ”€â”€ GET    /                  # List resources (pagination, filters, search)
+â”‚   â”œâ”€â”€ GET    /featured          # Get featured resources
+â”‚   â”œâ”€â”€ GET    /my/created        # Get user's created resources (auth)
+â”‚   â”œâ”€â”€ GET    /my/bookmarked     # Get user's bookmarked resources (auth)
+â”‚   â”œâ”€â”€ GET    /:slug             # Get single resource by slug
+â”‚   â”œâ”€â”€ POST   /                  # Create resource (auth)
+â”‚   â”œâ”€â”€ PUT    /:id               # Update resource (auth, owner)
+â”‚   â”œâ”€â”€ DELETE /:id               # Delete resource (auth, owner)
+â”‚   â”œâ”€â”€ POST   /:id/like          # Toggle like (auth)
+â”‚   â”œâ”€â”€ POST   /:id/bookmark      # Toggle bookmark (auth)
+â”‚   â”œâ”€â”€ POST   /:id/download      # Track download + get file URL (auth)
+â”‚   â”œâ”€â”€ POST   /:id/rate          # Rate 1-5 stars (auth)
+â”‚   â”œâ”€â”€ PATCH  /:id/hide          # Hide content (mod/admin)
+â”‚   â”œâ”€â”€ PATCH  /:id/unhide        # Restore content (mod/admin)
+â”‚   â””â”€â”€ PATCH  /:id/feature       # Toggle featured (admin)
+â”œâ”€â”€ /comments
+â”‚   â”œâ”€â”€ GET    /                  # Get comments for target (prompt/resource)
+â”‚   â”œâ”€â”€ POST   /                  # Create comment (auth)
+â”‚   â”œâ”€â”€ PUT    /:id               # Update comment (auth, owner)
+â”‚   â”œâ”€â”€ DELETE /:id               # Delete comment (auth, owner/mod)
+â”‚   â””â”€â”€ POST   /:id/like          # Toggle like on comment (auth)
+â”œâ”€â”€ /enrollments (auth required)
+â”‚   â”œâ”€â”€ GET    /my-courses        # Get user's enrolled courses
+â”‚   â”œâ”€â”€ GET    /check/:courseId   # Check enrollment status
+â”‚   â”œâ”€â”€ POST   /:courseId         # Enroll in course
+â”‚   â”œâ”€â”€ GET    /:courseId/progress    # Get enrollment progress
+â”‚   â”œâ”€â”€ PUT    /:courseId/progress    # Update lesson progress
+â”‚   â””â”€â”€ DELETE /:courseId         # Unenroll from course
+â”œâ”€â”€ /reviews
+â”‚   â”œâ”€â”€ GET    /course/:courseId  # Get reviews for course (with rating distribution)
+â”‚   â”œâ”€â”€ GET    /my-review/:courseId   # Get user's review (auth)
+â”‚   â”œâ”€â”€ POST   /:courseId         # Create review (auth)
+â”‚   â”œâ”€â”€ PUT    /:reviewId         # Update review (auth, owner)
+â”‚   â”œâ”€â”€ DELETE /:reviewId         # Delete review (auth, owner/admin)
+â”‚   â”œâ”€â”€ POST   /:reviewId/helpful # Toggle helpful mark (auth)
+â”‚   â””â”€â”€ POST   /:reviewId/reply   # Admin reply to review (admin)
+â”œâ”€â”€ /articles (public read, mod/admin write)
+â”‚   â”œâ”€â”€ GET    /             # List published articles (filter: category, search, pagination)
+â”‚   â”œâ”€â”€ GET    /admin/list   # List all articles inc. drafts (mod/admin)
+â”‚   â”œâ”€â”€ POST   /             # Create article (mod/admin)
+â”‚   â”œâ”€â”€ PUT    /:id          # Update article (mod/admin)
+â”‚   â”œâ”€â”€ DELETE /:id          # Delete article (mod/admin)
+â”‚   â”œâ”€â”€ PATCH  /:id/publish  # Publish article (mod/admin)
+â”‚   â”œâ”€â”€ PATCH  /:id/unpublish # Unpublish article (mod/admin)
+â”‚   â””â”€â”€ GET    /:slug        # Get single article by slug (public)
+â”œâ”€â”€ /cloud
+â”‚   â”œâ”€â”€ POST   /connect           # Connect to cloud desktop (auth)
+â”‚   â”œâ”€â”€ POST   /disconnect        # Disconnect from cloud desktop (auth)
+â”‚   â”œâ”€â”€ GET    /session           # Get active session (auth)
+â”‚   â”œâ”€â”€ POST   /heartbeat         # Agent heartbeat (secret-based)
+â”‚   â”œâ”€â”€ GET    /admin/machines    # List machines (admin)
+â”‚   â”œâ”€â”€ POST   /admin/machines    # Register machine (admin)
+â”‚   â”œâ”€â”€ PUT    /admin/machines/:id    # Update machine (admin)
+â”‚   â”œâ”€â”€ PATCH  /admin/machines/:id/toggle  # Toggle machine (admin)
+â”‚   â”œâ”€â”€ GET    /admin/sessions    # List sessions (admin)
+â”‚   â””â”€â”€ POST   /admin/sessions/:id/force-end  # Force end session (admin)
+â”œâ”€â”€ /upload
+â”‚   â”œâ”€â”€ POST   /presign           # Generate B2 presigned upload URL (auth)
+â”‚   â””â”€â”€ DELETE /file              # Delete file from B2 (admin)
+â”œâ”€â”€ /interior
+â”‚   â”œâ”€â”€ GET    /projects                    # List user's interior projects (auth)
+â”‚   â”œâ”€â”€ POST   /projects                    # Create project (auth)
+â”‚   â”œâ”€â”€ GET    /projects/:id                # Get project (auth, owner)
+â”‚   â”œâ”€â”€ PATCH  /projects/:id                # Rename project (auth, owner)
+â”‚   â”œâ”€â”€ DELETE /projects/:id                # Soft delete project (auth, owner)
+â”‚   â”œâ”€â”€ POST   /projects/:id/chat           # AI chat â€” proposal or apply stage (auth, charges credit)
+â”‚   â”œâ”€â”€ POST   /projects/:id/rollback       # Move currentVersionIndex to target version (auth, owner)
+â”‚   â”œâ”€â”€ POST   /analyze-image               # Image â†’ design model JSON (auth + quota)
+â”‚   â”œâ”€â”€ POST   /generate-render             # 3D view + style prompt â†’ render placeholder (auth + quota)
+â”‚   â”œâ”€â”€ POST   /workshop/components/delete  # Local/dev Workshop source JSON delete + bundle regen (localhost only)
+â”‚   â””â”€â”€ GET    /admin/logs                  # List InteriorAiLog (auth + adminOnly); filters projectId/userId/stage/status
+â”œâ”€â”€ /workflow
+â”‚   â”‚   â”œâ”€â”€ GET    /projects          # List user's projects (auth)
+â”‚   â”‚   â”œâ”€â”€ POST   /projects          # Create project (auth)
+â”‚   â”‚   â”œâ”€â”€ PUT    /projects/:id      # Update project (auth, creator/admin)
+â”‚   â”‚   â”œâ”€â”€ DELETE /projects/:id      # Delete project + docs (auth, creator/admin)
+â”‚   â”‚   â”œâ”€â”€ GET    /users/search      # Search users by name (auth)
+â”‚   â”‚   â”œâ”€â”€ GET    /users/:id         # Get user public profile (auth)
+â”‚   â”‚   â”œâ”€â”€ GET    /documents         # List user's docs, ?projectId=xxx (auth)
+â”‚   â”‚   â”œâ”€â”€ POST   /documents         # Create document record (auth)
+â”‚   â”‚   â”œâ”€â”€ PUT    /documents/:id     # Update document (auth, creator/admin)
+â”‚   â”‚   â””â”€â”€ DELETE /documents/:id     # Delete document (auth, creator/admin)
+â”œâ”€â”€ /chat (auth required)
+â”‚   â”œâ”€â”€ GET    /history          # User's chat history (?limit=50, max 200, oldestâ†’newest)
+â”‚   â”œâ”€â”€ POST   /send             # Send single message â†’ save user msg + forward to OpenClaw + save reply
+â”‚   â””â”€â”€ DELETE /history          # Clear user's chat history (DB only; OpenClaw session memory persists)
+â””â”€â”€ /health               # Health check endpoint
 ```
 
 ---
@@ -327,63 +330,63 @@ alpha-studio-backend/
 
 | Feature | Status | Files Involved | Notes |
 |---------|--------|----------------|-------|
-| User Registration | ✅ Complete | routes/auth.js | Email + password validation |
-| User Login | ✅ Complete | routes/auth.js | JWT token generation |
-| User Logout | ✅ Complete | routes/auth.js | Cookie clearing |
-| Get Current User | ✅ Complete | routes/auth.js | Protected route |
-| Update Profile | ✅ Complete | routes/auth.js | Name update |
-| Change Password | ✅ Complete | routes/auth.js | Old password verification |
-| Health Check | ✅ Complete | index.js | API status endpoint |
-| Password Hashing | ✅ Complete | models/User.js | bcrypt with 12 rounds |
-| JWT Middleware | ✅ Complete | middleware/auth.js | Token verification |
-| Admin Middleware | ✅ Complete | middleware/auth.js | Role-based authorization |
-| CORS Support | ✅ Complete | index.js | Multi-origin + PATCH method |
-| Course CRUD | ✅ Complete | routes/courses.js | Create, Read, Update, Delete |
-| Course Publishing | ✅ Complete | routes/courses.js | Publish, Unpublish, Archive |
-| Course Statistics | ✅ Complete | routes/courses.js | Aggregated stats endpoint |
-| Multilingual Courses | ✅ Complete | models/Course.js | VI/EN title and description |
-| Course Modules/Lessons | ✅ Complete | models/Course.js | Nested schema structure |
-| Job CRUD | ✅ Complete | routes/jobs.js | Create, Read, Update, Delete |
-| Job Publishing | ✅ Complete | routes/jobs.js | Publish, Close |
-| Job Statistics | ✅ Complete | routes/jobs.js | Aggregated stats endpoint |
-| Partner CRUD | ✅ Complete | routes/partners.js | Create, Read, Update, Delete |
-| Partner Publishing | ✅ Complete | routes/partners.js | Publish, Unpublish |
-| Partner Statistics | ✅ Complete | routes/partners.js | Aggregated stats endpoint |
-| Partner Skills | ✅ Complete | models/Partner.js | String array for skills |
-| Stale Index Cleanup | ✅ Complete | db/connection.js | Auto-drops stale indexes on startup |
-| Payment System | ✅ Complete | routes/payment.js, models/Transaction.js | Credit packages, VietQR, Casso webhook |
-| Webhook Logging | ✅ Complete | models/WebhookLog.js | Stores all incoming webhooks for debugging |
-| Admin Management | ✅ Complete | routes/admin.js | Users, transactions, webhook management |
-| Manual Top-up | ✅ Complete | routes/admin.js | Admin can top-up users manually |
-| Webhook Assignment | ✅ Complete | routes/admin.js | Admin can assign unmatched webhooks to users |
-| Transaction Timeout | ✅ Complete | routes/admin.js | Auto-timeout after 5 min without webhook match |
-| Share Prompts API | ✅ Complete | routes/prompts.js, models/Prompt.js | CRUD, like, bookmark, rate, download, featured, moderation |
-| Resource Hub API | ✅ Complete | routes/resources.js, models/Resource.js | CRUD, file upload (50MB), like, bookmark, rate, download |
-| Comments API | ✅ Complete | routes/comments.js, models/Comment.js | Comments for prompts/resources with likes |
-| Course Enrollment API | ✅ Complete | routes/enrollments.js, models/Enrollment.js | Enroll with credit deduction for paid courses; Transaction recorded; progress tracking |
-| Course Reviews API | ✅ Complete | routes/reviews.js, models/Review.js | CRUD, rating distribution, helpful votes, admin reply |
-| Lesson Video/Documents | ✅ Complete | models/Course.js | videoUrl and documents array per lesson |
-| Article CMS | ✅ Complete | models/Article.js, routes/articles.js | Bilingual articles for About & Services pages, admin CRUD |
-| Cloud Desktop API | ✅ Complete | models/HostMachine.js, models/CloudSession.js, routes/cloud.js | User connect/disconnect, admin machine/session management, agent heartbeat, cron cleanup |
-| B2 Presigned Upload | ✅ Complete | routes/upload.js, utils/b2Storage.js | Generate presigned PUT URL for browser-direct upload to Backblaze B2; `listAllFiles()` for bucket enumeration |
-| Workflow Projects API | ✅ Complete | models/WorkflowProject.js, routes/workflow.js | CRUD projects with team, tasks, chatHistory, expenseLog — auth required; GET /projects shows all non-completed for users |
-| Workflow Documents API | ✅ Complete | models/WorkflowDocument.js, routes/workflow.js | CRUD document records with status, comments, note — auth required; GET ?projectId returns all project docs to members |
-├── /workflow
-│   │   ├── GET    /projects          # List user's projects (auth)
-│   │   ├── POST   /projects          # Create project (auth)
-│   │   ├── PUT    /projects/:id      # Update project (auth, creator/admin)
-│   │   ├── DELETE /projects/:id      # Delete project + docs (auth, creator/admin)
-│   │   ├── GET    /users/search      # Search users by name (auth)
-│   │   ├── GET    /users/:id         # Get user public profile (auth)
-│   │   ├── GET    /documents         # List user's docs, ?projectId=xxx (auth)
-│   │   ├── POST   /documents         # Create document record (auth)
-│   │   ├── PUT    /documents/:id     # Update document (auth, creator/admin)
-│   │   └── DELETE /documents/:id     # Delete document (auth, creator/admin)
-├── /chat (auth required)
-│   ├── GET    /history          # User's chat history (?limit=50, max 200, oldest→newest)
-│   ├── POST   /send             # Send single message → save user msg + forward to OpenClaw + save reply
-│   └── DELETE /history          # Clear user's chat history (DB only; OpenClaw session memory persists)
-└── /health               # Health check endpoint
+| User Registration | âœ… Complete | routes/auth.js | Email + password validation |
+| User Login | âœ… Complete | routes/auth.js | JWT token generation |
+| User Logout | âœ… Complete | routes/auth.js | Cookie clearing |
+| Get Current User | âœ… Complete | routes/auth.js | Protected route |
+| Update Profile | âœ… Complete | routes/auth.js | Name update |
+| Change Password | âœ… Complete | routes/auth.js | Old password verification |
+| Health Check | âœ… Complete | index.js | API status endpoint |
+| Password Hashing | âœ… Complete | models/User.js | bcrypt with 12 rounds |
+| JWT Middleware | âœ… Complete | middleware/auth.js | Token verification |
+| Admin Middleware | âœ… Complete | middleware/auth.js | Role-based authorization |
+| CORS Support | âœ… Complete | index.js | Multi-origin + PATCH method |
+| Course CRUD | âœ… Complete | routes/courses.js | Create, Read, Update, Delete |
+| Course Publishing | âœ… Complete | routes/courses.js | Publish, Unpublish, Archive |
+| Course Statistics | âœ… Complete | routes/courses.js | Aggregated stats endpoint |
+| Multilingual Courses | âœ… Complete | models/Course.js | VI/EN title and description |
+| Course Modules/Lessons | âœ… Complete | models/Course.js | Nested schema structure |
+| Job CRUD | âœ… Complete | routes/jobs.js | Create, Read, Update, Delete |
+| Job Publishing | âœ… Complete | routes/jobs.js | Publish, Close |
+| Job Statistics | âœ… Complete | routes/jobs.js | Aggregated stats endpoint |
+| Partner CRUD | âœ… Complete | routes/partners.js | Create, Read, Update, Delete |
+| Partner Publishing | âœ… Complete | routes/partners.js | Publish, Unpublish |
+| Partner Statistics | âœ… Complete | routes/partners.js | Aggregated stats endpoint |
+| Partner Skills | âœ… Complete | models/Partner.js | String array for skills |
+| Stale Index Cleanup | âœ… Complete | db/connection.js | Auto-drops stale indexes on startup |
+| Payment System | âœ… Complete | routes/payment.js, models/Transaction.js | Credit packages, VietQR, Casso webhook |
+| Webhook Logging | âœ… Complete | models/WebhookLog.js | Stores all incoming webhooks for debugging |
+| Admin Management | âœ… Complete | routes/admin.js | Users, transactions, webhook management |
+| Manual Top-up | âœ… Complete | routes/admin.js | Admin can top-up users manually |
+| Webhook Assignment | âœ… Complete | routes/admin.js | Admin can assign unmatched webhooks to users |
+| Transaction Timeout | âœ… Complete | routes/admin.js | Auto-timeout after 5 min without webhook match |
+| Share Prompts API | âœ… Complete | routes/prompts.js, models/Prompt.js | CRUD, like, bookmark, rate, download, featured, moderation |
+| Resource Hub API | âœ… Complete | routes/resources.js, models/Resource.js | CRUD, file upload (50MB), like, bookmark, rate, download |
+| Comments API | âœ… Complete | routes/comments.js, models/Comment.js | Comments for prompts/resources with likes |
+| Course Enrollment API | âœ… Complete | routes/enrollments.js, models/Enrollment.js | Enroll with credit deduction for paid courses; Transaction recorded; progress tracking |
+| Course Reviews API | âœ… Complete | routes/reviews.js, models/Review.js | CRUD, rating distribution, helpful votes, admin reply |
+| Lesson Video/Documents | âœ… Complete | models/Course.js | videoUrl and documents array per lesson |
+| Article CMS | âœ… Complete | models/Article.js, routes/articles.js | Bilingual articles for About & Services pages, admin CRUD |
+| Cloud Desktop API | âœ… Complete | models/HostMachine.js, models/CloudSession.js, routes/cloud.js | User connect/disconnect, admin machine/session management, agent heartbeat, cron cleanup |
+| B2 Presigned Upload | âœ… Complete | routes/upload.js, utils/b2Storage.js | Generate presigned PUT URL for browser-direct upload to Backblaze B2; `listAllFiles()` for bucket enumeration |
+| Workflow Projects API | âœ… Complete | models/WorkflowProject.js, routes/workflow.js | CRUD projects with team, tasks, chatHistory, expenseLog â€” auth required; GET /projects shows all non-completed for users |
+| Workflow Documents API | âœ… Complete | models/WorkflowDocument.js, routes/workflow.js | CRUD document records with status, comments, note â€” auth required; GET ?projectId returns all project docs to members |
+â”œâ”€â”€ /workflow
+â”‚   â”‚   â”œâ”€â”€ GET    /projects          # List user's projects (auth)
+â”‚   â”‚   â”œâ”€â”€ POST   /projects          # Create project (auth)
+â”‚   â”‚   â”œâ”€â”€ PUT    /projects/:id      # Update project (auth, creator/admin)
+â”‚   â”‚   â”œâ”€â”€ DELETE /projects/:id      # Delete project + docs (auth, creator/admin)
+â”‚   â”‚   â”œâ”€â”€ GET    /users/search      # Search users by name (auth)
+â”‚   â”‚   â”œâ”€â”€ GET    /users/:id         # Get user public profile (auth)
+â”‚   â”‚   â”œâ”€â”€ GET    /documents         # List user's docs, ?projectId=xxx (auth)
+â”‚   â”‚   â”œâ”€â”€ POST   /documents         # Create document record (auth)
+â”‚   â”‚   â”œâ”€â”€ PUT    /documents/:id     # Update document (auth, creator/admin)
+â”‚   â”‚   â””â”€â”€ DELETE /documents/:id     # Delete document (auth, creator/admin)
+â”œâ”€â”€ /chat (auth required)
+â”‚   â”œâ”€â”€ GET    /history          # User's chat history (?limit=50, max 200, oldestâ†’newest)
+â”‚   â”œâ”€â”€ POST   /send             # Send single message â†’ save user msg + forward to OpenClaw + save reply
+â”‚   â””â”€â”€ DELETE /history          # Clear user's chat history (DB only; OpenClaw session memory persists)
+â””â”€â”€ /health               # Health check endpoint
 ```
 
 ---
@@ -438,59 +441,59 @@ alpha-studio-backend/
 
 | Feature | Status | Files Involved | Notes |
 |---------|--------|----------------|-------|
-| User Registration | ✅ Complete | routes/auth.js | Email + password validation |
-| User Login | ✅ Complete | routes/auth.js | JWT token generation |
-| User Logout | ✅ Complete | routes/auth.js | Cookie clearing |
-| Get Current User | ✅ Complete | routes/auth.js | Protected route |
-| Update Profile | ✅ Complete | routes/auth.js | Name update |
-| Change Password | ✅ Complete | routes/auth.js | Old password verification |
-| Health Check | ✅ Complete | index.js | API status endpoint |
-| Password Hashing | ✅ Complete | models/User.js | bcrypt with 12 rounds |
-| JWT Middleware | ✅ Complete | middleware/auth.js | Token verification |
-| Admin Middleware | ✅ Complete | middleware/auth.js | Role-based authorization |
-| CORS Support | ✅ Complete | index.js | Multi-origin + PATCH method |
-| Course CRUD | ✅ Complete | routes/courses.js | Create, Read, Update, Delete |
-| Course Publishing | ✅ Complete | routes/courses.js | Publish, Unpublish, Archive |
-| Course Statistics | ✅ Complete | routes/courses.js | Aggregated stats endpoint |
-| Multilingual Courses | ✅ Complete | models/Course.js | VI/EN title and description |
-| Course Modules/Lessons | ✅ Complete | models/Course.js | Nested schema structure |
-| Job CRUD | ✅ Complete | routes/jobs.js | Create, Read, Update, Delete |
-| Job Publishing | ✅ Complete | routes/jobs.js | Publish, Close |
-| Job Statistics | ✅ Complete | routes/jobs.js | Aggregated stats endpoint |
-| Partner CRUD | ✅ Complete | routes/partners.js | Create, Read, Update, Delete |
-| Partner Publishing | ✅ Complete | routes/partners.js | Publish, Unpublish |
-| Partner Statistics | ✅ Complete | routes/partners.js | Aggregated stats endpoint |
-| Partner Skills | ✅ Complete | models/Partner.js | String array for skills |
-| Stale Index Cleanup | ✅ Complete | db/connection.js | Auto-drops stale indexes on startup |
-| Payment System | ✅ Complete | routes/payment.js, models/Transaction.js | Credit packages, VietQR, Casso webhook |
-| Webhook Logging | ✅ Complete | models/WebhookLog.js | Stores all incoming webhooks for debugging |
-| Admin Management | ✅ Complete | routes/admin.js | Users, transactions, webhook management |
-| Manual Top-up | ✅ Complete | routes/admin.js | Admin can top-up users manually |
-| Webhook Assignment | ✅ Complete | routes/admin.js | Admin can assign unmatched webhooks to users |
-| Transaction Timeout | ✅ Complete | routes/admin.js | Auto-timeout after 5 min without webhook match |
-| Share Prompts API | ✅ Complete | routes/prompts.js, models/Prompt.js | CRUD, like, bookmark, rate, download, featured, moderation |
-| Resource Hub API | ✅ Complete | routes/resources.js, models/Resource.js | CRUD, file upload (50MB), like, bookmark, rate, download |
-| Comments API | ✅ Complete | routes/comments.js, models/Comment.js | Comments for prompts/resources with likes |
-| Course Enrollment API | ✅ Complete | routes/enrollments.js, models/Enrollment.js | Enroll with credit deduction for paid courses; Transaction recorded; progress tracking |
-| Course Reviews API | ✅ Complete | routes/reviews.js, models/Review.js | CRUD, rating distribution, helpful votes, admin reply |
-| Lesson Video/Documents | ✅ Complete | models/Course.js | videoUrl and documents array per lesson |
-| Article CMS | ✅ Complete | models/Article.js, routes/articles.js | Bilingual articles for About & Services pages, admin CRUD |
-| Cloud Desktop API | ✅ Complete | models/HostMachine.js, models/CloudSession.js, routes/cloud.js | User connect/disconnect, admin machine/session management, agent heartbeat, cron cleanup |
-| B2 Presigned Upload | ✅ Complete | routes/upload.js, utils/b2Storage.js | Generate presigned PUT URL for browser-direct upload to Backblaze B2; `listAllFiles()` for bucket enumeration |
-| Workflow Projects API | ✅ Complete | models/WorkflowProject.js, routes/workflow.js | CRUD projects with team, tasks, chatHistory, expenseLog — auth required; GET /projects shows all non-completed for users |
-| Workflow Documents API | ✅ Complete | models/WorkflowDocument.js, routes/workflow.js | CRUD document records with status, comments, note — auth required; GET ?projectId returns all project docs to members |
-| Workflow User Profile API | ✅ Complete | routes/workflow.js | GET /users/:id returns public profile (name, avatar, role, email, phone, bio, skills, location, socials) — auth required |
-| Storage Cleanup API | ✅ Complete | routes/admin.js, utils/b2Storage.js | Lists all B2 files; cross-references WorkflowDocument/Resource (file+previewImages)/Course (videoUrl+documents)/Prompt (exampleImages); returns `data` (orphaned) + `referencedFiles` each with `source`, `uploader`, `referenced` — super admin only |
-| Studio Usage Tracking (legacy) | ✅ Complete | models/User.js, routes/studio.js | `studioUsage: {date, count}` on User; GET /studio/usage + POST /studio/use; 3 free uses/day; admin/mod unlimited |
-| Flow Image/Video Generation | ✅ Complete (Phase 2) | models/{FlowServer,StudioGeneration,User}.js, routes/studio.js, routes/cloud.js | `POST /studio/image/generate` (5/day), `POST /studio/video/generate` (1/day), `GET /studio/media/:genId/:idx` (B2 redirect or agent proxy stream), `POST /studio/save/:genId/:idx` (B2 upload), `GET /studio/history`; agent register+heartbeat via `/cloud/flow-heartbeat` + admin CRUD `/cloud/admin/flow-servers`; cron marks flow-server offline >2min |
-| AI Consultation Chat | ✅ Complete | models/ChatMessage.js, routes/chat.js, routes/settings.js, utils/aiProvider.js, server/context/alpha-studio-bot | `POST /chat/send` saves user msg then routes via admin setting `useOpenClawForChat`: OpenClaw (`OPENCLAW_URL`, session memory) by default, or direct gcli (`GCLI_DIRECT_URL`) with bundled Alpha Studio workspace context and up to 3 previous MongoDB chat messages. `GET /chat/history` display history; `DELETE /chat/history` clears DB history. |
-| VocabFlip Integration | ✅ Complete (Phase 15) | models/Vocab.js, routes/vocab.js | MongoDB-backed public library (decks, flashcards, ratings, import links, profile, feedback, sync notification stubs) & private cloud storage CRUD for web users (`VocabPrivateDeck`, `VocabPrivateFlashcard` models, `/my-decks` routes); VocabFlip media upload uses existing B2 presign flow |
-| Interior Design AI API | ✅ Complete | models/InteriorProject.js, routes/interior.js, utils/aiProvider.js, routes/chat.js | Auth-gated `/api/interior` project CRUD, AI chat, version persistence, rollback, manual cabinetModel validation, 1-credit charge per valid AI response, admin/mod bypass. Reuses `useOpenClawForChat` provider toggle shared with `/api/chat/send`. |
-| Interior AI Prompt v2 + 2-step | ✅ Complete | routes/interior.js, models/User.js, models/InteriorProject.js, routes/auth.js, utils/templateValidator.js | (A) Prompt v2: few-shot, domain hints (kích thước/vật liệu chuẩn VN), Phase 10 strict dimension anchor, `/chat` `runs[]` rule for L/U/island/parallel layouts, z-axis wall-depth convention, forced reply format "Quan sát ảnh/Hiểu yêu cầu/Đã áp dụng", lower askForInfo threshold. Phase 14 template instructions require `boxes` only for new `tplNew` payloads, while validator accepts legacy `isoBoxes` and rejects SVG view fields. (B) Opt-in `User.preferences.interiorTwoStepConfirm` (set via `PUT /auth/profile`). When ON, `POST /interior/projects/:id/chat` accepts `stage='proposal'\|'apply'`: proposal returns plain-text analysis (1 credit, no version), apply consumes `proposalText` as context (1 credit, creates version). Total 2 credit/lần khi bật. |
-| Interior Image-to-Design (Phase 4+) | ✅ Complete | routes/interior.js (+/analyze-image, +/generate-render), middleware/interiorQuota.js, models/{InteriorAnalysis,InteriorRender,InteriorQuota}.js, routes/admin.js (orphan scan) | `POST /interior/analyze-image` (auth + 5/24h quota): JSON body `{imageUrl, hints, modelOverride}`, sha256 cache (24h TTL), Gemini Flash 3 default → Pro 3.1 escalate, 2-attempt JSON repair loop, returns `{model, suggestedModel, meta}`. Prompt teaches Phase 8 `runs[]` for L/U/island/galley layouts and Phase 7 `csgHints[]`; validator accepts either legacy `modules[]` or new `runs[]`, not both. Default project model now uses an opaque solid panel template instead of transparent zone modules. |
-| Interior Component Workshop Cleanup | ✅ Complete | routes/interior.js, tools/interior-component-workshop/component-library.js | `POST /api/interior/workshop/components/delete` deletes selected local Workshop `components/<id>.json` files and regenerates `data/template-bundle.js`. It is enabled only in local/dev (or `INTERIOR_WORKSHOP_DELETE_ENABLED=true`) and only accepts loopback requests from no origin, `Origin: null`, localhost, or 127.0.0.1; no Bearer token is required for this local cleanup endpoint. |
-| Interior Workshop File-Origin CORS | ✅ Complete | server/index.js | `Origin: null` from `file://` workshop pages is now treated as an allowed CORS origin instead of logging `CORS blocked origin: null`. Local workshop origins on localhost/127.0.0.1 are also explicitly allowed. |
-| Interior AI Log Viewer | ✅ Complete | models/InteriorAiLog.js, routes/interior.js, scripts/dump-interior-log.mjs | Every `/api/interior/projects/:id/chat` call (both `proposal` and `apply` stages) records raw prompt, ref images, raw AI response, parsed reply, latency, usage, status (`ok`/`parse-failed`/`validation-failed`/`upstream-error`), errorMessage. TTL 30 days. `GET /api/interior/admin/logs?projectId=&userId=&stage=&status=&limit=` accepts EITHER (auth + adminOnly) OR header `x-reviewer-token: $INTERIOR_LOG_REVIEWER_TOKEN` (reviewer bypass for ops/debug). Direct dump: `node scripts/dump-interior-log.mjs <projectId>`. |
+| User Registration | âœ… Complete | routes/auth.js | Email + password validation |
+| User Login | âœ… Complete | routes/auth.js | JWT token generation |
+| User Logout | âœ… Complete | routes/auth.js | Cookie clearing |
+| Get Current User | âœ… Complete | routes/auth.js | Protected route |
+| Update Profile | âœ… Complete | routes/auth.js | Name update |
+| Change Password | âœ… Complete | routes/auth.js | Old password verification |
+| Health Check | âœ… Complete | index.js | API status endpoint |
+| Password Hashing | âœ… Complete | models/User.js | bcrypt with 12 rounds |
+| JWT Middleware | âœ… Complete | middleware/auth.js | Token verification |
+| Admin Middleware | âœ… Complete | middleware/auth.js | Role-based authorization |
+| CORS Support | âœ… Complete | index.js | Multi-origin + PATCH method |
+| Course CRUD | âœ… Complete | routes/courses.js | Create, Read, Update, Delete |
+| Course Publishing | âœ… Complete | routes/courses.js | Publish, Unpublish, Archive |
+| Course Statistics | âœ… Complete | routes/courses.js | Aggregated stats endpoint |
+| Multilingual Courses | âœ… Complete | models/Course.js | VI/EN title and description |
+| Course Modules/Lessons | âœ… Complete | models/Course.js | Nested schema structure |
+| Job CRUD | âœ… Complete | routes/jobs.js | Create, Read, Update, Delete |
+| Job Publishing | âœ… Complete | routes/jobs.js | Publish, Close |
+| Job Statistics | âœ… Complete | routes/jobs.js | Aggregated stats endpoint |
+| Partner CRUD | âœ… Complete | routes/partners.js | Create, Read, Update, Delete |
+| Partner Publishing | âœ… Complete | routes/partners.js | Publish, Unpublish |
+| Partner Statistics | âœ… Complete | routes/partners.js | Aggregated stats endpoint |
+| Partner Skills | âœ… Complete | models/Partner.js | String array for skills |
+| Stale Index Cleanup | âœ… Complete | db/connection.js | Auto-drops stale indexes on startup |
+| Payment System | âœ… Complete | routes/payment.js, models/Transaction.js | Credit packages, VietQR, Casso webhook |
+| Webhook Logging | âœ… Complete | models/WebhookLog.js | Stores all incoming webhooks for debugging |
+| Admin Management | âœ… Complete | routes/admin.js | Users, transactions, webhook management |
+| Manual Top-up | âœ… Complete | routes/admin.js | Admin can top-up users manually |
+| Webhook Assignment | âœ… Complete | routes/admin.js | Admin can assign unmatched webhooks to users |
+| Transaction Timeout | âœ… Complete | routes/admin.js | Auto-timeout after 5 min without webhook match |
+| Share Prompts API | âœ… Complete | routes/prompts.js, models/Prompt.js | CRUD, like, bookmark, rate, download, featured, moderation |
+| Resource Hub API | âœ… Complete | routes/resources.js, models/Resource.js | CRUD, file upload (50MB), like, bookmark, rate, download |
+| Comments API | âœ… Complete | routes/comments.js, models/Comment.js | Comments for prompts/resources with likes |
+| Course Enrollment API | âœ… Complete | routes/enrollments.js, models/Enrollment.js | Enroll with credit deduction for paid courses; Transaction recorded; progress tracking |
+| Course Reviews API | âœ… Complete | routes/reviews.js, models/Review.js | CRUD, rating distribution, helpful votes, admin reply |
+| Lesson Video/Documents | âœ… Complete | models/Course.js | videoUrl and documents array per lesson |
+| Article CMS | âœ… Complete | models/Article.js, routes/articles.js | Bilingual articles for About & Services pages, admin CRUD |
+| Cloud Desktop API | âœ… Complete | models/HostMachine.js, models/CloudSession.js, routes/cloud.js | User connect/disconnect, admin machine/session management, agent heartbeat, cron cleanup |
+| B2 Presigned Upload | âœ… Complete | routes/upload.js, utils/b2Storage.js | Generate presigned PUT URL for browser-direct upload to Backblaze B2; `listAllFiles()` for bucket enumeration |
+| Workflow Projects API | âœ… Complete | models/WorkflowProject.js, routes/workflow.js | CRUD projects with team, tasks, chatHistory, expenseLog â€” auth required; GET /projects shows all non-completed for users |
+| Workflow Documents API | âœ… Complete | models/WorkflowDocument.js, routes/workflow.js | CRUD document records with status, comments, note â€” auth required; GET ?projectId returns all project docs to members |
+| Workflow User Profile API | âœ… Complete | routes/workflow.js | GET /users/:id returns public profile (name, avatar, role, email, phone, bio, skills, location, socials) â€” auth required |
+| Storage Cleanup API | âœ… Complete | routes/admin.js, utils/b2Storage.js | Lists all B2 files; cross-references WorkflowDocument/Resource (file+previewImages)/Course (videoUrl+documents)/Prompt (exampleImages); returns `data` (orphaned) + `referencedFiles` each with `source`, `uploader`, `referenced` â€” super admin only |
+| Studio Usage Tracking (legacy) | âœ… Complete | models/User.js, routes/studio.js | `studioUsage: {date, count}` on User; GET /studio/usage + POST /studio/use; 3 free uses/day; admin/mod unlimited |
+| Flow Image/Video Generation | âœ… Complete (Phase 2) | models/{FlowServer,StudioGeneration,User}.js, routes/studio.js, routes/cloud.js | `POST /studio/image/generate` (5/day), `POST /studio/video/generate` (1/day), `GET /studio/media/:genId/:idx` (B2 redirect or agent proxy stream), `POST /studio/save/:genId/:idx` (B2 upload), `GET /studio/history`; agent register+heartbeat via `/cloud/flow-heartbeat` + admin CRUD `/cloud/admin/flow-servers`; cron marks flow-server offline >2min |
+| AI Consultation Chat | âœ… Complete | models/ChatMessage.js, routes/chat.js, routes/settings.js, utils/aiProvider.js, server/context/alpha-studio-bot | `POST /chat/send` saves user msg then routes via admin setting `useOpenClawForChat`: OpenClaw (`OPENCLAW_URL`, session memory) by default, or direct gcli (`GCLI_DIRECT_URL`) with bundled Alpha Studio workspace context and up to 3 previous MongoDB chat messages. `GET /chat/history` display history; `DELETE /chat/history` clears DB history. |
+| VocabFlip Integration | âœ… Complete (Phase 15) | models/Vocab.js, routes/vocab.js | MongoDB-backed public library (decks, flashcards, ratings, import links, profile, feedback, sync notification stubs) & private cloud storage CRUD for web users (`VocabPrivateDeck`, `VocabPrivateFlashcard` models, `/my-decks` routes); VocabFlip media upload uses existing B2 presign flow |
+| Interior Design AI API | âœ… Complete | models/InteriorProject.js, routes/interior.js, utils/aiProvider.js, routes/chat.js | Auth-gated `/api/interior` project CRUD, AI chat, version persistence, rollback, manual cabinetModel validation, 1-credit charge per valid AI response, admin/mod bypass. Reuses `useOpenClawForChat` provider toggle shared with `/api/chat/send`. |
+| Interior AI Prompt v2 + 2-step | âœ… Complete | routes/interior.js, models/User.js, models/InteriorProject.js, routes/auth.js, utils/templateValidator.js | (A) Prompt v2: few-shot, domain hints (kĂ­ch thÆ°á»›c/váº­t liá»‡u chuáº©n VN), Phase 10 strict dimension anchor, `/chat` `runs[]` rule for L/U/island/parallel layouts, z-axis wall-depth convention, forced reply format "Quan sĂ¡t áº£nh/Hiá»ƒu yĂªu cáº§u/ÄĂ£ Ă¡p dá»¥ng", lower askForInfo threshold. Phase 14 template instructions require `boxes` only for new `tplNew` payloads, while validator accepts legacy `isoBoxes` and rejects SVG view fields. (B) Opt-in `User.preferences.interiorTwoStepConfirm` (set via `PUT /auth/profile`). When ON, `POST /interior/projects/:id/chat` accepts `stage='proposal'\|'apply'`: proposal returns plain-text analysis (1 credit, no version), apply consumes `proposalText` as context (1 credit, creates version). Total 2 credit/láº§n khi báº­t. |
+| Interior Image-to-Design (Phase 4+) | âœ… Complete | routes/interior.js (+/analyze-image, +/generate-render), middleware/interiorQuota.js, models/{InteriorAnalysis,InteriorRender,InteriorQuota}.js, routes/admin.js (orphan scan) | `POST /interior/analyze-image` (auth + 5/24h quota): JSON body `{imageUrl, hints, modelOverride}`, sha256 cache (24h TTL), Gemini Flash 3 default â†’ Pro 3.1 escalate, 2-attempt JSON repair loop, returns `{model, suggestedModel, meta}`. Prompt teaches Phase 8 `runs[]` for L/U/island/galley layouts and Phase 7 `csgHints[]`; validator accepts either legacy `modules[]` or new `runs[]`, not both. Default project model now uses an opaque solid panel template instead of transparent zone modules. |
+| Interior Component Workshop Cleanup | âœ… Complete | routes/interior.js, tools/interior-component-workshop/component-library.js | `POST /api/interior/workshop/components/delete` deletes selected local Workshop `components/<id>.json` files and regenerates `data/template-bundle.js`. It is enabled only in local/dev (or `INTERIOR_WORKSHOP_DELETE_ENABLED=true`) and only accepts loopback requests from no origin, `Origin: null`, localhost, or 127.0.0.1; no Bearer token is required for this local cleanup endpoint. |
+| Interior Workshop File-Origin CORS | âœ… Complete | server/index.js | `Origin: null` from `file://` workshop pages is now treated as an allowed CORS origin instead of logging `CORS blocked origin: null`. Local workshop origins on localhost/127.0.0.1 are also explicitly allowed. |
+| Interior AI Log Viewer | âœ… Complete | models/InteriorAiLog.js, routes/interior.js, scripts/dump-interior-log.mjs | Every `/api/interior/projects/:id/chat` call (both `proposal` and `apply` stages) records raw prompt, ref images, raw AI response, parsed reply, latency, usage, status (`ok`/`parse-failed`/`validation-failed`/`upstream-error`), errorMessage. TTL 30 days. `GET /api/interior/admin/logs?projectId=&userId=&stage=&status=&limit=` accepts EITHER (auth + adminOnly) OR header `x-reviewer-token: $INTERIOR_LOG_REVIEWER_TOKEN` (reviewer bypass for ops/debug). Direct dump: `node scripts/dump-interior-log.mjs <projectId>`. |
 
 ---
 
@@ -585,3 +588,5 @@ After running `npm run db:init` and `npm run db:migrate-passwords`:
 **NOTE TO CLAUDE CODE:**
 Read this file FIRST before making any changes.
 Update active features status and TODOs after each session.
+
+

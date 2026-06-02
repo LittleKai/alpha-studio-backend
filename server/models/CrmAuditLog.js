@@ -7,7 +7,7 @@ const CrmAuditLogSchema = new mongoose.Schema({
   action: { type: String, required: true }, // 'subscription_created', 'device_registered', etc.
   details: { type: Object },
   ipAddress: { type: String },
-  createdAt: { type: Date, default: Date.now, expires: '90d' } // Keep audit logs for 90 days
+  createdAt: { type: Date, default: Date.now }
 });
 
 // Index for faster queries

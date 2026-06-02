@@ -1,4 +1,4 @@
-import express from 'express';
+﻿import express from 'express';
 import crypto from 'crypto';
 import { authMiddleware, adminOnly } from '../middleware/auth.js';
 import User from '../models/User.js';
@@ -48,7 +48,7 @@ const requireActiveSubscription = async (req, res, next) => {
         if (!sub) {
             return res.status(403).json({
                 success: false,
-                message: 'Yêu cầu gói đăng ký Alpha CRM đang hoạt động.'
+                message: 'YĂªu cáº§u gĂ³i Ä‘Äƒng kĂ½ Alpha CRM Ä‘ang hoáº¡t Ä‘á»™ng.'
             });
         }
         
@@ -58,7 +58,7 @@ const requireActiveSubscription = async (req, res, next) => {
             await sub.save();
             return res.status(403).json({
                 success: false,
-                message: 'Gói đăng ký Alpha CRM của bạn đã hết hạn.'
+                message: 'GĂ³i Ä‘Äƒng kĂ½ Alpha CRM cá»§a báº¡n Ä‘Ă£ háº¿t háº¡n.'
             });
         }
         
@@ -75,17 +75,17 @@ const agentAuthMiddleware = async (req, res, next) => {
         const agentSecret = req.headers['x-agent-secret'] || req.body.agentSecret;
 
         if (!deviceId || !agentSecret) {
-            return res.status(401).json({ success: false, message: 'Thiếu deviceId hoặc agentSecret.' });
+            return res.status(401).json({ success: false, message: 'Thiáº¿u deviceId hoáº·c agentSecret.' });
         }
 
         const device = await CrmDevice.findOne({ _id: deviceId, status: 'active' });
         if (!device) {
-            return res.status(403).json({ success: false, message: 'Thiết bị không tồn tại hoặc đã bị vô hiệu hóa.' });
+            return res.status(403).json({ success: false, message: 'Thiáº¿t bá»‹ khĂ´ng tá»“n táº¡i hoáº·c Ä‘Ă£ bá»‹ vĂ´ hiá»‡u hĂ³a.' });
         }
 
         const incomingSecretHash = crypto.createHash('sha256').update(agentSecret).digest('hex');
         if (device.agentSecretHash !== incomingSecretHash) {
-            return res.status(403).json({ success: false, message: 'Sai mật khẩu thiết bị.' });
+            return res.status(403).json({ success: false, message: 'Sai máº­t kháº©u thiáº¿t bá»‹.' });
         }
 
         req.crmDevice = device;
@@ -126,7 +126,7 @@ router.get('/subscription/me', authMiddleware, async (req, res) => {
         if (!sub) {
             return res.json({
                 success: true,
-                message: 'Không tìm thấy gói đăng ký CRM nào.',
+                message: 'KhĂ´ng tĂ¬m tháº¥y gĂ³i Ä‘Äƒng kĂ½ CRM nĂ o.',
                 data: { active: false, subscription: null }
             });
         }
@@ -146,7 +146,7 @@ router.get('/subscription/me', authMiddleware, async (req, res) => {
         });
     } catch (error) {
         console.error('Error fetching CRM subscription:', error);
-        res.status(500).json({ success: false, message: 'Lỗi máy chủ.' });
+        res.status(500).json({ success: false, message: 'Lá»—i mĂ¡y chá»§.' });
     }
 });
 
@@ -196,7 +196,7 @@ router.get('/quota', authMiddleware, async (req, res) => {
         });
     } catch (error) {
         console.error('Error fetching CRM quota:', error);
-        res.status(500).json({ success: false, message: 'Lỗi máy chủ.' });
+        res.status(500).json({ success: false, message: 'Lá»—i mĂ¡y chá»§.' });
     }
 });
 
@@ -207,15 +207,16 @@ router.get('/quota', authMiddleware, async (req, res) => {
 // POST /api/crm/billing/checkout
 router.post('/billing/checkout', authMiddleware, async (req, res) => {
     try {
-        const { productId, paymentMethod } = req.body;
+        const { productId } = req.body;
+        const paymentMethod = req.body.paymentMethod === 'credits' ? 'credit' : req.body.paymentMethod;
 
         if (!productId || !paymentMethod) {
-            return res.status(400).json({ success: false, message: 'Thiếu productId hoặc paymentMethod.' });
+            return res.status(400).json({ success: false, message: 'Thiáº¿u productId hoáº·c paymentMethod.' });
         }
 
         const product = getCrmProduct(productId);
         if (!product) {
-            return res.status(404).json({ success: false, message: 'Không tìm thấy sản phẩm này trong danh mục.' });
+            return res.status(404).json({ success: false, message: 'KhĂ´ng tĂ¬m tháº¥y sáº£n pháº©m nĂ y trong danh má»¥c.' });
         }
 
         const orderType = CRM_PLANS[productId] ? 'subscription' : 'ai_pack';
@@ -226,7 +227,7 @@ router.post('/billing/checkout', authMiddleware, async (req, res) => {
             if (!activeSub) {
                 return res.status(400).json({ 
                     success: false, 
-                    message: 'Bạn phải có gói CRM đang hoạt động để mua gói AI top-up.' 
+                    message: 'Báº¡n pháº£i cĂ³ gĂ³i CRM Ä‘ang hoáº¡t Ä‘á»™ng Ä‘á»ƒ mua gĂ³i AI top-up.' 
                 });
             }
             if (new Date() > new Date(activeSub.periodEnd)) {
@@ -234,7 +235,7 @@ router.post('/billing/checkout', authMiddleware, async (req, res) => {
                 await activeSub.save();
                 return res.status(400).json({ 
                     success: false, 
-                    message: 'Gói đăng ký CRM của bạn đã hết hạn. Hãy gia hạn trước khi mua gói AI top-up.' 
+                    message: 'GĂ³i Ä‘Äƒng kĂ½ CRM cá»§a báº¡n Ä‘Ă£ háº¿t háº¡n. HĂ£y gia háº¡n trÆ°á»›c khi mua gĂ³i AI top-up.' 
                 });
             }
         }
@@ -251,7 +252,7 @@ router.post('/billing/checkout', authMiddleware, async (req, res) => {
             );
 
             if (!user) {
-                return res.status(400).json({ success: false, message: 'Số dư credit của bạn không đủ.' });
+                return res.status(400).json({ success: false, message: 'Sá»‘ dÆ° credit cá»§a báº¡n khĂ´ng Ä‘á»§.' });
             }
 
             // Generate unique transaction code
@@ -333,7 +334,7 @@ router.post('/billing/checkout', authMiddleware, async (req, res) => {
                     // AI pack purchase (subscription check already passed at checkout top)
                     subscription = await CrmSubscription.findOne({ userId: user._id, status: 'active' });
                     if (!subscription) {
-                        throw new Error('Bạn phải có gói CRM đang hoạt động để mua gói AI top-up.');
+                        throw new Error('Báº¡n pháº£i cĂ³ gĂ³i CRM Ä‘ang hoáº¡t Ä‘á»™ng Ä‘á»ƒ mua gĂ³i AI top-up.');
                     }
                     subscription.extraAiRemaining += product.extraAiLimit;
                     await subscription.save();
@@ -348,7 +349,7 @@ router.post('/billing/checkout', authMiddleware, async (req, res) => {
 
                 return res.json({
                     success: true,
-                    message: `${product.name} đã được thanh toán thành công qua Credits.`,
+                    message: `${product.name} Ä‘Ă£ Ä‘Æ°á»£c thanh toĂ¡n thĂ nh cĂ´ng qua Credits.`,
                     data: {
                         fulfilled: true,
                         subscription
@@ -367,7 +368,7 @@ router.post('/billing/checkout', authMiddleware, async (req, res) => {
                 
                 return res.status(500).json({ 
                     success: false, 
-                    message: `Lỗi xử lý đơn hàng. Đã hoàn trả credit. Chi tiết: ${err.message}` 
+                    message: `Lá»—i xá»­ lĂ½ Ä‘Æ¡n hĂ ng. ÄĂ£ hoĂ n tráº£ credit. Chi tiáº¿t: ${err.message}` 
                 });
             }
         }
@@ -385,7 +386,7 @@ router.post('/billing/checkout', authMiddleware, async (req, res) => {
             } while (attempts < 10);
 
             if (attempts >= 10) {
-                return res.status(500).json({ success: false, message: 'Không thể tạo mã đơn hàng duy nhất.' });
+                return res.status(500).json({ success: false, message: 'KhĂ´ng thá»ƒ táº¡o mĂ£ Ä‘Æ¡n hĂ ng duy nháº¥t.' });
             }
 
             const billingOrder = new CrmBillingOrder({
@@ -402,7 +403,7 @@ router.post('/billing/checkout', authMiddleware, async (req, res) => {
 
             const bankInfo = {
                 bankId: 'OCB',
-                bankName: 'OCB (Phương Đông)',
+                bankName: 'OCB (PhÆ°Æ¡ng ÄĂ´ng)',
                 accountNumber: 'CASS55252503',
                 accountHolder: 'NGUYEN ANH DUC'
             };
@@ -427,10 +428,10 @@ router.post('/billing/checkout', authMiddleware, async (req, res) => {
             });
         }
 
-        res.status(400).json({ success: false, message: 'Phương thức thanh toán không được hỗ trợ.' });
+        res.status(400).json({ success: false, message: 'PhÆ°Æ¡ng thá»©c thanh toĂ¡n khĂ´ng Ä‘Æ°á»£c há»— trá»£.' });
     } catch (error) {
         console.error('Checkout error:', error);
-        res.status(500).json({ success: false, message: 'Lỗi máy chủ khi tạo đơn hàng.' });
+        res.status(500).json({ success: false, message: 'Lá»—i mĂ¡y chá»§ khi táº¡o Ä‘Æ¡n hĂ ng.' });
     }
 });
 
@@ -441,7 +442,7 @@ router.get('/billing/orders', authMiddleware, async (req, res) => {
         res.json({ success: true, data: orders });
     } catch (error) {
         console.error('Error fetching billing orders:', error);
-        res.status(500).json({ success: false, message: 'Lỗi máy chủ.' });
+        res.status(500).json({ success: false, message: 'Lá»—i mĂ¡y chá»§.' });
     }
 });
 
@@ -456,7 +457,7 @@ router.get('/devices', authMiddleware, async (req, res) => {
         res.json({ success: true, data: devices });
     } catch (error) {
         console.error('Error fetching devices:', error);
-        res.status(500).json({ success: false, message: 'Lỗi máy chủ.' });
+        res.status(500).json({ success: false, message: 'Lá»—i mĂ¡y chá»§.' });
     }
 });
 
@@ -466,7 +467,7 @@ router.post('/devices/register', crmDeviceLimiter, authMiddleware, requireActive
         const { machineFingerprint, displayName, platform, appVersion, agentVersion } = req.body;
 
         if (!machineFingerprint || !displayName) {
-            return res.status(400).json({ success: false, message: 'Thiếu vân tay máy (machineFingerprint) hoặc tên hiển thị.' });
+            return res.status(400).json({ success: false, message: 'Thiáº¿u vĂ¢n tay mĂ¡y (machineFingerprint) hoáº·c tĂªn hiá»ƒn thá»‹.' });
         }
 
         const sub = req.crmSubscription;
@@ -480,7 +481,7 @@ router.post('/devices/register', crmDeviceLimiter, authMiddleware, requireActive
         if (activeDevices.length >= sub.deviceLimit) {
             return res.status(400).json({
                 success: false,
-                message: `Đã đạt giới hạn thiết bị hoạt động (${sub.deviceLimit}). Vui lòng vô hiệu hóa thiết bị cũ trước.`
+                message: `ÄĂ£ Ä‘áº¡t giá»›i háº¡n thiáº¿t bá»‹ hoáº¡t Ä‘á»™ng (${sub.deviceLimit}). Vui lĂ²ng vĂ´ hiá»‡u hĂ³a thiáº¿t bá»‹ cÅ© trÆ°á»›c.`
             });
         }
 
@@ -512,7 +513,7 @@ router.post('/devices/register', crmDeviceLimiter, authMiddleware, requireActive
 
         res.json({
             success: true,
-            message: 'Đăng ký thiết bị thành công.',
+            message: 'ÄÄƒng kĂ½ thiáº¿t bá»‹ thĂ nh cĂ´ng.',
             data: {
                 deviceId: newDevice._id,
                 agentSecret // Shared ONLY once during registration
@@ -523,11 +524,11 @@ router.post('/devices/register', crmDeviceLimiter, authMiddleware, requireActive
             const deviceLimit = req.crmSubscription ? req.crmSubscription.deviceLimit : 1;
             return res.status(400).json({
                 success: false,
-                message: `Đã đạt giới hạn thiết bị hoạt động (${deviceLimit}). Vui lòng vô hiệu hóa thiết bị cũ trước.`
+                message: `ÄĂ£ Ä‘áº¡t giá»›i háº¡n thiáº¿t bá»‹ hoáº¡t Ä‘á»™ng (${deviceLimit}). Vui lĂ²ng vĂ´ hiá»‡u hĂ³a thiáº¿t bá»‹ cÅ© trÆ°á»›c.`
             });
         }
         console.error('Device registration error:', error);
-        res.status(500).json({ success: false, message: 'Lỗi máy chủ khi đăng ký thiết bị.' });
+        res.status(500).json({ success: false, message: 'Lá»—i mĂ¡y chá»§ khi Ä‘Äƒng kĂ½ thiáº¿t bá»‹.' });
     }
 });
 
@@ -536,7 +537,7 @@ router.post('/devices/:id/disable', authMiddleware, async (req, res) => {
     try {
         const device = await CrmDevice.findOne({ _id: req.params.id, userId: req.user._id });
         if (!device) {
-            return res.status(404).json({ success: false, message: 'Không tìm thấy thiết bị của bạn.' });
+            return res.status(404).json({ success: false, message: 'KhĂ´ng tĂ¬m tháº¥y thiáº¿t bá»‹ cá»§a báº¡n.' });
         }
 
         device.status = 'disabled';
@@ -545,12 +546,12 @@ router.post('/devices/:id/disable', authMiddleware, async (req, res) => {
 
         res.json({
             success: true,
-            message: 'Đã vô hiệu hóa thiết bị thành công.',
+            message: 'ÄĂ£ vĂ´ hiá»‡u hĂ³a thiáº¿t bá»‹ thĂ nh cĂ´ng.',
             data: device
         });
     } catch (error) {
         console.error('Error disabling device:', error);
-        res.status(500).json({ success: false, message: 'Lỗi máy chủ.' });
+        res.status(500).json({ success: false, message: 'Lá»—i mĂ¡y chá»§.' });
     }
 });
 
@@ -559,12 +560,12 @@ router.post('/pairing/start', crmPairingLimiter, userOrAgentAuth, requireActiveS
     try {
         const { deviceId } = req.body;
         if (!deviceId) {
-            return res.status(400).json({ success: false, message: 'Thiếu deviceId.' });
+            return res.status(400).json({ success: false, message: 'Thiáº¿u deviceId.' });
         }
 
         const device = await CrmDevice.findOne({ _id: deviceId, userId: req.user._id, status: 'active' });
         if (!device) {
-            return res.status(404).json({ success: false, message: 'Không tìm thấy thiết bị hoạt động tương ứng.' });
+            return res.status(404).json({ success: false, message: 'KhĂ´ng tĂ¬m tháº¥y thiáº¿t bá»‹ hoáº¡t Ä‘á»™ng tÆ°Æ¡ng á»©ng.' });
         }
 
         // Generate 6-digit pairing code
@@ -604,7 +605,7 @@ router.post('/pairing/start', crmPairingLimiter, userOrAgentAuth, requireActiveS
         });
     } catch (error) {
         console.error('Pairing start error:', error);
-        res.status(500).json({ success: false, message: 'Lỗi máy chủ khi thiết lập ghép đôi.' });
+        res.status(500).json({ success: false, message: 'Lá»—i mĂ¡y chá»§ khi thiáº¿t láº­p ghĂ©p Ä‘Ă´i.' });
     }
 });
 
@@ -614,7 +615,7 @@ router.post('/pairing/confirm', crmPairingLimiter, authMiddleware, requireActive
         const { pairingCode, qrToken } = req.body;
 
         if (!pairingCode && !qrToken) {
-            return res.status(400).json({ success: false, message: 'Cần mã ghép đôi (pairingCode) hoặc mã QR (qrToken).' });
+            return res.status(400).json({ success: false, message: 'Cáº§n mĂ£ ghĂ©p Ä‘Ă´i (pairingCode) hoáº·c mĂ£ QR (qrToken).' });
         }
 
         let query = { status: 'pending', expiresAt: { $gt: new Date() } };
@@ -630,14 +631,14 @@ router.post('/pairing/confirm', crmPairingLimiter, authMiddleware, requireActive
         const session = await CrmPairingSession.findOne(query);
 
         if (!session) {
-            return res.status(404).json({ success: false, message: 'Mã ghép đôi không hợp lệ hoặc đã hết hạn.' });
+            return res.status(404).json({ success: false, message: 'MĂ£ ghĂ©p Ä‘Ă´i khĂ´ng há»£p lá»‡ hoáº·c Ä‘Ă£ háº¿t háº¡n.' });
         }
 
         // Verify cross-account security: confirming user must match pairing owner
         if (session.userId.toString() !== req.user._id.toString()) {
             return res.status(403).json({
                 success: false,
-                message: 'Không có quyền xác nhận ghép đôi cho tài khoản khác.'
+                message: 'KhĂ´ng cĂ³ quyá»n xĂ¡c nháº­n ghĂ©p Ä‘Ă´i cho tĂ i khoáº£n khĂ¡c.'
             });
         }
 
@@ -665,7 +666,7 @@ router.post('/pairing/confirm', crmPairingLimiter, authMiddleware, requireActive
 
         res.json({
             success: true,
-            message: 'Đã xác nhận ghép đôi thiết bị thành công.',
+            message: 'ÄĂ£ xĂ¡c nháº­n ghĂ©p Ä‘Ă´i thiáº¿t bá»‹ thĂ nh cĂ´ng.',
             data: {
                 deviceId: session.deviceId,
                 confirmedAt: session.confirmedAt
@@ -673,7 +674,7 @@ router.post('/pairing/confirm', crmPairingLimiter, authMiddleware, requireActive
         });
     } catch (error) {
         console.error('Pairing confirmation error:', error);
-        res.status(500).json({ success: false, message: 'Lỗi máy chủ khi xác nhận ghép đôi.' });
+        res.status(500).json({ success: false, message: 'Lá»—i mĂ¡y chá»§ khi xĂ¡c nháº­n ghĂ©p Ä‘Ă´i.' });
     }
 });
 
@@ -682,12 +683,12 @@ router.get('/pairing/:id', authMiddleware, async (req, res) => {
     try {
         const session = await CrmPairingSession.findOne({ _id: req.params.id, userId: req.user._id });
         if (!session) {
-            return res.status(404).json({ success: false, message: 'Không tìm thấy phiên ghép đôi này.' });
+            return res.status(404).json({ success: false, message: 'KhĂ´ng tĂ¬m tháº¥y phiĂªn ghĂ©p Ä‘Ă´i nĂ y.' });
         }
         res.json({ success: true, data: session });
     } catch (error) {
         console.error('Error fetching pairing session:', error);
-        res.status(500).json({ success: false, message: 'Lỗi máy chủ.' });
+        res.status(500).json({ success: false, message: 'Lá»—i mĂ¡y chá»§.' });
     }
 });
 
@@ -712,11 +713,11 @@ router.post('/agent/heartbeat', agentAuthMiddleware, async (req, res) => {
 
         res.json({
             success: true,
-            message: 'Nhận Heartbeat Agent thành công.'
+            message: 'Nháº­n Heartbeat Agent thĂ nh cĂ´ng.'
         });
     } catch (error) {
         console.error('Agent heartbeat error:', error);
-        res.status(500).json({ success: false, message: 'Lỗi server khi ghi nhận heartbeat.' });
+        res.status(500).json({ success: false, message: 'Lá»—i server khi ghi nháº­n heartbeat.' });
     }
 });
 
@@ -724,11 +725,21 @@ router.post('/agent/heartbeat', agentAuthMiddleware, async (req, res) => {
 router.post('/agent/commands/next', agentAuthMiddleware, async (req, res) => {
     try {
         const device = req.crmDevice;
+        const now = new Date();
+
+        await CrmAgentCommand.updateMany(
+            { deviceId: device._id, status: 'queued', expiresAt: { $exists: true, $lte: now } },
+            { $set: { status: 'expired', finishedAt: now, errorMessage: 'Command TTL expired before agent claim.' } }
+        );
 
         // Find the oldest queued command for this device
         const command = await CrmAgentCommand.findOneAndUpdate(
-            { deviceId: device._id, status: 'queued' },
-            { $set: { status: 'sent', sentAt: new Date() } },
+            {
+                deviceId: device._id,
+                status: 'queued',
+                $or: [{ expiresAt: { $gt: now } }, { expiresAt: { $exists: false } }]
+            },
+            { $set: { status: 'sent', sentAt: now } },
             { sort: { createdAt: 1 }, new: true }
         );
 
@@ -738,7 +749,7 @@ router.post('/agent/commands/next', agentAuthMiddleware, async (req, res) => {
         });
     } catch (error) {
         console.error('Error fetching next agent command:', error);
-        res.status(500).json({ success: false, message: 'Lỗi server.' });
+        res.status(500).json({ success: false, message: 'Lá»—i server.' });
     }
 });
 
@@ -750,7 +761,14 @@ router.post('/agent/commands/:id/result', agentAuthMiddleware, async (req, res) 
 
         const command = await CrmAgentCommand.findOne({ _id: req.params.id, deviceId: device._id });
         if (!command) {
-            return res.status(404).json({ success: false, message: 'Không tìm thấy lệnh này.' });
+            return res.status(404).json({ success: false, message: 'KhĂ´ng tĂ¬m tháº¥y lá»‡nh nĂ y.' });
+        }
+
+        if (['succeeded', 'failed', 'cancelled', 'expired'].includes(command.status)) {
+            return res.status(409).json({
+                success: false,
+                message: 'Lệnh này đã ở trạng thái kết thúc và không thể ghi kết quả lại.'
+            });
         }
 
         if (success && result && result.status === 'running') {
@@ -789,11 +807,11 @@ router.post('/agent/commands/:id/result', agentAuthMiddleware, async (req, res) 
 
         res.json({
             success: true,
-            message: 'Cập nhật kết quả lệnh thành công.'
+            message: 'Cáº­p nháº­t káº¿t quáº£ lá»‡nh thĂ nh cĂ´ng.'
         });
     } catch (error) {
         console.error('Error updating agent command result:', error);
-        res.status(500).json({ success: false, message: 'Lỗi server.' });
+        res.status(500).json({ success: false, message: 'Lá»—i server.' });
     }
 });
 
@@ -808,7 +826,7 @@ router.get('/customers', authMiddleware, async (req, res) => {
         res.json({ success: true, data: customers });
     } catch (error) {
         console.error(error);
-        res.status(500).json({ success: false, message: 'Lỗi server.' });
+        res.status(500).json({ success: false, message: 'Lá»—i server.' });
     }
 });
 
@@ -822,18 +840,18 @@ router.post('/customers', authMiddleware, requireActiveSubscription, async (req,
         res.json({ success: true, data: newCust });
     } catch (error) {
         console.error(error);
-        res.status(500).json({ success: false, message: 'Lỗi server.' });
+        res.status(500).json({ success: false, message: 'Lá»—i server.' });
     }
 });
 
 router.get('/customers/:id', authMiddleware, async (req, res) => {
     try {
         const cust = await CrmCustomer.findOne({ _id: req.params.id, userId: req.user._id });
-        if (!cust) return res.status(404).json({ success: false, message: 'Không tìm thấy khách hàng.' });
+        if (!cust) return res.status(404).json({ success: false, message: 'KhĂ´ng tĂ¬m tháº¥y khĂ¡ch hĂ ng.' });
         res.json({ success: true, data: cust });
     } catch (error) {
         console.error(error);
-        res.status(500).json({ success: false, message: 'Lỗi server.' });
+        res.status(500).json({ success: false, message: 'Lá»—i server.' });
     }
 });
 
@@ -850,22 +868,22 @@ router.put('/customers/:id', authMiddleware, requireActiveSubscription, async (r
             { $set: updateData },
             { new: true }
         );
-        if (!cust) return res.status(404).json({ success: false, message: 'Không tìm thấy khách hàng.' });
+        if (!cust) return res.status(404).json({ success: false, message: 'KhĂ´ng tĂ¬m tháº¥y khĂ¡ch hĂ ng.' });
         res.json({ success: true, data: cust });
     } catch (error) {
         console.error(error);
-        res.status(500).json({ success: false, message: 'Lỗi server.' });
+        res.status(500).json({ success: false, message: 'Lá»—i server.' });
     }
 });
 
 router.delete('/customers/:id', authMiddleware, requireActiveSubscription, async (req, res) => {
     try {
         const result = await CrmCustomer.findOneAndDelete({ _id: req.params.id, userId: req.user._id });
-        if (!result) return res.status(404).json({ success: false, message: 'Không tìm thấy khách hàng.' });
-        res.json({ success: true, message: 'Đã xóa khách hàng.' });
+        if (!result) return res.status(404).json({ success: false, message: 'KhĂ´ng tĂ¬m tháº¥y khĂ¡ch hĂ ng.' });
+        res.json({ success: true, message: 'ÄĂ£ xĂ³a khĂ¡ch hĂ ng.' });
     } catch (error) {
         console.error(error);
-        res.status(500).json({ success: false, message: 'Lỗi server.' });
+        res.status(500).json({ success: false, message: 'Lá»—i server.' });
     }
 });
 
@@ -876,7 +894,7 @@ router.get('/contacts', authMiddleware, async (req, res) => {
         res.json({ success: true, data: contacts });
     } catch (error) {
         console.error(error);
-        res.status(500).json({ success: false, message: 'Lỗi server.' });
+        res.status(500).json({ success: false, message: 'Lá»—i server.' });
     }
 });
 
@@ -890,7 +908,7 @@ router.post('/contacts', authMiddleware, requireActiveSubscription, async (req, 
         res.json({ success: true, data: newContact });
     } catch (error) {
         console.error(error);
-        res.status(500).json({ success: false, message: 'Lỗi server.' });
+        res.status(500).json({ success: false, message: 'Lá»—i server.' });
     }
 });
 
@@ -907,22 +925,22 @@ router.put('/contacts/:id', authMiddleware, requireActiveSubscription, async (re
             { $set: updateData },
             { new: true }
         );
-        if (!contact) return res.status(404).json({ success: false, message: 'Không tìm thấy liên hệ.' });
+        if (!contact) return res.status(404).json({ success: false, message: 'KhĂ´ng tĂ¬m tháº¥y liĂªn há»‡.' });
         res.json({ success: true, data: contact });
     } catch (error) {
         console.error(error);
-        res.status(500).json({ success: false, message: 'Lỗi server.' });
+        res.status(500).json({ success: false, message: 'Lá»—i server.' });
     }
 });
 
 router.delete('/contacts/:id', authMiddleware, requireActiveSubscription, async (req, res) => {
     try {
         const result = await CrmContact.findOneAndDelete({ _id: req.params.id, userId: req.user._id });
-        if (!result) return res.status(404).json({ success: false, message: 'Không tìm thấy liên hệ.' });
-        res.json({ success: true, message: 'Đã xóa liên hệ.' });
+        if (!result) return res.status(404).json({ success: false, message: 'KhĂ´ng tĂ¬m tháº¥y liĂªn há»‡.' });
+        res.json({ success: true, message: 'ÄĂ£ xĂ³a liĂªn há»‡.' });
     } catch (error) {
         console.error(error);
-        res.status(500).json({ success: false, message: 'Lỗi server.' });
+        res.status(500).json({ success: false, message: 'Lá»—i server.' });
     }
 });
 
@@ -933,7 +951,7 @@ router.get('/templates', authMiddleware, async (req, res) => {
         res.json({ success: true, data: templates });
     } catch (error) {
         console.error(error);
-        res.status(500).json({ success: false, message: 'Lỗi server.' });
+        res.status(500).json({ success: false, message: 'Lá»—i server.' });
     }
 });
 
@@ -947,7 +965,7 @@ router.post('/templates', authMiddleware, requireActiveSubscription, async (req,
         res.json({ success: true, data: newTemplate });
     } catch (error) {
         console.error(error);
-        res.status(500).json({ success: false, message: 'Lỗi server.' });
+        res.status(500).json({ success: false, message: 'Lá»—i server.' });
     }
 });
 
@@ -964,22 +982,22 @@ router.put('/templates/:id', authMiddleware, requireActiveSubscription, async (r
             { $set: updateData },
             { new: true }
         );
-        if (!template) return res.status(404).json({ success: false, message: 'Không tìm thấy biểu mẫu.' });
+        if (!template) return res.status(404).json({ success: false, message: 'KhĂ´ng tĂ¬m tháº¥y biá»ƒu máº«u.' });
         res.json({ success: true, data: template });
     } catch (error) {
         console.error(error);
-        res.status(500).json({ success: false, message: 'Lỗi server.' });
+        res.status(500).json({ success: false, message: 'Lá»—i server.' });
     }
 });
 
 router.delete('/templates/:id', authMiddleware, requireActiveSubscription, async (req, res) => {
     try {
         const result = await CrmTemplate.findOneAndDelete({ _id: req.params.id, userId: req.user._id });
-        if (!result) return res.status(404).json({ success: false, message: 'Không tìm thấy biểu mẫu.' });
-        res.json({ success: true, message: 'Đã xóa biểu mẫu.' });
+        if (!result) return res.status(404).json({ success: false, message: 'KhĂ´ng tĂ¬m tháº¥y biá»ƒu máº«u.' });
+        res.json({ success: true, message: 'ÄĂ£ xĂ³a biá»ƒu máº«u.' });
     } catch (error) {
         console.error(error);
-        res.status(500).json({ success: false, message: 'Lỗi server.' });
+        res.status(500).json({ success: false, message: 'Lá»—i server.' });
     }
 });
 
@@ -990,7 +1008,7 @@ router.get('/campaigns', authMiddleware, async (req, res) => {
         res.json({ success: true, data: campaigns });
     } catch (error) {
         console.error(error);
-        res.status(500).json({ success: false, message: 'Lỗi server.' });
+        res.status(500).json({ success: false, message: 'Lá»—i server.' });
     }
 });
 
@@ -1004,7 +1022,7 @@ router.post('/campaigns', authMiddleware, requireActiveSubscription, async (req,
         res.json({ success: true, data: newCampaign });
     } catch (error) {
         console.error(error);
-        res.status(500).json({ success: false, message: 'Lỗi server.' });
+        res.status(500).json({ success: false, message: 'Lá»—i server.' });
     }
 });
 
@@ -1021,11 +1039,11 @@ router.put('/campaigns/:id', authMiddleware, requireActiveSubscription, async (r
             { $set: updateData },
             { new: true }
         );
-        if (!campaign) return res.status(404).json({ success: false, message: 'Không tìm thấy chiến dịch.' });
+        if (!campaign) return res.status(404).json({ success: false, message: 'KhĂ´ng tĂ¬m tháº¥y chiáº¿n dá»‹ch.' });
         res.json({ success: true, data: campaign });
     } catch (error) {
         console.error(error);
-        res.status(500).json({ success: false, message: 'Lỗi server.' });
+        res.status(500).json({ success: false, message: 'Lá»—i server.' });
     }
 });
 
@@ -1034,11 +1052,11 @@ router.post('/campaigns/:id/start', authMiddleware, requireActiveSubscription, a
     try {
         const campaign = await CrmCampaign.findOne({ _id: req.params.id, userId: req.user._id });
         if (!campaign) {
-            return res.status(404).json({ success: false, message: 'Không tìm thấy chiến dịch.' });
+            return res.status(404).json({ success: false, message: 'KhĂ´ng tĂ¬m tháº¥y chiáº¿n dá»‹ch.' });
         }
 
         if (campaign.status === 'running' || campaign.status === 'completed') {
-            return res.status(400).json({ success: false, message: 'Chiến dịch đã/đang chạy.' });
+            return res.status(400).json({ success: false, message: 'Chiáº¿n dá»‹ch Ä‘Ă£/Ä‘ang cháº¡y.' });
         }
 
         // Find active device for enqueuing commands
@@ -1046,7 +1064,7 @@ router.post('/campaigns/:id/start', authMiddleware, requireActiveSubscription, a
         if (!activeDevice) {
             return res.status(400).json({ 
                 success: false, 
-                message: 'Bạn cần ghép đôi thiết bị Windows đang hoạt động trước khi bắt đầu chiến dịch.' 
+                message: 'Báº¡n cáº§n ghĂ©p Ä‘Ă´i thiáº¿t bá»‹ Windows Ä‘ang hoáº¡t Ä‘á»™ng trÆ°á»›c khi báº¯t Ä‘áº§u chiáº¿n dá»‹ch.' 
             });
         }
 
@@ -1058,7 +1076,7 @@ router.post('/campaigns/:id/start', authMiddleware, requireActiveSubscription, a
                 message: 'Khong tim thay mau tin nhan cua chien dich.'
             });
         }
-        const templateMessageText = template ? template.body : 'Tin nhắn chiến dịch';
+        const templateMessageText = template ? template.body : 'Tin nháº¯n chiáº¿n dá»‹ch';
 
         // Fetch recipients details (Zalo phone, name, ID)
         const customers = await CrmCustomer.find({ _id: { $in: campaign.targetCustomerIds }, userId: req.user._id });
@@ -1094,18 +1112,20 @@ router.post('/campaigns/:id/start', authMiddleware, requireActiveSubscription, a
                 channel: campaign.channel,
                 recipients: targetRecipients
             },
-            status: 'queued'
+            status: 'queued',
+            idempotencyKey: `campaign-start:${campaign._id}`,
+            expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000)
         });
         await agentCommand.save();
 
         res.json({
             success: true,
-            message: 'Đã đưa lệnh bắt đầu chiến dịch vào hàng đợi lệnh của thiết bị.',
+            message: 'ÄĂ£ Ä‘Æ°a lá»‡nh báº¯t Ä‘áº§u chiáº¿n dá»‹ch vĂ o hĂ ng Ä‘á»£i lá»‡nh cá»§a thiáº¿t bá»‹.',
             data: { campaign, agentCommand }
         });
     } catch (error) {
         console.error('Campaign start error:', error);
-        res.status(500).json({ success: false, message: 'Lỗi máy chủ.' });
+        res.status(500).json({ success: false, message: 'Lá»—i mĂ¡y chá»§.' });
     }
 });
 
@@ -1113,7 +1133,7 @@ router.post('/campaigns/:id/start', authMiddleware, requireActiveSubscription, a
 router.post('/campaigns/:id/cancel', authMiddleware, requireActiveSubscription, async (req, res) => {
     try {
         const campaign = await CrmCampaign.findOne({ _id: req.params.id, userId: req.user._id });
-        if (!campaign) return res.status(404).json({ success: false, message: 'Không tìm thấy chiến dịch.' });
+        if (!campaign) return res.status(404).json({ success: false, message: 'KhĂ´ng tĂ¬m tháº¥y chiáº¿n dá»‹ch.' });
 
         campaign.status = 'cancelled';
         campaign.finishedAt = new Date();
@@ -1128,14 +1148,16 @@ router.post('/campaigns/:id/cancel', authMiddleware, requireActiveSubscription, 
                 deviceId: activeDevice._id,
                 type: 'CANCEL_CAMPAIGN',
                 payload: { campaignId: campaign._id },
-                status: 'queued'
+                status: 'queued',
+                idempotencyKey: `campaign-cancel:${campaign._id}:${Date.now()}`,
+                expiresAt: new Date(Date.now() + 60 * 60 * 1000)
             });
         }
 
-        res.json({ success: true, message: 'Đã hủy chiến dịch thành công.', data: campaign });
+        res.json({ success: true, message: 'ÄĂ£ há»§y chiáº¿n dá»‹ch thĂ nh cĂ´ng.', data: campaign });
     } catch (error) {
         console.error(error);
-        res.status(500).json({ success: false, message: 'Lỗi server.' });
+        res.status(500).json({ success: false, message: 'Lá»—i server.' });
     }
 });
 
@@ -1146,7 +1168,7 @@ router.get('/execution-logs', authMiddleware, async (req, res) => {
         res.json({ success: true, data: logs });
     } catch (error) {
         console.error(error);
-        res.status(500).json({ success: false, message: 'Lỗi server.' });
+        res.status(500).json({ success: false, message: 'Lá»—i server.' });
     }
 });
 
@@ -1165,19 +1187,19 @@ router.post('/ai/chat', crmAiLimiter, authMiddleware, requireActiveSubscription,
         const promptContent = message || (messages && messages[messages.length - 1]?.content);
 
         if (!promptContent) {
-            return res.status(400).json({ success: false, message: 'Nội dung tin nhắn không được rỗng.' });
+            return res.status(400).json({ success: false, message: 'Ná»™i dung tin nháº¯n khĂ´ng Ä‘Æ°á»£c rá»—ng.' });
         }
 
         // Limit message length
         if (promptContent.length > 5000) {
-            return res.status(400).json({ success: false, message: 'Tin nhắn quá dài (tối đa 5000 ký tự).' });
+            return res.status(400).json({ success: false, message: 'Tin nháº¯n quĂ¡ dĂ i (tá»‘i Ä‘a 5000 kĂ½ tá»±).' });
         }
 
         // 1. Quota check
         if (!hasQuota(sub)) {
             return res.status(403).json({
                 success: false,
-                message: 'Hết hạn mức AI quota. Vui lòng mua thêm gói AI top-up.'
+                message: 'Háº¿t háº¡n má»©c AI quota. Vui lĂ²ng mua thĂªm gĂ³i AI top-up.'
             });
         }
 
@@ -1209,7 +1231,7 @@ router.post('/ai/chat', crmAiLimiter, authMiddleware, requireActiveSubscription,
 
             return res.status(500).json({
                 success: false,
-                message: `Lỗi AI: ${aiError.message}`
+                message: `Lá»—i AI: ${aiError.message}`
             });
         }
 
@@ -1247,7 +1269,7 @@ router.post('/ai/chat', crmAiLimiter, authMiddleware, requireActiveSubscription,
         });
     } catch (error) {
         console.error('CRM AI Chat Error:', error);
-        res.status(500).json({ success: false, message: 'Lỗi máy chủ khi xử lý AI Chat.' });
+        res.status(500).json({ success: false, message: 'Lá»—i mĂ¡y chá»§ khi xá»­ lĂ½ AI Chat.' });
     }
 });
 
@@ -1271,7 +1293,7 @@ router.get('/admin/subscriptions', authMiddleware, adminOnly, async (req, res) =
         res.json({ success: true, data: subs });
     } catch (error) {
         console.error(error);
-        res.status(500).json({ success: false, message: 'Lỗi server.' });
+        res.status(500).json({ success: false, message: 'Lá»—i server.' });
     }
 });
 
@@ -1282,7 +1304,7 @@ router.get('/admin/devices', authMiddleware, adminOnly, async (req, res) => {
         res.json({ success: true, data: devices });
     } catch (error) {
         console.error(error);
-        res.status(500).json({ success: false, message: 'Lỗi server.' });
+        res.status(500).json({ success: false, message: 'Lá»—i server.' });
     }
 });
 
@@ -1290,16 +1312,23 @@ router.get('/admin/devices', authMiddleware, adminOnly, async (req, res) => {
 router.patch('/admin/devices/:id/disable', authMiddleware, adminOnly, async (req, res) => {
     try {
         const device = await CrmDevice.findById(req.params.id);
-        if (!device) return res.status(404).json({ success: false, message: 'Không tìm thấy thiết bị.' });
+        if (!device) return res.status(404).json({ success: false, message: 'KhĂ´ng tĂ¬m tháº¥y thiáº¿t bá»‹.' });
 
         device.status = 'disabled';
         device.replacedAt = new Date();
         await device.save();
 
-        res.json({ success: true, message: 'Đã vô hiệu hóa thiết bị.', data: device });
+        await CrmAuditLog.create({
+            userId: device.userId,
+            deviceId: device._id,
+            action: 'admin_device_disabled',
+            details: { adminUserId: req.user._id }
+        });
+
+        res.json({ success: true, message: 'ÄĂ£ vĂ´ hiá»‡u hĂ³a thiáº¿t bá»‹.', data: device });
     } catch (error) {
         console.error(error);
-        res.status(500).json({ success: false, message: 'Lỗi server.' });
+        res.status(500).json({ success: false, message: 'Lá»—i server.' });
     }
 });
 
@@ -1310,7 +1339,7 @@ router.get('/admin/billing/orders', authMiddleware, adminOnly, async (req, res) 
         res.json({ success: true, data: orders });
     } catch (error) {
         console.error(error);
-        res.status(500).json({ success: false, message: 'Lỗi server.' });
+        res.status(500).json({ success: false, message: 'Lá»—i server.' });
     }
 });
 
@@ -1326,29 +1355,29 @@ router.post('/admin/billing/orders/:id/approve', authMiddleware, adminOnly, asyn
         if (fulfillment.status === 'fulfilled') {
             return res.json({
                 success: true,
-                message: 'Đơn hàng đã được duyệt thanh toán và kích hoạt dịch vụ thành công.'
+                message: 'ÄÆ¡n hĂ ng Ä‘Ă£ Ä‘Æ°á»£c duyá»‡t thanh toĂ¡n vĂ  kĂ­ch hoáº¡t dá»‹ch vá»¥ thĂ nh cĂ´ng.'
             });
         }
 
         if (fulfillment.status === 'already_paid') {
-            return res.status(400).json({ success: false, message: 'Đơn hàng này đã được xử lý.' });
+            return res.status(400).json({ success: false, message: 'ÄÆ¡n hĂ ng nĂ y Ä‘Ă£ Ä‘Æ°á»£c xá»­ lĂ½.' });
         }
 
         if (fulfillment.status === 'already_fulfilling') {
             return res.status(409).json({
                 success: false,
-                message: 'Đơn hàng đang ở trạng thái xử lý cũ và cần kiểm tra thủ công trước khi duyệt lại.'
+                message: 'ÄÆ¡n hĂ ng Ä‘ang á»Ÿ tráº¡ng thĂ¡i xá»­ lĂ½ cÅ© vĂ  cáº§n kiá»ƒm tra thá»§ cĂ´ng trÆ°á»›c khi duyá»‡t láº¡i.'
             });
         }
 
         if (fulfillment.status === 'not_found') {
-            return res.status(404).json({ success: false, message: 'Không tìm thấy đơn hàng.' });
+            return res.status(404).json({ success: false, message: 'KhĂ´ng tĂ¬m tháº¥y Ä‘Æ¡n hĂ ng.' });
         }
 
-        return res.status(400).json({ success: false, message: 'Đơn hàng này không còn ở trạng thái chờ.' });
+        return res.status(400).json({ success: false, message: 'ÄÆ¡n hĂ ng nĂ y khĂ´ng cĂ²n á»Ÿ tráº¡ng thĂ¡i chá».' });
     } catch (error) {
         console.error(error);
-        res.status(500).json({ success: false, message: 'Lỗi server.' });
+        res.status(500).json({ success: false, message: 'Lá»—i server.' });
     }
 });
 
@@ -1363,7 +1392,30 @@ router.get('/admin/ai/usage', authMiddleware, adminOnly, async (req, res) => {
         res.json({ success: true, data: usage });
     } catch (error) {
         console.error(error);
-        res.status(500).json({ success: false, message: 'Lỗi server.' });
+        res.status(500).json({ success: false, message: 'Lá»—i server.' });
+    }
+});
+
+// GET /api/crm/admin/audit-logs
+router.get('/admin/audit-logs', authMiddleware, adminOnly, async (req, res) => {
+    try {
+        const { userId, subscriptionId, deviceId, action } = req.query;
+        const query = {};
+        if (userId) query.userId = userId;
+        if (subscriptionId) query.subscriptionId = subscriptionId;
+        if (deviceId) query.deviceId = deviceId;
+        if (action) query.action = action;
+
+        const logs = await CrmAuditLog.find(query)
+            .populate('userId', 'name email')
+            .populate('deviceId', 'displayName platform status')
+            .sort({ createdAt: -1 })
+            .limit(200);
+
+        res.json({ success: true, data: logs });
+    } catch (error) {
+        console.error(error);
+        res.status(500).json({ success: false, message: 'Lá»—i server.' });
     }
 });
 
@@ -1392,7 +1444,7 @@ router.get('/releases/latest', async (req, res) => {
                     version: release.tag_name ? (release.tag_name.startsWith('v') ? release.tag_name.substring(1) : release.tag_name) : '1.0.0',
                     windowsInstallerUrl: windowsAsset ? windowsAsset.browser_download_url : 'https://github.com/LittleKai/alpha-crm-app/releases/download/v1.0.0/alpha-crm-setup.exe',
                     androidApkUrl: androidAsset ? androidAsset.browser_download_url : 'https://github.com/LittleKai/alpha-crm-app/releases/download/v1.0.0/alpha-crm-app.apk',
-                    releaseNotes: release.body || 'Bản phát hành chính thức Alpha CRM',
+                    releaseNotes: release.body || 'Báº£n phĂ¡t hĂ nh chĂ­nh thá»©c Alpha CRM',
                     sha256: 'mock-sha256-hash-value',
                     publishedAt: release.published_at || new Date().toISOString()
                 };
@@ -1406,7 +1458,7 @@ router.get('/releases/latest', async (req, res) => {
             version: '1.0.0',
             windowsInstallerUrl: 'https://github.com/LittleKai/alpha-crm-app/releases/download/v1.0.0/alpha-crm-setup.exe',
             androidApkUrl: 'https://github.com/LittleKai/alpha-crm-app/releases/download/v1.0.0/alpha-crm-app.apk',
-            releaseNotes: 'Bản phát hành chính thức Alpha CRM Production',
+            releaseNotes: 'Báº£n phĂ¡t hĂ nh chĂ­nh thá»©c Alpha CRM Production',
             sha256: 'mock-sha256-hash-value',
             publishedAt: new Date().toISOString()
         };
@@ -1417,8 +1469,9 @@ router.get('/releases/latest', async (req, res) => {
         });
     } catch (error) {
         console.error('Error fetching latest CRM release:', error);
-        res.status(500).json({ success: false, message: 'Lỗi server khi lấy thông tin bản phát hành mới nhất.' });
+        res.status(500).json({ success: false, message: 'Lá»—i server khi láº¥y thĂ´ng tin báº£n phĂ¡t hĂ nh má»›i nháº¥t.' });
     }
 });
 
 export default router;
+
