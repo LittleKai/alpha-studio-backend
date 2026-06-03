@@ -31,7 +31,13 @@ import SystemSetting from '../models/SystemSetting.js';
 import { crmPairingLimiter, crmDeviceLimiter, crmAiLimiter } from '../middleware/crmRateLimit.js';
 
 import { CRM_PLANS, CRM_AI_PACKS, getCrmProduct } from '../utils/crmCatalog.js';
-import { hasQuota, consumeQuota, refundQuota } from '../utils/crmQuota.js';
+import {
+    consumeQuota,
+    consumeQuotaUnits,
+    hasQuota,
+    refundQuota,
+    refundQuotaUnits
+} from '../utils/crmQuota.js';
 import { fulfillCrmBillingOrder } from '../utils/crmBilling.js';
 import { callConfiguredAiProvider } from '../utils/aiProvider.js';
 import { calculateCrmLeadScore } from '../utils/crmLeadScoring.js';
@@ -69,25 +75,40 @@ const sanitizeUpdate = (body, allowedFields) => {
 };
 
 const getChatbotSettingsKey = (userId) => `crmChatbotSettings:${userId}`;
+const CHATBOT_ALLOWED_AI_MODELS = ['gemini-3-flash-preview', 'gemini-2.5-pro', 'gemini-3.1-pro-preview'];
+const CHATBOT_DEFAULT_AI_MODEL = 'gemini-3-flash-preview';
+const CHATBOT_PRO_AI_MODEL = 'gemini-3.1-pro-preview';
 
 const defaultChatbotSettings = {
     aiEnabled: true,
-    aiModel: 'gcli-default',
+    aiModel: CHATBOT_DEFAULT_AI_MODEL,
     systemPrompt: 'Ban la tro ly CSKH Zalo CRM. Tra loi ngan gon, lich su va de nghi nhan vien tiep quan khi co yeu cau nhay cam.',
     temperature: 0.7,
     knowledgeSnippets: []
 };
 
+function normalizeChatbotAiModel(value) {
+    return CHATBOT_ALLOWED_AI_MODELS.includes(value) ? value : CHATBOT_DEFAULT_AI_MODEL;
+}
+
+function getChatbotModelQuotaUnits(model) {
+    return model === CHATBOT_PRO_AI_MODEL ? 2 : 1;
+}
+
 async function getChatbotSettings(userId) {
     const setting = await SystemSetting.findOne({ key: getChatbotSettingsKey(userId) }).lean();
-    return { ...defaultChatbotSettings, ...(setting?.value || {}) };
+    const settings = { ...defaultChatbotSettings, ...(setting?.value || {}) };
+    return {
+        ...settings,
+        aiModel: normalizeChatbotAiModel(settings.aiModel || settings.model)
+    };
 }
 
 async function saveChatbotSettings(userId, value) {
     const safeValue = {
         ...defaultChatbotSettings,
         aiEnabled: value.aiEnabled !== false,
-        aiModel: value.aiModel || value.model || defaultChatbotSettings.aiModel,
+        aiModel: normalizeChatbotAiModel(value.aiModel || value.model || defaultChatbotSettings.aiModel),
         systemPrompt: String(value.systemPrompt || defaultChatbotSettings.systemPrompt).slice(0, 8000),
         temperature: Number.isFinite(Number(value.temperature)) ? Number(value.temperature) : defaultChatbotSettings.temperature,
         knowledgeSnippets: Array.isArray(value.knowledgeSnippets)
@@ -102,10 +123,11 @@ async function saveChatbotSettings(userId, value) {
     return safeValue;
 }
 
-function getQuotaPayload(subscription, quotaBucket = 'none') {
+function getQuotaPayload(subscription, quotaBucket = 'none', quotaUnits = 0) {
     const includedRemaining = Math.max(0, subscription.includedAiLimit - subscription.includedAiUsed);
     return {
         bucketUsed: quotaBucket,
+        unitsUsed: quotaUnits,
         includedAiLimit: subscription.includedAiLimit,
         includedAiUsed: subscription.includedAiUsed,
         extraAiRemaining: subscription.extraAiRemaining,
@@ -118,23 +140,33 @@ async function runCrmAiWithQuota(req, {
     sessionId,
     requestType,
     messages,
-    systemPrompt
+    systemPrompt,
+    model,
+    temperature,
+    forceGcliDirect = false,
+    quotaUnits = 1
 }) {
     const startTime = Date.now();
     const sub = req.crmSubscription;
-    let quotaBucket = 'none';
+    let quotaConsumption = { bucket: 'none', units: 0, included: 0, extra: 0 };
 
-    if (!hasQuota(sub)) {
+    if (!hasQuota(sub, quotaUnits)) {
         const error = new Error('Het han muc AI quota. Vui long mua them goi AI top-up.');
         error.statusCode = 403;
         throw error;
     }
 
-    quotaBucket = consumeQuota(sub);
+    quotaConsumption = consumeQuotaUnits(sub, quotaUnits);
     await sub.save();
 
     try {
-        const aiResponse = await callConfiguredAiProvider(promptContent, sessionId, { messages, systemPrompt });
+        const aiResponse = await callConfiguredAiProvider(promptContent, sessionId, {
+            messages,
+            systemPrompt,
+            model,
+            temperature,
+            forceGcliDirect
+        });
         const usageDoc = await CrmAiUsage.create({
             userId: req.user._id,
             subscriptionId: sub._id,
@@ -142,7 +174,8 @@ async function runCrmAiWithQuota(req, {
             provider: 'gcli',
             model: aiResponse.model,
             status: 'succeeded',
-            quotaBucket,
+            quotaBucket: quotaConsumption.bucket,
+            quotaUnits: quotaConsumption.units,
             tokens: {
                 promptTokens: aiResponse.usage?.promptTokens || 0,
                 completionTokens: aiResponse.usage?.completionTokens || 0,
@@ -154,10 +187,10 @@ async function runCrmAiWithQuota(req, {
         return {
             aiResponse,
             usageDoc,
-            quota: getQuotaPayload(sub, quotaBucket)
+            quota: getQuotaPayload(sub, quotaConsumption.bucket, quotaConsumption.units)
         };
     } catch (aiError) {
-        refundQuota(sub, quotaBucket);
+        refundQuotaUnits(sub, quotaConsumption);
         await sub.save();
         await CrmAiUsage.create({
             userId: req.user._id,
@@ -165,7 +198,8 @@ async function runCrmAiWithQuota(req, {
             requestType,
             provider: 'gcli',
             status: 'failed',
-            quotaBucket,
+            quotaBucket: quotaConsumption.bucket,
+            quotaUnits: quotaConsumption.units || quotaUnits,
             latencyMs: Date.now() - startTime,
             errorMessage: aiError.message
         });
@@ -2596,7 +2630,17 @@ router.post('/agent/events/message', agentAuthMiddleware, async (req, res) => {
 
 router.get('/chatbot/settings', authMiddleware, async (req, res) => {
     try {
-        const settings = await getChatbotSettings(req.user._id);
+        const storedSettings = await getChatbotSettings(req.user._id);
+        const settings = {
+            ...storedSettings,
+            aiModel: normalizeChatbotAiModel(req.body.aiModel || req.body.model || storedSettings.aiModel),
+            systemPrompt: req.body.systemPrompt
+                ? String(req.body.systemPrompt).slice(0, 8000)
+                : storedSettings.systemPrompt,
+            temperature: Number.isFinite(Number(req.body.temperature))
+                ? Number(req.body.temperature)
+                : storedSettings.temperature
+        };
         res.json({ success: true, data: settings });
     } catch (error) {
         console.error('Chatbot settings get error:', error);
@@ -2738,11 +2782,16 @@ router.post('/chatbot/test', crmAiLimiter, authMiddleware, requireActiveSubscrip
 
         const knowledge = settings.knowledgeSnippets?.length ? `\nKien thuc noi bo:\n${settings.knowledgeSnippets.join('\n---\n')}` : '';
         const promptContent = `${settings.systemPrompt}${knowledge}\n\nTin nhan khach hang: ${message}`;
+        const quotaUnits = getChatbotModelQuotaUnits(settings.aiModel);
         const { aiResponse, usageDoc, quota } = await runCrmAiWithQuota(req, {
             promptContent,
             sessionId: `crm-chatbot-test:${req.user._id}`,
             requestType: 'chatbot_test',
-            systemPrompt: settings.systemPrompt
+            systemPrompt: settings.systemPrompt,
+            model: settings.aiModel,
+            temperature: settings.temperature,
+            forceGcliDirect: true,
+            quotaUnits
         });
         const log = await CrmChatbotLog.create({
             userId: req.user._id,
@@ -2753,7 +2802,17 @@ router.post('/chatbot/test', crmAiLimiter, authMiddleware, requireActiveSubscrip
             status: 'succeeded'
         });
 
-        res.json({ success: true, data: { mode: 'ai', text: aiResponse.text, log, quota } });
+        res.json({
+            success: true,
+            data: {
+                mode: 'ai',
+                text: aiResponse.text,
+                model: aiResponse.model || settings.aiModel,
+                quotaCost: quotaUnits,
+                log,
+                quota
+            }
+        });
     } catch (error) {
         console.error('Chatbot test error:', error);
         res.status(error.statusCode || 500).json({ success: false, message: error.message || 'Loi server khi test chatbot.' });
@@ -3646,7 +3705,7 @@ router.get('/releases/latest', async (req, res) => {
             const response = await fetch('https://cdn.giaiphapsangtao.com/file/alpha-studio/crm-app/version.json');
             if (response.ok) {
                 const release = await response.json();
-                const windowsAsset = release.assets?.find(a => a.name.endsWith('.exe') || a.name.endsWith('.msix'));
+                const windowsAsset = release.assets?.find(a => a.name.endsWith('.exe') || a.name.endsWith('.msix') || a.name.endsWith('.zip'));
                 const androidAsset = release.assets?.find(a => a.name.endsWith('.apk'));
                 b2Data = {
                     version: release.tag_name ? (release.tag_name.startsWith('v') ? release.tag_name.substring(1) : release.tag_name) : '1.0.0',

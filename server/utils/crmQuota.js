@@ -8,15 +8,48 @@
  * @param {Object} subscription - CrmSubscription document/object
  * @returns {Boolean}
  */
-export const hasQuota = (subscription) => {
+export const hasQuota = (subscription, requiredUnits = 1) => {
     if (!subscription || subscription.status !== 'active') {
         return false;
     }
 
     const hasIncludedRemaining = subscription.includedAiUsed < subscription.includedAiLimit;
     const hasExtraRemaining = subscription.extraAiRemaining > 0;
+    const units = Math.max(1, Number(requiredUnits) || 1);
+    const totalRemaining = Math.max(0, subscription.includedAiLimit - subscription.includedAiUsed)
+        + Math.max(0, subscription.extraAiRemaining);
 
-    return hasIncludedRemaining || hasExtraRemaining;
+    return (hasIncludedRemaining || hasExtraRemaining) && totalRemaining >= units;
+};
+
+export const consumeQuotaUnits = (subscription, requiredUnits = 1) => {
+    const units = Math.max(1, Number(requiredUnits) || 1);
+    if (!hasQuota(subscription, units)) {
+        return { bucket: 'none', units: 0, included: 0, extra: 0 };
+    }
+
+    let included = 0;
+    let extra = 0;
+
+    for (let i = 0; i < units; i += 1) {
+        if (subscription.includedAiUsed < subscription.includedAiLimit) {
+            subscription.includedAiUsed += 1;
+            included += 1;
+        } else if (subscription.extraAiRemaining > 0) {
+            subscription.extraAiRemaining -= 1;
+            extra += 1;
+        }
+    }
+
+    const bucket = included > 0 && extra > 0
+        ? 'mixed'
+        : included > 0
+            ? 'included'
+            : extra > 0
+                ? 'extra'
+                : 'none';
+
+    return { bucket, units: included + extra, included, extra };
 };
 
 /**
@@ -28,23 +61,7 @@ export const hasQuota = (subscription) => {
  * @returns {String} 'included' | 'extra' | 'none'
  */
 export const consumeQuota = (subscription) => {
-    if (!subscription || subscription.status !== 'active') {
-        return 'none';
-    }
-
-    // Spend included quota first
-    if (subscription.includedAiUsed < subscription.includedAiLimit) {
-        subscription.includedAiUsed += 1;
-        return 'included';
-    }
-
-    // Spend extra quota second
-    if (subscription.extraAiRemaining > 0) {
-        subscription.extraAiRemaining -= 1;
-        return 'extra';
-    }
-
-    return 'none';
+    return consumeQuotaUnits(subscription, 1).bucket;
 };
 
 /**
@@ -72,4 +89,22 @@ export const refundQuota = (subscription, bucket) => {
     }
 
     return false;
+};
+
+export const refundQuotaUnits = (subscription, consumption) => {
+    if (!subscription || !consumption || consumption.bucket === 'none') {
+        return false;
+    }
+
+    const included = Math.max(0, Number(consumption.included) || 0);
+    const extra = Math.max(0, Number(consumption.extra) || 0);
+
+    if (included > 0) {
+        subscription.includedAiUsed = Math.max(0, subscription.includedAiUsed - included);
+    }
+    if (extra > 0) {
+        subscription.extraAiRemaining += extra;
+    }
+
+    return included > 0 || extra > 0;
 };

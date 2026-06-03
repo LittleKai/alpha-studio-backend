@@ -296,7 +296,13 @@ export async function callGcliDirect(content, options = {}) {
         messages.push({ role: 'user', content: userContent });
     }
 
-    const body = JSON.stringify({ model, messages });
+    const body = JSON.stringify({
+        model,
+        messages,
+        ...(Number.isFinite(Number(options.temperature))
+            ? { temperature: Number(options.temperature) }
+            : {})
+    });
     const { response, token, attempts } = await fetchGcliWithRetry(url, body);
 
     const raw = await response.text();
@@ -344,13 +350,24 @@ export async function getGcliBotModel() {
 }
 
 export async function callConfiguredAiProvider(content, sessionId, options = {}) {
+    if (options.forceGcliDirect) {
+        const systemPrompt = options.systemPrompt || await readAlphaStudioWorkspaceContext();
+        return callGcliDirect(content, {
+            model: options.model || await getGcliBotModel(),
+            systemPrompt,
+            messages: options.messages,
+            temperature: options.temperature
+        });
+    }
+
     const useOpenClaw = await shouldUseOpenClawForChat();
     if (useOpenClaw) return callOpenClaw(content, sessionId);
-    const model = await getGcliBotModel();
+    const model = options.model || await getGcliBotModel();
     const systemPrompt = options.systemPrompt || await readAlphaStudioWorkspaceContext();
     return callGcliDirect(content, {
         model,
         systemPrompt,
-        messages: options.messages
+        messages: options.messages,
+        temperature: options.temperature
     });
 }

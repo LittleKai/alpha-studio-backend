@@ -2,7 +2,7 @@ import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { execSync } from 'child_process';
-import { S3Client, PutObjectCommand, GetObjectCommand } from '@aws-sdk/client-s3';
+import { S3Client, PutObjectCommand, GetObjectCommand, ListObjectsV2Command, DeleteObjectsCommand } from '@aws-sdk/client-s3';
 import dotenv from 'dotenv';
 
 // Resolve directory paths in ES Modules
@@ -170,6 +170,93 @@ function stageZaloBackendForWindows(winReleaseDir) {
         ].join('\r\n'),
         'utf8'
     );
+}
+
+/**
+ * Keeps only the current version and the 2 most recent previous versions,
+ * deleting older APK and ZIP build files on Backblaze B2.
+ */
+async function cleanupOldReleases(s3, currentVersionStr) {
+    console.log('\nCleaning up old releases on B2 (keeping current + 2 previous versions)...');
+    try {
+        const listRes = await s3.send(new ListObjectsV2Command({
+            Bucket: B2_BUCKET_NAME,
+            Prefix: 'crm-app/releases/'
+        }));
+
+        if (!listRes.Contents || listRes.Contents.length === 0) {
+            console.log('No releases found to clean up.');
+            return;
+        }
+
+        // Map files to their parsed version
+        const fileRegex = /^crm-app\/releases\/alpha-crm-(?:windows-)?v([\d.]+)\.(?:apk|zip)$/;
+        const fileVersionMap = []; // array of { key, version }
+
+        for (const item of listRes.Contents) {
+            const match = item.Key.match(fileRegex);
+            if (match) {
+                fileVersionMap.push({
+                    key: item.Key,
+                    version: match[1]
+                });
+            }
+        }
+
+        // Find unique versions
+        const uniqueVersions = Array.from(new Set(fileVersionMap.map(x => x.version)));
+        console.log(`Found ${uniqueVersions.length} unique versions on B2:`, uniqueVersions);
+
+        if (uniqueVersions.length <= 3) {
+            console.log('3 or fewer unique versions found on B2. No cleanup needed.');
+            return;
+        }
+
+        // Sort unique versions in ascending order
+        uniqueVersions.sort((v1, v2) => {
+            const p1 = v1.split('.').map(Number);
+            const p2 = v2.split('.').map(Number);
+            for (let i = 0; i < 3; i++) {
+                const n1 = p1[i] || 0;
+                const n2 = p2[i] || 0;
+                if (n1 !== n2) {
+                    return n1 - n2;
+                }
+            }
+            return 0;
+        });
+
+        // We want to keep the 3 newest versions
+        const keepVersions = uniqueVersions.slice(-3);
+        const deleteVersions = uniqueVersions.slice(0, -3);
+
+        console.log('Versions to KEEP:', keepVersions);
+        console.log('Versions to DELETE:', deleteVersions);
+
+        const deleteKeys = fileVersionMap
+            .filter(x => deleteVersions.includes(x.version))
+            .map(x => ({ Key: x.key }));
+
+        if (deleteKeys.length > 0) {
+            console.log(`Deleting ${deleteKeys.length} old build files from B2...`);
+            for (const item of deleteKeys) {
+                console.log(` - Deleting: ${item.Key}`);
+            }
+
+            await s3.send(new DeleteObjectsCommand({
+                Bucket: B2_BUCKET_NAME,
+                Delete: {
+                    Objects: deleteKeys,
+                    Quiet: true
+                }
+            }));
+            console.log('✅ Old build files successfully deleted from B2.');
+        } else {
+            console.log('No build files matched the delete versions.');
+        }
+    } catch (err) {
+        console.error('⚠️ Warning: Failed to clean up old B2 releases:', err.message);
+    }
 }
 
 async function main() {
@@ -370,6 +457,9 @@ async function main() {
             ContentType: 'application/json'
         }));
         console.log(`✅ version.json updated successfully on B2! URL: ${CDN_BASE_URL}/${versionKey}`);
+
+        // Clean up old releases from B2 bucket, keeping current + 2 previous versions
+        await cleanupOldReleases(s3, versionStr);
 
         console.log('\n=== RELEASE FINISHED SUCCESSFULLY! ===');
         console.log(`Android Download URL: ${apkUrl}`);

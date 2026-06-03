@@ -33,8 +33,12 @@ const crmAiUsageSchema = new mongoose.Schema({
     },
     quotaBucket: {
         type: String,
-        enum: ['included', 'extra', 'none'],
+        enum: ['included', 'extra', 'mixed', 'none'],
         default: 'none'
+    },
+    quotaUnits: {
+        type: Number,
+        default: 1
     },
     tokens: {
         promptTokens: { type: Number, default: 0 },
