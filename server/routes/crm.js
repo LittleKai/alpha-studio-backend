@@ -82,8 +82,12 @@ const CHATBOT_PRO_AI_MODEL = 'gemini-3.1-pro-preview';
 const defaultChatbotSettings = {
     aiEnabled: true,
     aiModel: CHATBOT_DEFAULT_AI_MODEL,
-    systemPrompt: 'Ban la tro ly CSKH Zalo CRM. Tra loi ngan gon, lich su va de nghi nhan vien tiep quan khi co yeu cau nhay cam.',
+    systemPrompt: 'Bạn là một người hỗ trợ tư vấn khách hàng Zalo. Hãy phản hồi tự nhiên, ngắn gọn và đời thường như một người thật, tránh viết quá dài (dưới 40 từ). Đặc biệt: CHỈ gửi lời chào (như Chào bạn, Dạ chào anh/chị) ở câu đầu tiên của cuộc hội thoại, từ các câu tiếp theo tuyệt đối không lặp lại câu chào hỏi nữa mà trả lời thẳng vào vấn đề.',
+    soulPrompt: 'Bạn là nhân viên tư vấn Zalo của doanh nghiệp: chuyên nghiệp, gần gũi, hiểu sản phẩm/dịch vụ, không tiết lộ mình là AI, không nói về hệ thống nội bộ.',
+    responseRules: '- Trả lời bằng tiếng Việt theo ngôn ngữ của khách.\n- Không bịa thông tin ngoài kho kiến thức; nếu thiếu dữ liệu thì đề nghị chuyển nhân viên.\n- Không gửi mật khẩu, token, cookie hoặc dữ liệu nhạy cảm.\n- Khi cần gửi file/ảnh, chỉ nêu đúng tài liệu phù hợp trong kho kiến thức để agent Zalo gửi.',
     temperature: 0.7,
+    personalAudience: 'all',
+    groupAudience: 'none',
     knowledgeSnippets: []
 };
 
@@ -110,7 +114,11 @@ async function saveChatbotSettings(userId, value) {
         aiEnabled: value.aiEnabled !== false,
         aiModel: normalizeChatbotAiModel(value.aiModel || value.model || defaultChatbotSettings.aiModel),
         systemPrompt: String(value.systemPrompt || defaultChatbotSettings.systemPrompt).slice(0, 8000),
+        soulPrompt: String(value.soulPrompt || defaultChatbotSettings.soulPrompt).slice(0, 8000),
+        responseRules: String(value.responseRules || defaultChatbotSettings.responseRules).slice(0, 8000),
         temperature: Number.isFinite(Number(value.temperature)) ? Number(value.temperature) : defaultChatbotSettings.temperature,
+        personalAudience: ['all', 'crmOnly'].includes(value.personalAudience) ? value.personalAudience : defaultChatbotSettings.personalAudience,
+        groupAudience: ['none', 'tagOnly', 'selected'].includes(value.groupAudience) ? value.groupAudience : defaultChatbotSettings.groupAudience,
         knowledgeSnippets: Array.isArray(value.knowledgeSnippets)
             ? value.knowledgeSnippets.map((item) => String(item).slice(0, 4000)).slice(0, 20)
             : []
@@ -2631,14 +2639,15 @@ router.post('/agent/events/message', agentAuthMiddleware, async (req, res) => {
 router.get('/chatbot/settings', authMiddleware, async (req, res) => {
     try {
         const storedSettings = await getChatbotSettings(req.user._id);
+        const body = req.body || {};
         const settings = {
             ...storedSettings,
-            aiModel: normalizeChatbotAiModel(req.body.aiModel || req.body.model || storedSettings.aiModel),
-            systemPrompt: req.body.systemPrompt
-                ? String(req.body.systemPrompt).slice(0, 8000)
+            aiModel: normalizeChatbotAiModel(body.aiModel || body.model || storedSettings.aiModel),
+            systemPrompt: body.systemPrompt
+                ? String(body.systemPrompt).slice(0, 8000)
                 : storedSettings.systemPrompt,
-            temperature: Number.isFinite(Number(req.body.temperature))
-                ? Number(req.body.temperature)
+            temperature: Number.isFinite(Number(body.temperature))
+                ? Number(body.temperature)
                 : storedSettings.temperature
         };
         res.json({ success: true, data: settings });
@@ -2679,6 +2688,7 @@ router.post('/chatbot/rules', authMiddleware, requireActiveSubscription, async (
         const rule = await CrmChatbotRule.create({
             userId: req.user._id,
             name: req.body.name || keywords[0],
+            description: req.body.description ? String(req.body.description).slice(0, 1000) : '',
             keywords,
             matchMode: req.body.matchMode || 'contains',
             response: req.body.response,
@@ -2696,7 +2706,7 @@ router.post('/chatbot/rules', authMiddleware, requireActiveSubscription, async (
 
 router.put('/chatbot/rules/:id', authMiddleware, requireActiveSubscription, async (req, res) => {
     try {
-        const updateData = sanitizeUpdate(req.body, ['name', 'keywords', 'matchMode', 'response', 'isActive', 'priority', 'channelScope', 'handoffKeywords', 'businessHours']);
+        const updateData = sanitizeUpdate(req.body, ['name', 'description', 'keywords', 'matchMode', 'response', 'isActive', 'priority', 'channelScope', 'handoffKeywords', 'businessHours']);
         const rule = await CrmChatbotRule.findOneAndUpdate(
             { _id: req.params.id, userId: req.user._id },
             { $set: updateData },
@@ -2743,7 +2753,15 @@ router.post('/chatbot/test', crmAiLimiter, authMiddleware, requireActiveSubscrip
         const threadType = normalizeThreadType(req.body.threadType);
         if (!message) return res.status(400).json({ success: false, message: 'Can tin nhan de test chatbot.' });
 
-        const settings = await getChatbotSettings(req.user._id);
+        const storedSettings = await getChatbotSettings(req.user._id);
+        const settings = {
+            ...storedSettings,
+            aiModel: normalizeChatbotAiModel(req.body.aiModel || req.body.model || storedSettings.aiModel),
+            systemPrompt: req.body.systemPrompt ? String(req.body.systemPrompt).slice(0, 8000) : storedSettings.systemPrompt,
+            soulPrompt: req.body.soulPrompt ? String(req.body.soulPrompt).slice(0, 8000) : storedSettings.soulPrompt,
+            responseRules: req.body.responseRules ? String(req.body.responseRules).slice(0, 8000) : storedSettings.responseRules,
+            temperature: Number.isFinite(Number(req.body.temperature)) ? Number(req.body.temperature) : storedSettings.temperature
+        };
         if (hasHandoffKeyword(settings, message)) {
             const log = await CrmChatbotLog.create({
                 userId: req.user._id,
@@ -2780,14 +2798,20 @@ router.post('/chatbot/test', crmAiLimiter, authMiddleware, requireActiveSubscrip
             return res.json({ success: true, data: { mode: 'none', text: '', log, quota: getQuotaPayload(req.crmSubscription) } });
         }
 
-        const knowledge = settings.knowledgeSnippets?.length ? `\nKien thuc noi bo:\n${settings.knowledgeSnippets.join('\n---\n')}` : '';
-        const promptContent = `${settings.systemPrompt}${knowledge}\n\nTin nhan khach hang: ${message}`;
+        const aiInstructions = [
+            settings.systemPrompt,
+            settings.soulPrompt ? `Soul / vai tro:\n${settings.soulPrompt}` : '',
+            settings.responseRules ? `Quy tac bat buoc:\n${settings.responseRules}` : '',
+            `Pham vi tu dong: ca nhan=${settings.personalAudience}; nhom=${settings.groupAudience}. Neu can gui file/anh/link, chi quyet dinh dung tai lieu nao; agent Zalo tren may nguoi dung moi thuc hien gui that.`
+        ].filter(Boolean).join('\n\n');
+        const knowledge = settings.knowledgeSnippets?.length ? `\n\nKien thuc noi bo:\n${settings.knowledgeSnippets.join('\n---\n')}` : '';
+        const promptContent = `${aiInstructions}${knowledge}\n\nTin nhan khach hang: ${message}`;
         const quotaUnits = getChatbotModelQuotaUnits(settings.aiModel);
         const { aiResponse, usageDoc, quota } = await runCrmAiWithQuota(req, {
             promptContent,
             sessionId: `crm-chatbot-test:${req.user._id}`,
             requestType: 'chatbot_test',
-            systemPrompt: settings.systemPrompt,
+            systemPrompt: aiInstructions,
             model: settings.aiModel,
             temperature: settings.temperature,
             forceGcliDirect: true,

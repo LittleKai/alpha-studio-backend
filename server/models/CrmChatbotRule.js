@@ -12,6 +12,12 @@ const crmChatbotRuleSchema = new mongoose.Schema({
         required: true,
         trim: true
     },
+    description: {
+        type: String,
+        trim: true,
+        default: '',
+        maxlength: 1000
+    },
     keywords: [{
         type: String,
         trim: true
