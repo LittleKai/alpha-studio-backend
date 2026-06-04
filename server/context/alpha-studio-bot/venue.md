@@ -15,6 +15,32 @@ Alpha Studio (tại địa chỉ https://giaiphapsangtao.com/) là một nền t
 - **Tính năng nổi bật**: Cung cấp hơn 20 bộ công cụ xử lý ảnh mạnh mẽ. Bạn có thể dễ dàng sửa ảnh trực quan, khoanh vùng chỉnh sửa tuỳ biến (Masking), tạo nháp phân cảnh đa nhân vật, thay đổi phông nền, và xử lý ảnh đa bước tinh tế.
 - **Giới hạn sử dụng**: Các tính năng chỉnh sửa mạnh mẽ đều có giới hạn lượt sử dụng hàng ngày nhất định dành riêng cho mỗi tài khoản.
 
+### 3. VocabFlip (Ứng Dụng Học Từ Vựng)
+- **Đường dẫn**: `/studio/vocab`
+- **Tính năng chính**:
+  - Tạo bộ thẻ flashcard cá nhân đa ngôn ngữ.
+  - Ôn tập từ vựng khoa học theo phương pháp Lặp Lại Ngắt Quãng (Spaced Repetition) với lịch ôn tập SM-2.
+  - Từ điển tích hợp tra nghĩa, phát âm hỗ trợ 4 ngôn ngữ: Tiếng Anh, Tiếng Việt, Tiếng Nhật, và Tiếng Trung.
+  - Đồng bộ đám mây tự động với tài khoản Alpha Studio (tự động đăng nhập SSO khi mở bản Web).
+- **Các phiên bản**:
+  - **Bản Web**: Mở chạy trực tiếp trên trình duyệt.
+  - **Bản Windows**: Tải file ZIP chạy trên máy tính Windows để học màn hình lớn.
+  - **Bản Android**: Tải file APK cài đặt lên điện thoại Android để ôn tập mọi lúc mọi nơi.
+- **Hạn mức**: Miễn phí hoàn toàn, không yêu cầu đăng ký gói tháng.
+
+### 4. Alpha CRM (Hệ Thống Zalo Marketing Tự Động)
+- **Đường dẫn**:
+  - Ứng dụng khách: `/studio/crm` (yêu cầu giấy phép đang hoạt động).
+  - Quản lý gói cước & cài đặt: `/studio/crm/subscription`.
+- **Tính năng chính**:
+  - Tự động hoá phễu tiếp thị Zalo, gửi tin nhắn hàng loạt và chăm sóc khách hàng tự động tối ưu chi phí.
+  - Ghép nối thiết bị: Người dùng tải ứng dụng Windows Client và ứng dụng di động Android APK (Pair Connector), sau đó quét mã QR từ điện thoại để liên kết bot Zalo.
+  - Hạn mức AI (AI Quota) hàng tháng hỗ trợ soạn thảo, tối ưu kịch bản và phản hồi tin nhắn tự động.
+- **Gói dịch vụ & gia hạn**:
+  - Giấy phép chính gia hạn hàng tháng (1 tháng) giá 525 credits (hoặc 500.000đ) bao gồm 1000 lượt yêu cầu AI.
+  - Có các gói mua thêm hạn mức AI vĩnh viễn (AI Top-up): Gói +200 lượt AI (100 credits hoặc 100.000đ), gói +1000 lượt AI (500 credits hoặc 500.000đ), và gói +2000 lượt AI (1000 credits hoặc 1.000.000đ).
+  - Hỗ trợ thanh toán nhanh bằng số dư Ví Credits hoặc quét mã VietQR tự động duyệt 24/7.
+
 ## Học viện AI Academy & Kho tài nguyên
 
 ### 1. Hệ thống Khóa Học (Course Catalog)

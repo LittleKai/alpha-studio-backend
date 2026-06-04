@@ -1561,8 +1561,13 @@ router.post('/agent/commands/:id/result', agentAuthMiddleware, async (req, res) 
                         }
                     }
 
-                    // Mark any remaining queued/running logs as cancelled if campaign was cancelled
-                    if (wasCancelled) {
+                    // Mark any remaining queued/running logs as cancelled if campaign was cancelled or command failed
+                    if (!success) {
+                        await CrmExecutionLog.updateMany(
+                            { campaignId: campaign._id, status: { $in: ['queued', 'running'] } },
+                            { $set: { status: 'cancelled', failedAt: now, errorMessage: errorMessage || 'Chiến dịch bị hủy do lỗi lệnh gửi.' } }
+                        );
+                    } else if (wasCancelled) {
                         await CrmExecutionLog.updateMany(
                             { campaignId: campaign._id, status: { $in: ['queued', 'running'] } },
                             { $set: { status: 'cancelled', failedAt: now } }
@@ -1570,14 +1575,25 @@ router.post('/agent/commands/:id/result', agentAuthMiddleware, async (req, res) 
                     }
 
                     // Finalize campaign metrics and status
-                    campaign.metrics = {
-                        totalSent: results.length,
-                        totalTargets: campaign.metrics.totalTargets || results.length,
-                        successCount,
-                        failedCount,
-                        cancelledCount
-                    };
-                    campaign.status = wasCancelled ? 'cancelled' : 'completed';
+                    if (!success) {
+                        const totalTargets = campaign.metrics.totalTargets || recipients.length || 0;
+                        campaign.metrics = {
+                            totalSent: 0,
+                            totalTargets: totalTargets,
+                            successCount: 0,
+                            failedCount: 0,
+                            cancelledCount: totalTargets
+                        };
+                    } else {
+                        campaign.metrics = {
+                            totalSent: results.length,
+                            totalTargets: campaign.metrics.totalTargets || results.length,
+                            successCount,
+                            failedCount,
+                            cancelledCount
+                        };
+                    }
+                    campaign.status = !success ? 'cancelled' : (wasCancelled ? 'cancelled' : 'completed');
                     campaign.finishedAt = new Date();
                     campaign.lastProgressAt = new Date();
                     await campaign.save();
@@ -2179,7 +2195,10 @@ router.get('/campaigns/:id/status', authMiddleware, async (req, res) => {
             CrmAgentCommand.findOne({
                 userId: req.user._id,
                 type: 'START_CAMPAIGN',
-                'payload.campaignId': campaign._id
+                $or: [
+                    { 'payload.campaignId': campaign._id },
+                    { 'payload.campaignId': campaign._id.toString() }
+                ]
             }).sort({ createdAt: -1 }),
             CrmExecutionLog.find({ userId: req.user._id, campaignId: campaign._id })
                 .sort({ updatedAt: -1, createdAt: -1 })
@@ -2209,6 +2228,7 @@ router.get('/campaigns/:id/status', authMiddleware, async (req, res) => {
                 campaign,
                 commandStatus: command?.status || null,
                 commandResult: command?.result || null,
+                commandError: command?.errorMessage || null,
                 statusCounts,
                 latestLogs
             }
@@ -2247,7 +2267,10 @@ router.post('/campaigns/:id/cancel', authMiddleware, requireActiveSubscription, 
         const startCommand = await CrmAgentCommand.findOne({
             userId: req.user._id,
             type: 'START_CAMPAIGN',
-            'payload.campaignId': campaign._id
+            $or: [
+                { 'payload.campaignId': campaign._id },
+                { 'payload.campaignId': campaign._id.toString() }
+            ]
         }).sort({ createdAt: -1 });
         let cancelDevice = null;
         if (startCommand?.deviceId) {

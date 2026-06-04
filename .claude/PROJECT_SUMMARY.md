@@ -1,5 +1,9 @@
 # Project Summary
 
+**CRM Chatbot Knowledge Base Update (2026-06-04):** Updated the chatbot's authoritative context file `venue.md` with specifications for VocabFlip (spaced repetition SM-2 decks, built-in dictionary, direct web/desktop/Android downloads, monthly-free terms) and Alpha CRM (device link, bot connectors, credits checkout, top-up package bounds, monthly limit adjustments).
+
+**CRM Campaign Compliance Warning Fix (2026-06-04):** Modified `/crm/agent/commands/:id/result` to update campaign status to `'cancelled'` when the agent command fails (e.g., blocked by compliance). Updated `/crm/campaigns/:id/status` status polling response to return `commandError` (exposing `command.errorMessage`), allowing the Flutter UI client to display details when campaign execution is blocked by compliance.
+
 **VocabFlip Release Metadata Update (2026-06-04):** Added public `GET /api/vocab/releases/latest` with `vocab_latest_release` DB override support and B2 metadata fallback, plus `scripts/release-vocabflip-to-b2.js` for Android APK, Windows ZIP, Web build publishing, and `vocabflip-app/version.json` updates.
 
 **CRM Shorebird Release Integration (2026-06-04):** Updated `scripts/release-to-b2.js` to use `shorebird release android --artifact apk` for compiling the Android build and registering it with Shorebird. Bypassed local `local.properties` Flutter SDK path conflicts during compilation, enabling a successful Shorebird-integrated build and deployment flow.
@@ -38,8 +42,8 @@ If selected templates already match the latest library version, the endpoint ret
 **Phase 12 Update (2026-05-19):** Backend now hosts the self-extending interior template library. New model `InteriorTemplate` (status: seed/pending/approved/deprecated). New endpoints: `GET /api/interior/templates` (engine catalog load, returns seed+approved deduped by highest version), `POST /api/interior/templates` (user commits a project inline template to pending), and `/api/admin/interior-templates` CRUD (list/getOne/approve/reject/edit/deprecate). `/api/interior/projects/:id/chat` now extracts AI-emitted `tplNew` blocks into `modelJson.inlineTemplates[id]`, replaces with `tpl: id`, and surfaces created ids in `data.meta.newInlineTemplates`. DSL validation lives in `server/utils/templateValidator.js` (AST whitelist mirror of the engine `expression.js`). Seed script `scripts/seed-interior-templates.mjs` upserts the 7 built-in templates from `tools/interior-design-engine/src/templates/` (idempotent).
 
 **Phase 11 Update (2026-05-19):** `server/routes/interior.js` now validates the compact template contract: top-level `palette`, optional `inlineTemplates`, and module/detail items using either legacy `width/height/depth` boxes or `tpl/style` template references. The default project model uses `sliding-2door` with `palette: "wood-oak"`, and `/api/interior` prompts include the built-in template catalog while no longer promoting CSG hints.
-**Last Updated:** 2026-06-04 (VocabFlip release metadata and B2 automation)
-**Updated By:** Codex
+**Last Updated:** 2026-06-04 (VocabFlip & CRM AI chatbot knowledge base updates)
+**Updated By:** Antigravity
 
 
 ---
