@@ -1,5 +1,7 @@
 # Project Summary
 
+**CRM Release Script Fix (2026-06-04):** Fixed `scripts/release-to-b2.js` to run standard `flutter build apk --release` directly, bypassing Shorebird command errors (like missing `--release` options and incorrect CLI subcommands), ensuring a successful build and packaging flow.
+
 **CRM Chatbot Model Update (2026-06-03):** Alpha CRM chatbot settings now whitelist `gemini-3-flash-preview`, `gemini-2.5-pro`, and `gemini-3.1-pro-preview`; chatbot AI tests force direct GCLI calls through the backend key pool, forward the selected model/temperature, charge Flash/2.5 Pro as 1 CRM AI quota unit, and charge `gemini-3.1-pro-preview` as 2 units with refund on upstream failure.
 
 **CRM AI Quota Update (2026-06-03):** Updated the monthly CRM subscription plan (`crm_monthly`) default AI quota limit to 1000 and doubled all top-up packages limits (+200, +1000, +2000) inside backend catalog, default billing configurations, and associated tests.
@@ -34,7 +36,7 @@ If selected templates already match the latest library version, the endpoint ret
 **Phase 12 Update (2026-05-19):** Backend now hosts the self-extending interior template library. New model `InteriorTemplate` (status: seed/pending/approved/deprecated). New endpoints: `GET /api/interior/templates` (engine catalog load, returns seed+approved deduped by highest version), `POST /api/interior/templates` (user commits a project inline template to pending), and `/api/admin/interior-templates` CRUD (list/getOne/approve/reject/edit/deprecate). `/api/interior/projects/:id/chat` now extracts AI-emitted `tplNew` blocks into `modelJson.inlineTemplates[id]`, replaces with `tpl: id`, and surfaces created ids in `data.meta.newInlineTemplates`. DSL validation lives in `server/utils/templateValidator.js` (AST whitelist mirror of the engine `expression.js`). Seed script `scripts/seed-interior-templates.mjs` upserts the 7 built-in templates from `tools/interior-design-engine/src/templates/` (idempotent).
 
 **Phase 11 Update (2026-05-19):** `server/routes/interior.js` now validates the compact template contract: top-level `palette`, optional `inlineTemplates`, and module/detail items using either legacy `width/height/depth` boxes or `tpl/style` template references. The default project model uses `sliding-2door` with `palette: "wood-oak"`, and `/api/interior` prompts include the built-in template catalog while no longer promoting CSG hints.
-**Last Updated:** 2026-06-03 (CRM Chatbot model and quota update)
+**Last Updated:** 2026-06-04 (CRM Release script fix and build execution)
 **Updated By:** Antigravity (Advanced AI Coding Assistant)
 
 
