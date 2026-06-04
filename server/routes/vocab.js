@@ -3,6 +3,7 @@ import mongoose from 'mongoose';
 import { authMiddleware } from '../middleware/auth.js';
 import User from '../models/User.js';
 import Transaction from '../models/Transaction.js';
+import SystemSetting from '../models/SystemSetting.js';
 import {
     VocabDeckRating,
     VocabFeedback,
@@ -117,6 +118,63 @@ function serializeImportLink(link) {
         auto_sync: l.autoSync !== false,
     };
 }
+
+// GET /api/vocab/releases/latest
+router.get('/releases/latest', async (_req, res) => {
+    try {
+        const setting = await SystemSetting.findOne({ key: 'vocab_latest_release' });
+        if (setting && setting.value) {
+            return ok(res, setting.value);
+        }
+
+        let b2Data = null;
+        try {
+            const response = await fetch('https://cdn.giaiphapsangtao.com/file/alpha-studio/vocabflip-app/version.json');
+            if (response.ok) {
+                const release = await response.json();
+                const assets = release.assets || [];
+                const windowsAsset = assets.find((asset) => {
+                    const name = (asset.name || '').toLowerCase();
+                    return name.includes('windows') && name.endsWith('.zip');
+                }) || assets.find((asset) => (asset.name || '').toLowerCase().endsWith('.zip'));
+                const androidAsset = assets.find((asset) => (asset.name || '').toLowerCase().endsWith('.apk'));
+                const version = release.tag_name
+                    ? (release.tag_name.startsWith('v') ? release.tag_name.substring(1) : release.tag_name)
+                    : (release.version || '1.1.5');
+
+                b2Data = {
+                    version,
+                    windowsInstallerUrl: windowsAsset
+                        ? windowsAsset.browser_download_url
+                        : `https://cdn.giaiphapsangtao.com/file/alpha-studio/vocabflip-app/releases/vocabflip-windows-v${version}.zip`,
+                    androidApkUrl: androidAsset
+                        ? androidAsset.browser_download_url
+                        : `https://cdn.giaiphapsangtao.com/file/alpha-studio/vocabflip-app/releases/vocabflip-v${version}.apk`,
+                    releaseNotes: release.body || 'VocabFlip release build',
+                    publishedAt: release.published_at || new Date().toISOString(),
+                    windowsSize: windowsAsset?.size,
+                    androidSize: androidAsset?.size,
+                };
+            }
+        } catch (fetchError) {
+            console.error('Failed to fetch VocabFlip release metadata from B2:', fetchError.message);
+        }
+
+        return ok(res, b2Data || {
+            version: '1.1.5',
+            windowsInstallerUrl: 'https://cdn.giaiphapsangtao.com/file/alpha-studio/vocabflip-app/releases/vocabflip-windows-v1.1.5.zip',
+            androidApkUrl: 'https://cdn.giaiphapsangtao.com/file/alpha-studio/vocabflip-app/releases/vocabflip-v1.1.5.apk',
+            releaseNotes: 'VocabFlip release build',
+            publishedAt: new Date().toISOString(),
+        });
+    } catch (error) {
+        console.error('Error fetching latest VocabFlip release:', error);
+        return res.status(500).json({
+            success: false,
+            message: 'Lỗi server khi lấy thông tin bản phát hành VocabFlip mới nhất'
+        });
+    }
+});
 
 function serializeProfile(profile, fallbackUser = null) {
     if (!profile && !fallbackUser) return null;
