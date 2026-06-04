@@ -1,6 +1,6 @@
 # Project Summary
 
-**CRM Release Script Fix (2026-06-04):** Fixed `scripts/release-to-b2.js` to run standard `flutter build apk --release` directly, bypassing Shorebird command errors (like missing `--release` options and incorrect CLI subcommands), ensuring a successful build and packaging flow.
+**CRM Shorebird Release Integration (2026-06-04):** Updated `scripts/release-to-b2.js` to use `shorebird release android --artifact apk` for compiling the Android build and registering it with Shorebird. Bypassed local `local.properties` Flutter SDK path conflicts during compilation, enabling a successful Shorebird-integrated build and deployment flow.
 
 **CRM Chatbot Model Update (2026-06-03):** Alpha CRM chatbot settings now whitelist `gemini-3-flash-preview`, `gemini-2.5-pro`, and `gemini-3.1-pro-preview`; chatbot AI tests force direct GCLI calls through the backend key pool, forward the selected model/temperature, charge Flash/2.5 Pro as 1 CRM AI quota unit, and charge `gemini-3.1-pro-preview` as 2 units with refund on upstream failure.
 

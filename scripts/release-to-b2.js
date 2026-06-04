@@ -285,7 +285,7 @@ async function main() {
     // 1. Build APK (Android)
     console.log('\n[1/6] Building Flutter APK...');
     try {
-        execSync('flutter build apk --release', { cwd: CRM_DIR, stdio: 'inherit' });
+        execSync('shorebird release android --artifact apk', { cwd: CRM_DIR, stdio: 'inherit' });
         console.log('✅ APK built successfully!');
     } catch (err) {
         console.error('❌ Error building APK:', err.message);
