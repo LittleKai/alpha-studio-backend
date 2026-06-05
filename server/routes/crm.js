@@ -42,6 +42,12 @@ import { fulfillCrmBillingOrder } from '../utils/crmBilling.js';
 import { callConfiguredAiProvider } from '../utils/aiProvider.js';
 import { calculateCrmLeadScore } from '../utils/crmLeadScoring.js';
 import { buildGroupSummaryPrompt, extractSimpleInsights, redactPhoneLikeStrings } from '../utils/crmGroupSummary.js';
+import {
+    buildConversationMessageQuery,
+    normalizeCrmMessageType,
+    normalizeQueryLimit,
+    withManagedConversationVisibility
+} from '../utils/crmLiveChat.js';
 
 const router = express.Router();
 
@@ -244,6 +250,7 @@ async function upsertConversationFromInbound({ userId, deviceId, event, enforceM
     const content = String(event.content || '').trim();
     const providerMessageId = String(event.providerMessageId || '').trim();
     const receivedAt = event.timestamp ? new Date(event.timestamp) : new Date();
+    const messageType = normalizeCrmMessageType(event.messageType);
 
     if (!accountId || !threadId || !content) {
         const error = new Error('accountId, threadId va content la bat buoc.');
@@ -270,6 +277,25 @@ async function upsertConversationFromInbound({ userId, deviceId, event, enforceM
         });
     }
 
+    const existingConversation = await CrmConversation.findOne({ userId, accountId, threadId, threadType });
+    let displayName = existingConversation?.displayName;
+    let avatarUrl = existingConversation?.avatarUrl;
+
+    if (threadType === 'group') {
+        displayName = managedGroup?.name || event.displayName || displayName || threadId;
+        avatarUrl = managedGroup?.avatarUrl || event.avatarUrl || avatarUrl || '';
+    } else {
+        if (event.senderId === threadId) {
+            // Inbound from customer
+            displayName = event.senderName || event.displayName || displayName || threadId;
+            avatarUrl = event.avatarUrl || avatarUrl || '';
+        } else {
+            // Outbound from operator
+            displayName = displayName || event.displayName || threadId;
+            avatarUrl = avatarUrl || '';
+        }
+    }
+
     const conversation = await CrmConversation.findOneAndUpdate(
         { userId, accountId, threadId, threadType },
         {
@@ -280,8 +306,8 @@ async function upsertConversationFromInbound({ userId, deviceId, event, enforceM
                 threadId,
                 threadType,
                 customerId: customer?._id || null,
-                displayName: event.senderName || event.displayName || managedGroup?.name || threadId,
-                avatarUrl: event.avatarUrl || managedGroup?.avatarUrl || '',
+                displayName,
+                avatarUrl,
                 lastMessagePreview: previewText(content),
                 lastMessageAt: receivedAt,
                 lastInboundAt: receivedAt
@@ -308,7 +334,8 @@ async function upsertConversationFromInbound({ userId, deviceId, event, enforceM
             senderId: event.senderId || '',
             senderName: event.senderName || '',
             content,
-            messageType: event.messageType || 'text',
+            messageType,
+            attachments: event.attachments || null,
             providerMessageId,
             status: 'received',
             receivedAt
@@ -335,7 +362,7 @@ async function upsertConversationFromInbound({ userId, deviceId, event, enforceM
                 senderId: event.senderId || '',
                 senderName: event.senderName || '',
                 content,
-                messageType: event.messageType || 'text',
+                messageType,
                 sentAt: receivedAt,
                 capturedAt: new Date()
             });
@@ -2483,8 +2510,8 @@ router.get('/conversations', authMiddleware, async (req, res) => {
     try {
         const { accountId, threadType, search } = req.query;
         const page = Math.max(1, parseInt(req.query.page) || 1);
-        const limit = Math.min(100, Math.max(1, parseInt(req.query.limit) || 30));
-        const query = { userId: req.user._id };
+        const limit = normalizeQueryLimit(req.query.limit, { defaultLimit: 30, maxLimit: 100 });
+        let query = { userId: req.user._id };
 
         if (accountId) query.accountId = accountId;
         if (threadType) query.threadType = normalizeThreadType(threadType);
@@ -2494,6 +2521,15 @@ router.get('/conversations', authMiddleware, async (req, res) => {
                 { threadId: { $regex: search, $options: 'i' } },
                 { lastMessagePreview: { $regex: search, $options: 'i' } }
             ];
+        }
+
+        if (req.query.includeUnmanagedGroups !== 'true' && query.threadType !== 'user') {
+            const managedGroupQuery = { userId: req.user._id, isManaged: true };
+            if (accountId) managedGroupQuery.accountId = accountId;
+            const managedGroups = await CrmZaloGroup.find(managedGroupQuery)
+                .select('accountId groupId')
+                .lean();
+            query = withManagedConversationVisibility(query, managedGroups);
         }
 
         const [total, conversations] = await Promise.all([
@@ -2520,20 +2556,47 @@ router.get('/conversations/:id/messages', authMiddleware, async (req, res) => {
         const conversation = await CrmConversation.findOne({ _id: req.params.id, userId: req.user._id });
         if (!conversation) return res.status(404).json({ success: false, message: 'Khong tim thay hoi thoai.' });
 
-        const limit = Math.min(100, Math.max(1, parseInt(req.query.limit) || 50));
-        const query = { userId: req.user._id, conversationId: conversation._id };
-        if (req.query.before) {
-            query.createdAt = { $lt: new Date(req.query.before) };
-        }
+        const limit = normalizeQueryLimit(req.query.limit, { defaultLimit: 50, maxLimit: 100 });
+        const query = buildConversationMessageQuery({
+            userId: req.user._id,
+            conversationId: conversation._id,
+            before: req.query.before,
+            after: req.query.after
+        });
+        const isAfterQuery = Boolean(req.query.after);
 
         const messages = await CrmMessage.find(query)
-            .sort({ createdAt: -1 })
+            .sort({ createdAt: isAfterQuery ? 1 : -1 })
             .limit(limit);
 
-        res.json({ success: true, data: messages.reverse() });
+        res.json({ success: true, data: isAfterQuery ? messages : messages.reverse() });
     } catch (error) {
         console.error('Conversation messages error:', error);
         res.status(500).json({ success: false, message: 'Loi server khi tai tin nhan.' });
+    }
+});
+
+router.post('/conversations/:id/messages/failed/clear', authMiddleware, async (req, res) => {
+    try {
+        const conversation = await CrmConversation.findOne({ _id: req.params.id, userId: req.user._id });
+        if (!conversation) return res.status(404).json({ success: false, message: 'Khong tim thay hoi thoai.' });
+
+        const result = await CrmMessage.deleteMany({
+            userId: req.user._id,
+            conversationId: conversation._id,
+            status: 'failed'
+        });
+        const latestMessage = await CrmMessage.findOne({ userId: req.user._id, conversationId: conversation._id })
+            .sort({ createdAt: -1 });
+
+        conversation.lastMessagePreview = latestMessage ? previewText(latestMessage.content || `[${latestMessage.messageType}]`) : '';
+        conversation.lastMessageAt = latestMessage ? (latestMessage.sentAt || latestMessage.receivedAt || latestMessage.createdAt) : null;
+        await conversation.save();
+
+        res.json({ success: true, message: 'Da xoa tin nhan gui that bai.', data: { deletedCount: result.deletedCount || 0 } });
+    } catch (error) {
+        console.error('Conversation failed message clear error:', error);
+        res.status(500).json({ success: false, message: 'Loi server khi xoa tin nhan gui that bai.' });
     }
 });
 
@@ -2610,6 +2673,122 @@ router.post('/conversations/:id/send', authMiddleware, requireActiveSubscription
     } catch (error) {
         console.error('Conversation send error:', error);
         res.status(500).json({ success: false, message: 'Loi server khi gui tin nhan.' });
+    }
+});
+
+// Send attachment (image/file/video) from operator
+router.post('/conversations/:id/send-attachment', authMiddleware, requireActiveSubscription, async (req, res) => {
+    try {
+        const content = String(req.body.content || req.body.message || '').trim();
+        const attachments = Array.isArray(req.body.attachments)
+            ? req.body.attachments.map((item) => String(item || '').trim()).filter(Boolean).slice(0, 10)
+            : [];
+        const normalizedType = normalizeCrmMessageType(req.body.messageType || 'file');
+        if (!content && attachments.length === 0) {
+            return res.status(400).json({ success: false, message: 'Noi dung hoac file dinh kem la bat buoc.' });
+        }
+
+        const conversation = await CrmConversation.findOne({ _id: req.params.id, userId: req.user._id });
+        if (!conversation) return res.status(404).json({ success: false, message: 'Khong tim thay hoi thoai.' });
+
+        let activeDevice = conversation.deviceId
+            ? await CrmDevice.findOne({ _id: conversation.deviceId, userId: req.user._id, status: 'active' })
+            : null;
+        if (!activeDevice) activeDevice = await CrmDevice.findOne({ userId: req.user._id, status: 'active' });
+        if (!activeDevice) return res.status(400).json({ success: false, message: 'Khong co thiet bi Windows dang hoat dong de gui file.' });
+
+        const messageType = normalizedType === 'unknown' ? 'file' : normalizedType;
+        const message = await CrmMessage.create({
+            userId: req.user._id,
+            conversationId: conversation._id,
+            deviceId: activeDevice._id,
+            accountId: conversation.accountId,
+            threadId: conversation.threadId,
+            threadType: conversation.threadType,
+            direction: 'outbound',
+            senderId: conversation.accountId,
+            senderName: 'Operator',
+            content: content || `[${messageType}]`,
+            messageType,
+            attachments,
+            status: 'queued',
+            sentAt: null
+        });
+
+        const command = await CrmAgentCommand.create({
+            userId: req.user._id,
+            subscriptionId: req.crmSubscription._id,
+            deviceId: activeDevice._id,
+            type: 'zalo.message.send',
+            payload: {
+                crmMessageId: message._id,
+                accountId: conversation.accountId,
+                recipientId: conversation.threadId,
+                threadType: conversation.threadType,
+                message: content || '',
+                messageType,
+                attachments
+            },
+            status: 'queued',
+            idempotencyKey: `live-send-attach:${message._id}`,
+            expiresAt: new Date(Date.now() + 60 * 60 * 1000)
+        });
+
+        conversation.lastMessagePreview = previewText(content || `[${messageType}]`);
+        conversation.lastMessageAt = new Date();
+        await conversation.save();
+
+        res.json({ success: true, data: { message, command } });
+    } catch (error) {
+        console.error('Conversation send-attachment error:', error);
+        res.status(500).json({ success: false, message: 'Loi server khi gui file dinh kem.' });
+    }
+});
+
+// Recall/undo a sent message
+router.post('/conversations/:id/messages/:messageId/recall', authMiddleware, requireActiveSubscription, async (req, res) => {
+    try {
+        const conversation = await CrmConversation.findOne({ _id: req.params.id, userId: req.user._id });
+        if (!conversation) return res.status(404).json({ success: false, message: 'Khong tim thay hoi thoai.' });
+
+        const message = await CrmMessage.findOne({ _id: req.params.messageId, userId: req.user._id, conversationId: conversation._id });
+        if (!message) return res.status(404).json({ success: false, message: 'Khong tim thay tin nhan.' });
+        if (message.direction !== 'outbound') {
+            return res.status(400).json({ success: false, message: 'Chi co the thu hoi tin nhan gui di.' });
+        }
+
+        let activeDevice = conversation.deviceId
+            ? await CrmDevice.findOne({ _id: conversation.deviceId, userId: req.user._id, status: 'active' })
+            : null;
+        if (!activeDevice) activeDevice = await CrmDevice.findOne({ userId: req.user._id, status: 'active' });
+        if (!activeDevice) return res.status(400).json({ success: false, message: 'Khong co thiet bi Windows dang hoat dong de thu hoi tin.' });
+
+        const command = await CrmAgentCommand.create({
+            userId: req.user._id,
+            subscriptionId: req.crmSubscription._id,
+            deviceId: activeDevice._id,
+            type: 'zalo.message.recall',
+            payload: {
+                crmMessageId: message._id,
+                accountId: conversation.accountId,
+                threadId: conversation.threadId,
+                threadType: conversation.threadType,
+                msgId: message.providerMessageId || '',
+                cliMsgId: message.providerMessageId || ''
+            },
+            status: 'queued',
+            idempotencyKey: `live-recall:${message._id}`,
+            expiresAt: new Date(Date.now() + 60 * 60 * 1000)
+        });
+
+        message.status = 'recalled';
+        message.isDeleted = true;
+        await message.save();
+
+        res.json({ success: true, data: { message, command } });
+    } catch (error) {
+        console.error('Conversation recall error:', error);
+        res.status(500).json({ success: false, message: 'Loi server khi thu hoi tin nhan.' });
     }
 });
 

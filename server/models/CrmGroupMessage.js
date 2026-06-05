@@ -1,4 +1,5 @@
 import mongoose from 'mongoose';
+import { CRM_MESSAGE_TYPES } from '../utils/crmLiveChat.js';
 
 const crmGroupMessageSchema = new mongoose.Schema({
     userId: {
@@ -40,7 +41,7 @@ const crmGroupMessageSchema = new mongoose.Schema({
     },
     messageType: {
         type: String,
-        enum: ['text', 'image', 'file', 'sticker', 'unknown'],
+        enum: CRM_MESSAGE_TYPES,
         default: 'text'
     },
     sentAt: {

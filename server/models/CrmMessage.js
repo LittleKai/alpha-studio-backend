@@ -1,4 +1,5 @@
 import mongoose from 'mongoose';
+import { CRM_MESSAGE_TYPES } from '../utils/crmLiveChat.js';
 
 const crmMessageSchema = new mongoose.Schema({
     userId: {
@@ -57,17 +58,25 @@ const crmMessageSchema = new mongoose.Schema({
     },
     messageType: {
         type: String,
-        enum: ['text', 'image', 'file', 'sticker', 'unknown'],
+        enum: CRM_MESSAGE_TYPES,
         default: 'text'
+    },
+    attachments: {
+        type: mongoose.Schema.Types.Mixed,
+        default: null
     },
     providerMessageId: {
         type: String,
         trim: true,
         default: ''
     },
+    isDeleted: {
+        type: Boolean,
+        default: false
+    },
     status: {
         type: String,
-        enum: ['received', 'queued', 'sent', 'delivered', 'failed'],
+        enum: ['received', 'queued', 'sent', 'delivered', 'failed', 'recalled'],
         default: 'received',
         index: true
     },
@@ -86,6 +95,13 @@ const crmMessageSchema = new mongoose.Schema({
 }, {
     timestamps: true
 });
+
+crmMessageSchema.virtual('zaloMsgId').get(function getZaloMsgId() {
+    return this.providerMessageId;
+});
+
+crmMessageSchema.set('toJSON', { virtuals: true });
+crmMessageSchema.set('toObject', { virtuals: true });
 
 crmMessageSchema.index({ conversationId: 1, createdAt: -1 });
 crmMessageSchema.index(
