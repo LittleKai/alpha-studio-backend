@@ -48,6 +48,24 @@ const crmDeviceSchema = new mongoose.Schema({
         type: mongoose.Schema.Types.ObjectId,
         ref: 'User'
     }],
+    pairedMobileDevices: [{
+        userId: {
+            type: mongoose.Schema.Types.ObjectId,
+            ref: 'User'
+        },
+        platform: {
+            type: String,
+            default: 'Mobile'
+        },
+        displayName: {
+            type: String,
+            default: 'Thiết bị di động'
+        },
+        pairedAt: {
+            type: Date,
+            default: Date.now
+        }
+    }],
     lastSeenAt: {
         type: Date,
         default: Date.now
