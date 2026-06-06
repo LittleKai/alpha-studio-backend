@@ -105,10 +105,11 @@ test('force replacement validates input, rotates credentials, and returns the on
     assert.match(route, /replaceActiveDevice\(\{\s*userId:\s*req\.user\._id,\s*subscriptionId:\s*sub\._id,\s*deviceInput:\s*\{/);
 
     const deviceInputStart = route.indexOf('deviceInput: {');
-    const deviceInputEnd = route.indexOf('\n            }\n        });', deviceInputStart);
     assert.notStrictEqual(deviceInputStart, -1);
-    assert.notStrictEqual(deviceInputEnd, -1);
-    const deviceInput = route.slice(deviceInputStart, deviceInputEnd);
+    const deviceInputTail = route.slice(deviceInputStart);
+    const deviceInputEnd = /\r?\n\s{12}\}\r?\n\s{8}\}\);/.exec(deviceInputTail);
+    assert.ok(deviceInputEnd);
+    const deviceInput = deviceInputTail.slice(0, deviceInputEnd.index);
 
     for (const field of [
         'machineFingerprintHash',
