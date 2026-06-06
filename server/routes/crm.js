@@ -48,6 +48,11 @@ import {
     normalizeQueryLimit,
     withManagedConversationVisibility
 } from '../utils/crmLiveChat.js';
+import {
+    buildActiveDeviceConflict,
+    createAgentSecret,
+    replaceActiveDevice
+} from '../utils/crmDeviceSessions.js';
 
 const router = express.Router();
 
@@ -474,18 +479,38 @@ const agentAuthMiddleware = async (req, res, next) => {
         const deviceId = req.headers['x-agent-device-id'] || req.body.deviceId;
         const agentSecret = req.headers['x-agent-secret'] || req.body.agentSecret;
 
-        if (!deviceId || !agentSecret) {
-            return res.status(401).json({ success: false, message: 'Thiếu deviceId hoặc agentSecret.' });
+        if (!deviceId) {
+            return res.status(403).json({
+                success: false,
+                code: 'DEVICE_REVOKED',
+                message: 'Thiết bị không tồn tại hoặc đã bị vô hiệu hóa.'
+            });
+        }
+
+        if (!agentSecret) {
+            return res.status(403).json({
+                success: false,
+                code: 'INVALID_AGENT_CREDENTIALS',
+                message: 'Sai mật khẩu thiết bị.'
+            });
         }
 
         const device = await CrmDevice.findOne({ _id: deviceId, status: 'active' });
         if (!device) {
-            return res.status(403).json({ success: false, message: 'Thiết bị không tồn tại hoặc đã bị vô hiệu hóa.' });
+            return res.status(403).json({
+                success: false,
+                code: 'DEVICE_REVOKED',
+                message: 'Thiết bị không tồn tại hoặc đã bị vô hiệu hóa.'
+            });
         }
 
         const incomingSecretHash = crypto.createHash('sha256').update(agentSecret).digest('hex');
         if (device.agentSecretHash !== incomingSecretHash) {
-            return res.status(403).json({ success: false, message: 'Sai mật khẩu thiết bị.' });
+            return res.status(403).json({
+                success: false,
+                code: 'INVALID_AGENT_CREDENTIALS',
+                message: 'Sai mật khẩu thiết bị.'
+            });
         }
 
         req.crmDevice = device;
@@ -1085,23 +1110,23 @@ router.post('/devices/register', crmDeviceLimiter, authMiddleware, requireActive
         }
 
         const sub = req.crmSubscription;
+        const activeDevice = await CrmDevice.findOne({ subscriptionId: sub._id, status: 'active' });
 
         // Hash the fingerprint hash to avoid exposing raw fingerprints
         const machineFingerprintHash = crypto.createHash('sha256').update(machineFingerprint).digest('hex');
 
-        // Check if there are other active devices on this subscription
-        const activeDevices = await CrmDevice.find({ subscriptionId: sub._id, status: 'active' });
-
-        if (activeDevices.length >= sub.deviceLimit) {
-            return res.status(400).json({
+        if (activeDevice) {
+            return res.status(409).json({
                 success: false,
-                message: `ÄĂ£ Ä‘áº¡t giá»›i háº¡n thiáº¿t bá»‹ hoáº¡t Ä‘á»™ng (${sub.deviceLimit}). Vui lĂ²ng vĂ´ hiá»‡u hĂ³a thiáº¿t bá»‹ cÅ© trÆ°á»›c.`
+                code: 'DEVICE_ALREADY_ACTIVE',
+                message: `ÄĂ£ Ä‘áº¡t giá»›i háº¡n thiáº¿t bá»‹ hoáº¡t Ä‘á»™ng (${sub.deviceLimit}). Vui lĂ²ng vĂ´ hiá»‡u hĂ³a thiáº¿t bá»‹ cÅ© trÆ°á»›c.`,
+                data: {
+                    device: buildActiveDeviceConflict(activeDevice)
+                }
             });
         }
 
-        // Generate a cryptographically strong secret for the agent
-        const agentSecret = crypto.randomBytes(32).toString('hex');
-        const agentSecretHash = crypto.createHash('sha256').update(agentSecret).digest('hex');
+        const { agentSecret, agentSecretHash } = createAgentSecret();
 
         const newDevice = new CrmDevice({
             userId: req.user._id,
@@ -1135,14 +1160,63 @@ router.post('/devices/register', crmDeviceLimiter, authMiddleware, requireActive
         });
     } catch (error) {
         if (error.code === 11000 || error.message.includes('E11000')) {
-            const deviceLimit = req.crmSubscription ? req.crmSubscription.deviceLimit : 1;
-            return res.status(400).json({
-                success: false,
-                message: `ÄĂ£ Ä‘áº¡t giá»›i háº¡n thiáº¿t bá»‹ hoáº¡t Ä‘á»™ng (${deviceLimit}). Vui lĂ²ng vĂ´ hiá»‡u hĂ³a thiáº¿t bá»‹ cÅ© trÆ°á»›c.`
-            });
+            const activeDevice = req.crmSubscription
+                ? await CrmDevice.findOne({ subscriptionId: req.crmSubscription._id, status: 'active' })
+                : null;
+
+            if (activeDevice) {
+                return res.status(409).json({
+                    success: false,
+                    code: 'DEVICE_ALREADY_ACTIVE',
+                    message: 'An active device is already registered. Use force replacement to continue.',
+                    data: {
+                        device: buildActiveDeviceConflict(activeDevice)
+                    }
+                });
+            }
         }
         console.error('Device registration error:', error);
         res.status(500).json({ success: false, message: 'Lỗi máy chủ khi đăng ký thiết bị.' });
+    }
+});
+
+// POST /api/crm/devices/force-logout-old
+router.post('/devices/force-logout-old', crmDeviceLimiter, authMiddleware, requireActiveSubscription, async (req, res) => {
+    try {
+        const { machineFingerprint, displayName, platform, appVersion, agentVersion } = req.body;
+
+        if (!machineFingerprint || !displayName) {
+            return res.status(400).json({ success: false, message: 'Thiếu vân tay máy (machineFingerprint) hoặc tên hiển thị.' });
+        }
+
+        const sub = req.crmSubscription;
+        const machineFingerprintHash = crypto.createHash('sha256').update(machineFingerprint).digest('hex');
+        const { agentSecret, agentSecretHash } = createAgentSecret();
+        const { device } = await replaceActiveDevice({
+            userId: req.user._id,
+            subscriptionId: sub._id,
+            deviceInput: {
+                machineFingerprintHash,
+                displayName,
+                platform: platform || 'windows',
+                appVersion: appVersion || '',
+                agentVersion: agentVersion || '',
+                agentSecretHash,
+                lastIp: req.ip
+            }
+        });
+
+        res.json({
+            success: true,
+            message: 'Đã thay thế thiết bị hoạt động thành công.',
+            data: {
+                deviceId: device._id,
+                agentSecret
+            }
+        });
+    } catch (error) {
+        console.error('Device force replacement error:', error);
+        res.status(500).json({ success: false, message: 'Lỗi máy chủ khi thay thế thiết bị.' });
     }
 });
 
