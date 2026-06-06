@@ -124,3 +124,15 @@ test('force replacement validates input, rotates credentials, and returns the on
 
     assert.match(route, /data:\s*{\s*deviceId:\s*device\._id,\s*agentSecret\s*}/);
 });
+
+test('pairing revoke removes only the mobile remote relationship', () => {
+    const route = sourceBetween(
+        "router.post('/pairing/revoke'",
+        "// GET /api/crm/pairing/:id"
+    );
+
+    assert.match(route, /\$pull:\s*{[\s\S]*pairedMobileUserIds/);
+    assert.match(route, /pairedMobileDevices:\s*{\s*userId:\s*requestedMobileUserId\s*}/);
+    assert.doesNotMatch(route, /status\s*[:=]\s*['"]disabled['"]/);
+    assert.doesNotMatch(route, /replacedAt/);
+});

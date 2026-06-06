@@ -1374,6 +1374,56 @@ router.post('/pairing/confirm', crmPairingLimiter, authMiddleware, requireActive
     }
 });
 
+// POST /api/crm/pairing/revoke
+router.post('/pairing/revoke', authMiddleware, async (req, res) => {
+    try {
+        const requestedMobileUserId = req.body.mobileUserId || req.user._id;
+        const device = await CrmDevice.findOneAndUpdate(
+            {
+                userId: req.user._id,
+                status: 'active',
+                pairedMobileUserIds: requestedMobileUserId
+            },
+            {
+                $pull: {
+                    pairedMobileUserIds: requestedMobileUserId,
+                    pairedMobileDevices: { userId: requestedMobileUserId }
+                }
+            },
+            { new: true }
+        );
+
+        if (!device) {
+            return res.status(404).json({
+                success: false,
+                code: 'REMOTE_PAIRING_NOT_FOUND',
+                message: 'Khong tim thay ket noi Remote dang hoat dong.'
+            });
+        }
+
+        await CrmAuditLog.create({
+            userId: req.user._id,
+            subscriptionId: device.subscriptionId,
+            action: 'mobile_remote_revoked',
+            details: {
+                deviceId: device._id,
+                mobileUserId: requestedMobileUserId
+            }
+        });
+
+        return res.json({
+            success: true,
+            data: { device }
+        });
+    } catch (error) {
+        console.error('Pairing revoke error:', error);
+        return res.status(500).json({
+            success: false,
+            message: 'Loi may chu khi ngat ket noi Remote.'
+        });
+    }
+});
+
 // GET /api/crm/pairing/:id
 router.get('/pairing/:id', authMiddleware, async (req, res) => {
     try {
