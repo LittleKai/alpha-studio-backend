@@ -136,3 +136,15 @@ test('pairing revoke removes only the mobile remote relationship', () => {
     assert.doesNotMatch(route, /status\s*[:=]\s*['"]disabled['"]/);
     assert.doesNotMatch(route, /replacedAt/);
 });
+
+test('pairing confirmation records mobile display metadata', () => {
+    const route = sourceBetween(
+        "router.post('/pairing/confirm'",
+        "// POST /api/crm/pairing/revoke"
+    );
+
+    assert.match(route, /pairedMobileDevices\.push\(\{/);
+    assert.match(route, /userId:\s*req\.user\._id/);
+    assert.match(route, /\bplatform\b/);
+    assert.match(route, /\bdisplayName\b/);
+});

@@ -1308,7 +1308,12 @@ router.post('/pairing/start', crmPairingLimiter, userOrAgentAuth, requireActiveS
 // POST /api/crm/pairing/confirm
 router.post('/pairing/confirm', crmPairingLimiter, authMiddleware, requireActiveSubscription, async (req, res) => {
     try {
-        const { pairingCode, qrToken } = req.body;
+        const {
+            pairingCode,
+            qrToken,
+            platform = 'Mobile',
+            displayName = 'Thiết bị di động'
+        } = req.body;
 
         if (!pairingCode && !qrToken) {
             return res.status(400).json({ success: false, message: 'Cần mã ghép đôi (pairingCode) hoặc mã QR (qrToken).' });
@@ -1349,8 +1354,19 @@ router.post('/pairing/confirm', crmPairingLimiter, authMiddleware, requireActive
         if (device) {
             if (!device.pairedMobileUserIds.includes(req.user._id)) {
                 device.pairedMobileUserIds.push(req.user._id);
-                await device.save();
             }
+            const hasMobileDetails = device.pairedMobileDevices.some(
+                (mobile) => mobile.userId?.toString() === req.user._id.toString()
+            );
+            if (!hasMobileDetails) {
+                device.pairedMobileDevices.push({
+                    userId: req.user._id,
+                    platform,
+                    displayName,
+                    pairedAt: new Date()
+                });
+            }
+            await device.save();
         }
 
         await CrmAuditLog.create({
