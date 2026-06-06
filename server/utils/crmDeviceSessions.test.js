@@ -119,6 +119,7 @@ test('replaceActiveDevice creates history then reuses the active record to remai
         agentVersion: '1.1.0',
         status: 'active',
         agentSecretHash: 'old-agent-secret-hash',
+        revokedAgentSecretHashes: ['older-agent-secret-hash'],
         lastSeenAt: oldLastSeenAt,
         lastIp: '203.0.113.5',
         registeredAt: oldRegisteredAt,
@@ -160,6 +161,10 @@ test('replaceActiveDevice creates history then reuses the active record to remai
     assert.notStrictEqual(activeDevice.lastSeenAt, oldLastSeenAt);
     assert.strictEqual(activeDevice.machineFingerprintHash, deviceInput.machineFingerprintHash);
     assert.strictEqual(activeDevice.agentSecretHash, deviceInput.agentSecretHash);
+    assert.deepStrictEqual(activeDevice.revokedAgentSecretHashes, [
+        'older-agent-secret-hash',
+        'old-agent-secret-hash'
+    ]);
     assert.strictEqual(activeDevice.displayName, deviceInput.displayName);
     assert.strictEqual(activeDevice.platform, deviceInput.platform);
     assert.strictEqual(activeDevice.appVersion, deviceInput.appVersion);

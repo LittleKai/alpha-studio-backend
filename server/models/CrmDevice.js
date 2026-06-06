@@ -44,6 +44,9 @@ const crmDeviceSchema = new mongoose.Schema({
         type: String,
         required: true
     },
+    revokedAgentSecretHashes: [{
+        type: String
+    }],
     pairedMobileUserIds: [{
         type: mongoose.Schema.Types.ObjectId,
         ref: 'User'

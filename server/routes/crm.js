@@ -505,6 +505,14 @@ const agentAuthMiddleware = async (req, res, next) => {
         }
 
         const incomingSecretHash = crypto.createHash('sha256').update(agentSecret).digest('hex');
+        if (device.revokedAgentSecretHashes?.includes(incomingSecretHash)) {
+            return res.status(403).json({
+                success: false,
+                code: 'DEVICE_REVOKED',
+                message: 'Phiên đăng nhập trên thiết bị này đã được thay thế.'
+            });
+        }
+
         if (device.agentSecretHash !== incomingSecretHash) {
             return res.status(403).json({
                 success: false,

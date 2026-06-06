@@ -72,8 +72,21 @@ test('agent authentication distinguishes revoked devices from bad secrets', () =
     );
     assert.match(
         middleware,
+        /revokedAgentSecretHashes[\s\S]*?includes\(incomingSecretHash\)[\s\S]*?code:\s*['"]DEVICE_REVOKED['"]/
+    );
+    assert.match(
+        middleware,
         /if\s*\(device\.agentSecretHash\s*!==\s*incomingSecretHash\)\s*{\s*return res\.status\(403\)\.json\(\{[\s\S]*?code:\s*['"]INVALID_AGENT_CREDENTIALS['"]/
     );
+});
+
+test('CrmDevice schema stores revoked agent secret hashes for old-PC detection', () => {
+    const modelSource = readFileSync(
+        join(__dirname, '../../models/CrmDevice.js'),
+        'utf8'
+    );
+
+    assert.match(modelSource, /revokedAgentSecretHashes:\s*\[\s*{\s*type:\s*String/);
 });
 
 test('force replacement validates input, rotates credentials, and returns the one-time secret', () => {

@@ -46,6 +46,10 @@ export const replaceActiveDevice = async ({
                 }], { session });
             } else {
                 const now = new Date();
+                const revokedAgentSecretHashes = [
+                    ...(activeDevice.revokedAgentSecretHashes || []),
+                    activeDevice.agentSecretHash
+                ].filter((value, index, values) => value && values.indexOf(value) === index);
 
                 [replacedDevice] = await models.CrmDevice.create([{
                     userId,
@@ -67,6 +71,7 @@ export const replaceActiveDevice = async ({
                     userId,
                     subscriptionId,
                     status: 'active',
+                    revokedAgentSecretHashes,
                     replacedAt: null,
                     registeredAt: now,
                     lastSeenAt: now
