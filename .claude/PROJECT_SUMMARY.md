@@ -8,8 +8,8 @@ MongoDB transaction, preserves the old device as `status: replaced`, and keeps
 the partial unique active-device index valid. Old credentials receive
 `403 DEVICE_REVOKED`; malformed current credentials receive
 `INVALID_AGENT_CREDENTIALS`. `POST /api/crm/pairing/revoke` removes only mobile
-pairing arrays and never disables the Windows PC. Focused device-session tests:
-11/11 passing.
+pairing arrays and never disables the Windows PC. Device-session tests pass
+12/12; billing/catalog/quota verification adds 4/4 passing tests.
 
 **CRM Live Chat Backend Compatibility (2026-06-05):** Updated `/api/crm/conversations` to hide unmanaged group conversations by default while preserving direct chats, added `includeUnmanagedGroups=true` opt-out, added `before`/`after` message window query support, added `POST /api/crm/conversations/:id/messages/failed/clear`, and expanded CRM message schemas for rich Zalo content types, attachments, recalled state, and `zaloMsgId` JSON compatibility.
 
