@@ -13,6 +13,7 @@ import {
     VocabPublicFlashcard,
     VocabPrivateDeck,
     VocabPrivateFlashcard,
+    VocabChineseDictionary,
 } from '../models/Vocab.js';
 
 const router = express.Router();
@@ -122,11 +123,6 @@ function serializeImportLink(link) {
 // GET /api/vocab/releases/latest
 router.get('/releases/latest', async (_req, res) => {
     try {
-        const setting = await SystemSetting.findOne({ key: 'vocab_latest_release' });
-        if (setting && setting.value) {
-            return ok(res, setting.value);
-        }
-
         let b2Data = null;
         try {
             const response = await fetch('https://cdn.giaiphapsangtao.com/file/alpha-studio/vocabflip-app/version.json');
@@ -140,7 +136,7 @@ router.get('/releases/latest', async (_req, res) => {
                 const androidAsset = assets.find((asset) => (asset.name || '').toLowerCase().endsWith('.apk'));
                 const version = release.tag_name
                     ? (release.tag_name.startsWith('v') ? release.tag_name.substring(1) : release.tag_name)
-                    : (release.version || '1.1.5');
+                    : (release.version || '1.1.6');
 
                 b2Data = {
                     version,
@@ -155,15 +151,33 @@ router.get('/releases/latest', async (_req, res) => {
                     windowsSize: windowsAsset?.size,
                     androidSize: androidAsset?.size,
                 };
+
+                // Automatically update/cache in SystemSetting database so the override remains fresh!
+                await SystemSetting.findOneAndUpdate(
+                    { key: 'vocab_latest_release' },
+                    { value: b2Data },
+                    { upsert: true, new: true }
+                );
             }
         } catch (fetchError) {
             console.error('Failed to fetch VocabFlip release metadata from B2:', fetchError.message);
         }
 
-        return ok(res, b2Data || {
-            version: '1.1.5',
-            windowsInstallerUrl: 'https://cdn.giaiphapsangtao.com/file/alpha-studio/vocabflip-app/releases/vocabflip-windows-v1.1.5.zip',
-            androidApkUrl: 'https://cdn.giaiphapsangtao.com/file/alpha-studio/vocabflip-app/releases/vocabflip-v1.1.5.apk',
+        if (b2Data) {
+            return ok(res, b2Data);
+        }
+
+        // If CDN fetch fails, fall back to cached settings in DB
+        const setting = await SystemSetting.findOne({ key: 'vocab_latest_release' });
+        if (setting && setting.value) {
+            return ok(res, setting.value);
+        }
+
+        // Final fallback if both CDN fetch and DB cache are unavailable
+        return ok(res, {
+            version: '1.1.6',
+            windowsInstallerUrl: 'https://cdn.giaiphapsangtao.com/file/alpha-studio/vocabflip-app/releases/vocabflip-windows-v1.1.6.zip',
+            androidApkUrl: 'https://cdn.giaiphapsangtao.com/file/alpha-studio/vocabflip-app/releases/vocabflip-v1.1.6.apk',
             releaseNotes: 'VocabFlip release build',
             publishedAt: new Date().toISOString(),
         });
@@ -1125,6 +1139,72 @@ router.put('/my-decks/:deckId/cards/:cardId', authMiddleware, async (req, res) =
     } catch (error) {
         console.error('Update private card error:', error);
         return res.status(500).json({ success: false, message: 'Cannot update card' });
+    }
+});
+
+// ==========================================
+// CHINESE DICTIONARY
+// ==========================================
+
+router.get('/dictionary/chinese/search', async (req, res) => {
+    try {
+        const query = req.query.query;
+        const limit = parseInt(req.query.limit) || 20;
+
+        if (!query) {
+            return res.status(400).json({ success: false, message: 'Missing query parameter' });
+        }
+
+        // Exact match first
+        let results = await VocabChineseDictionary.find({ word: query }).limit(limit).lean();
+
+        if (results.length === 0) {
+            // Prefix match
+            results = await VocabChineseDictionary.find({ word: { $regex: '^' + query } }).limit(limit).lean();
+        }
+
+        if (results.length === 0) {
+            // Contains match
+            results = await VocabChineseDictionary.find({ word: { $regex: query } }).limit(limit).lean();
+        }
+
+        return ok(res, results);
+    } catch (error) {
+        console.error('Dictionary search error:', error);
+        return res.status(500).json({ success: false, message: 'Dictionary search failed' });
+    }
+});
+
+router.get('/dictionary/chinese/lookup', async (req, res) => {
+    try {
+        const word = req.query.word;
+
+        if (!word) {
+            return res.status(400).json({ success: false, message: 'Missing word parameter' });
+        }
+
+        const result = await VocabChineseDictionary.findOne({ word: word }).lean();
+        return ok(res, result);
+    } catch (error) {
+        console.error('Dictionary lookup error:', error);
+        return res.status(500).json({ success: false, message: 'Dictionary lookup failed' });
+    }
+});
+
+router.get('/dictionary/chinese/pinyin', async (req, res) => {
+    try {
+        const pinyin = req.query.pinyin;
+        const limit = parseInt(req.query.limit) || 20;
+
+        if (!pinyin) {
+            return res.status(400).json({ success: false, message: 'Missing pinyin parameter' });
+        }
+
+        const results = await VocabChineseDictionary.find({ pinyin: { $regex: pinyin, $options: 'i' } }).limit(limit).lean();
+        return ok(res, results);
+    } catch (error) {
+        console.error('Dictionary pinyin error:', error);
+        return res.status(500).json({ success: false, message: 'Dictionary pinyin search failed' });
     }
 });
 

@@ -129,6 +129,14 @@ const vocabPrivateFlashcardSchema = new mongoose.Schema({
     lastReviewDate: { type: Date, default: null },
 }, { timestamps: true });
 
+const vocabChineseDictionarySchema = new mongoose.Schema({
+    wordId: { type: Number, required: true, index: true },
+    word: { type: String, required: true, index: true },
+    pinyin: { type: String, default: null, index: true },
+    hanViet: { type: String, default: null },
+    definition: { type: String, required: true },
+}, { timestamps: true });
+
 export const VocabPublicDeck = mongoose.model('VocabPublicDeck', vocabPublicDeckSchema);
 export const VocabPublicFlashcard = mongoose.model('VocabPublicFlashcard', vocabPublicFlashcardSchema);
 export const VocabDeckRating = mongoose.model('VocabDeckRating', vocabRatingSchema);
@@ -137,4 +145,6 @@ export const VocabProfile = mongoose.model('VocabProfile', vocabProfileSchema);
 export const VocabFeedback = mongoose.model('VocabFeedback', vocabFeedbackSchema);
 export const VocabPrivateDeck = mongoose.model('VocabPrivateDeck', vocabPrivateDeckSchema);
 export const VocabPrivateFlashcard = mongoose.model('VocabPrivateFlashcard', vocabPrivateFlashcardSchema);
+export const VocabChineseDictionary = mongoose.model('VocabChineseDictionary', vocabChineseDictionarySchema, 'vocab_chinese_dictionaries');
+
 
