@@ -46,7 +46,8 @@ import {
     buildConversationMessageQuery,
     normalizeCrmMessageType,
     normalizeQueryLimit,
-    withManagedConversationVisibility
+    withManagedConversationVisibility,
+    isLocalFirstLiveChatEnabled
 } from '../utils/crmLiveChat.js';
 import {
     buildActiveDeviceConflict,
@@ -323,28 +324,32 @@ async function upsertConversationFromInbound({ userId, deviceId, event, enforceM
         { upsert: true, new: true, setDefaultsOnInsert: true }
     );
 
+    const IS_LOCAL_FIRST_LIVE_CHAT = isLocalFirstLiveChatEnabled();
     let message = null;
-    if (providerMessageId) {
-        message = await CrmMessage.findOne({ userId, accountId, providerMessageId });
-    }
-    if (!message) {
-        message = await CrmMessage.create({
-            userId,
-            conversationId: conversation._id,
-            deviceId,
-            accountId,
-            threadId,
-            threadType,
-            direction: 'inbound',
-            senderId: event.senderId || '',
-            senderName: event.senderName || '',
-            content,
-            messageType,
-            attachments: event.attachments || null,
-            providerMessageId,
-            status: 'received',
-            receivedAt
-        });
+
+    if (!IS_LOCAL_FIRST_LIVE_CHAT) {
+        if (providerMessageId) {
+            message = await CrmMessage.findOne({ userId, accountId, providerMessageId });
+        }
+        if (!message) {
+            message = await CrmMessage.create({
+                userId,
+                conversationId: conversation._id,
+                deviceId,
+                accountId,
+                threadId,
+                threadType,
+                direction: 'inbound',
+                senderId: event.senderId || '',
+                senderName: event.senderName || '',
+                content,
+                messageType,
+                attachments: event.attachments || null,
+                providerMessageId,
+                status: 'received',
+                receivedAt
+            });
+        }
     }
 
     if (customer) {
@@ -2701,6 +2706,15 @@ router.get('/conversations', authMiddleware, async (req, res) => {
 
 router.get('/conversations/:id/messages', authMiddleware, async (req, res) => {
     try {
+        if (isLocalFirstLiveChatEnabled()) {
+            return res.json({
+                success: true,
+                code: 'LOCAL_BRIDGE_REQUIRED',
+                message: 'Local-first mode enabled. Full history is not available from cloud.',
+                data: []
+            });
+        }
+
         const conversation = await CrmConversation.findOne({ _id: req.params.id, userId: req.user._id });
         if (!conversation) return res.status(404).json({ success: false, message: 'Khong tim thay hoi thoai.' });
 

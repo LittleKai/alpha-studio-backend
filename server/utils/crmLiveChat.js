@@ -85,3 +85,8 @@ export function withManagedConversationVisibility(baseQuery, managedGroups) {
         : { threadType: 'user' };
     return andFilters(query, visibility);
 }
+
+export function isLocalFirstLiveChatEnabled() {
+    return process.env.LOCAL_FIRST_LIVE_CHAT === 'true' || process.env.CRM_LOCAL_FIRST_LIVE_CHAT === 'true';
+}
+

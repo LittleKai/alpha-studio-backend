@@ -1,15 +1,28 @@
 import express from 'express';
 import crypto from 'crypto';
+import rateLimit from 'express-rate-limit';
 import User from '../models/User.js';
 import { generateToken, authMiddleware } from '../middleware/auth.js';
 import { sendPasswordVerificationCode } from '../utils/email.js';
 
 const router = express.Router();
 
+// Rate limiter for authentication endpoints (register, login, password reset)
+const authLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000, // 15 minutes
+    max: 10,                   // 10 attempts per window per IP
+    standardHeaders: true,
+    legacyHeaders: false,
+    message: {
+        success: false,
+        message: 'Too many authentication attempts. Please try again after 15 minutes.'
+    }
+});
+
 // @route   POST /api/auth/register
 // @desc    Register new user
 // @access  Public
-router.post('/register', async (req, res) => {
+router.post('/register', authLimiter, async (req, res) => {
     try {
         const { email, password, name } = req.body;
         const normalizedEmail = typeof email === 'string' ? email.trim().toLowerCase() : '';
@@ -81,7 +94,7 @@ router.post('/register', async (req, res) => {
 // @route   POST /api/auth/login
 // @desc    Login user
 // @access  Public
-router.post('/login', async (req, res) => {
+router.post('/login', authLimiter, async (req, res) => {
     try {
         const { email, password } = req.body;
         const normalizedEmail = typeof email === 'string' ? email.trim().toLowerCase() : '';

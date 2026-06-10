@@ -2,6 +2,7 @@ import express from 'express';
 import cors from 'cors';
 import cookieParser from 'cookie-parser';
 import dotenv from 'dotenv';
+import helmet from 'helmet';
 import connectDB from './db/connection.js';
 import authRoutes from './routes/auth.js';
 import courseRoutes from './routes/courses.js';
@@ -25,6 +26,7 @@ import sitemapRoutes from './routes/sitemap.js';
 import geminiRoutes from './routes/gemini.js';
 import chatRoutes from './routes/chat.js';
 import vocabRoutes from './routes/vocab.js';
+import aiRoutes from './routes/ai.js';
 import interiorRoutes from './routes/interior.js';
 import crmRoutes from './routes/crm.js';
 import { configureBucketCors } from './utils/b2Storage.js';
@@ -46,6 +48,12 @@ connectDB();
 
 // Configure B2 bucket CORS for browser direct upload
 configureBucketCors();
+
+// Security headers
+app.use(helmet({
+    // Allow cross-origin resource loading for CDN/B2 assets
+    crossOriginResourcePolicy: { policy: 'cross-origin' }
+}));
 
 // CORS configuration
 const allowedOrigins = [
@@ -79,7 +87,7 @@ app.use(cors({
             callback(null, true);
         } else {
             console.warn('CORS blocked origin:', origin);
-            callback(null, true); // Allow anyway but log warning
+            callback(new Error('Not allowed by CORS'));
         }
     },
     credentials: true,
@@ -121,6 +129,7 @@ app.use('/api/featured-students', featuredStudentsRoutes);
 app.use('/api/studio', studioRoutes);
 app.use('/api/gemini', geminiRoutes);
 app.use('/api/chat', chatRoutes);
+app.use('/api/ai', aiRoutes);
 app.use('/api/vocab', vocabRoutes);
 app.use('/api/interior', interiorRoutes);
 app.use('/api/crm', crmRoutes);

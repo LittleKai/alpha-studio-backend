@@ -208,12 +208,62 @@ async function fetchGcliWithRetry(url, body) {
     throw new Error(`gcli rate-limited after ${GCLI_MAX_RETRIES} attempts (status=${lastStatus}, tried keys: ${triedKeys.join(', ')}).`);
 }
 
+// ─── SSRF protection for user-supplied URLs ────────────────────────────────
+import dns from 'node:dns/promises';
+
+const PRIVATE_IP_RANGES = [
+    /^127\./,                          // loopback
+    /^10\./,                           // Class A private
+    /^172\.(1[6-9]|2\d|3[01])\./,      // Class B private
+    /^192\.168\./,                     // Class C private
+    /^169\.254\./,                     // link-local
+    /^0\./,                            // current network
+    /^::1$/,                           // IPv6 loopback
+    /^fc00:/i,                         // IPv6 unique-local
+    /^fe80:/i,                         // IPv6 link-local
+];
+
+function isPrivateIp(ip) {
+    return PRIVATE_IP_RANGES.some((r) => r.test(ip));
+}
+
+async function validateUrlSafety(urlString) {
+    let parsed;
+    try {
+        parsed = new URL(urlString);
+    } catch {
+        throw new Error('Invalid URL.');
+    }
+    if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') {
+        throw new Error(`Blocked URL protocol: ${parsed.protocol}`);
+    }
+    const hostname = parsed.hostname;
+    if (hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '::1') {
+        throw new Error('Blocked localhost URL.');
+    }
+    // DNS resolve to check for private IPs
+    try {
+        const addresses = await dns.resolve4(hostname).catch(() => []);
+        const addresses6 = await dns.resolve6(hostname).catch(() => []);
+        const all = [...addresses, ...addresses6];
+        for (const addr of all) {
+            if (isPrivateIp(addr)) {
+                throw new Error(`Blocked private IP (${addr}) for host ${hostname}.`);
+            }
+        }
+    } catch (err) {
+        if (err.message.startsWith('Blocked')) throw err;
+        // DNS resolution failure — allow the request to proceed (fetch will fail naturally)
+    }
+}
+
 // Gemini qua gcli upstream KHÔNG tự fetch HTTPS URL — bắt buộc base64 data URL.
 // Flash sẽ hallucinate plausibly (prompt_tokens ≈ 11) khi không có ảnh, Pro thì
 // báo thẳng "không có ảnh". Vì vậy mọi URL phải được fetch + encode trước khi gửi.
 async function fetchImageAsDataUrl(url) {
     if (typeof url !== 'string') throw new Error('Invalid image URL.');
     if (url.startsWith('data:')) return url; // Đã là data URL → pass through.
+    await validateUrlSafety(url);
     const res = await fetch(url);
     if (!res.ok) throw new Error(`Image fetch failed: ${res.status}`);
     const contentType = (res.headers.get('content-type') || 'image/jpeg').split(';')[0].trim();

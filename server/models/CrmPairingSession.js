@@ -37,8 +37,7 @@ const crmPairingSessionSchema = new mongoose.Schema({
     },
     expiresAt: {
         type: Date,
-        required: true,
-        index: true // TTL index can be configured on MongoDB if desired
+        required: true
     },
     confirmedAt: {
         type: Date,
@@ -52,6 +51,9 @@ const crmPairingSessionSchema = new mongoose.Schema({
 }, {
     timestamps: true
 });
+
+// TTL index: MongoDB will automatically delete documents once expiresAt has passed
+crmPairingSessionSchema.index({ expiresAt: 1 }, { expireAfterSeconds: 0 });
 
 const CrmPairingSession = mongoose.model('CrmPairingSession', crmPairingSessionSchema);
 

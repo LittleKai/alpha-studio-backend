@@ -58,15 +58,25 @@ const generateTransferContent = () => {
  */
 const verifyCassoWebhook = (req) => {
     if (!CASSO_WEBHOOK_SECRET) {
-        console.warn('CASSO_WEBHOOK_SECRET not set, skipping verification');
-        return true;
+        console.error('CASSO_WEBHOOK_SECRET not set — rejecting webhook for safety');
+        return false;
     }
 
     const secureToken = req.headers['secure-token'] ||
                         req.headers['x-secure-token'] ||
                         req.query.secure_token;
 
-    return secureToken === CASSO_WEBHOOK_SECRET;
+    if (!secureToken) return false;
+
+    // Constant-time comparison to prevent timing attacks
+    try {
+        return crypto.timingSafeEqual(
+            Buffer.from(secureToken, 'utf8'),
+            Buffer.from(CASSO_WEBHOOK_SECRET, 'utf8')
+        );
+    } catch {
+        return false; // length mismatch
+    }
 };
 
 /**

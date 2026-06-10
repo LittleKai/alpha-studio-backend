@@ -283,7 +283,7 @@ async function main() {
     const releaseNotes = process.argv[3] || `Bản phát hành tự động Alpha CRM v${versionStr}`;
 
     // 1. Build APK (Android)
-    console.log('\n[1/6] Building Flutter APK...');
+    console.log('\n[1/5] Building Flutter APK...');
     try {
         execSync('shorebird release android --artifact apk', { cwd: CRM_DIR, stdio: 'inherit' });
         console.log('✅ APK built successfully!');
@@ -293,7 +293,7 @@ async function main() {
     }
 
     // 2. Build Windows EXE
-    console.log('\n[2/6] Building Flutter Windows Executable...');
+    console.log('\n[2/5] Building Flutter Windows Executable...');
     try {
         execSync('flutter build windows --release', { cwd: CRM_DIR, stdio: 'inherit' });
         console.log('✅ Windows build files generated successfully!');
@@ -303,7 +303,7 @@ async function main() {
     }
 
     // 3. Build local Zalo backend for the Windows package
-    console.log('\n[3/6] Building local Zalo backend...');
+    console.log('\n[3/5] Building local Zalo backend...');
     try {
         execSync('npm.cmd run build', { cwd: ZALO_BOT_SERVICE_DIR, stdio: 'inherit' });
         console.log('Local Zalo backend built successfully!');
@@ -312,30 +312,8 @@ async function main() {
         process.exit(1);
     }
 
-    // 4. Build Flutter Web & Publish to React Public Directory
-    console.log('\n[4/6] Building Flutter Web App...');
-    try {
-        execSync('flutter build web --release --base-href "/crm/"', { cwd: CRM_DIR, stdio: 'inherit' });
-        console.log('✅ Web build generated successfully!');
-        
-        console.log('Copying Web build to React public/crm folder...');
-        const webBuildDir = path.join(CRM_DIR, 'build/web');
-        const publicCrmDir = path.resolve(WORKSPACE_ROOT, 'alpha-studio/public/crm');
-        
-        if (fs.existsSync(publicCrmDir)) {
-            fs.rmSync(publicCrmDir, { recursive: true, force: true });
-        }
-        fs.mkdirSync(publicCrmDir, { recursive: true });
-        
-        fs.cpSync(webBuildDir, publicCrmDir, { recursive: true });
-        console.log(`✅ Web build successfully copied to: ${publicCrmDir}`);
-    } catch (err) {
-        console.error('❌ Error building or publishing Web app:', err.message);
-        process.exit(1);
-    }
-
-    // 5. Stage local backend and compress Windows Release directory
-    console.log('\n[5/6] Staging local Zalo backend and zipping Windows release folder...');
+    // 4. Stage local backend and compress Windows Release directory
+    console.log('\n[4/5] Staging local Zalo backend and zipping Windows release folder...');
     const winReleaseDir = path.join(CRM_DIR, 'build/windows/x64/runner/Release');
     const zipDestPath = path.join(CRM_DIR, `build/alpha-crm-windows-v${versionStr}.zip`);
 
@@ -357,8 +335,8 @@ async function main() {
         process.exit(1);
     }
 
-    // 6. Upload to Backblaze B2
-    console.log('\n[6/6] Uploading binaries and updating metadata on Backblaze B2...');
+    // 5. Upload to Backblaze B2
+    console.log('\n[5/5] Uploading binaries and updating metadata on Backblaze B2...');
     const s3 = new S3Client({
         endpoint: B2_ENDPOINT,
         region: B2_REGION,
