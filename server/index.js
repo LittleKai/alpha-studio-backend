@@ -157,6 +157,12 @@ app.use((req, res) => {
 
 // Error handler
 app.use((err, req, res, next) => {
+    if (err?.code === 'INLINE_MEDIA_NOT_ALLOWED') {
+        return res.status(422).json({
+            success: false,
+            message: `Inline file/media is not allowed at ${err.path}. Upload it first and store its URL.`
+        });
+    }
     console.error('Server error:', err);
     res.status(500).json({
         success: false,

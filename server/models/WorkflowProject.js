@@ -1,4 +1,5 @@
 import mongoose from 'mongoose';
+import { noInlineMediaPlugin } from '../validation/inlineMedia.js';
 
 const expenseEntrySchema = new mongoose.Schema({
     id: String,
@@ -57,5 +58,7 @@ const workflowProjectSchema = new mongoose.Schema({
     timestamps: true,
     toJSON: { virtuals: true }
 });
+
+workflowProjectSchema.plugin(noInlineMediaPlugin);
 
 export default mongoose.model('WorkflowProject', workflowProjectSchema);

@@ -1,4 +1,5 @@
 import mongoose from 'mongoose';
+import { noInlineMediaPlugin } from '../validation/inlineMedia.js';
 
 const articleSchema = new mongoose.Schema({
     title: {
@@ -47,6 +48,8 @@ const articleSchema = new mongoose.Schema({
 }, {
     timestamps: true
 });
+
+articleSchema.plugin(noInlineMediaPlugin);
 
 // Auto-generate slug from Vietnamese title before save
 articleSchema.pre('save', function (next) {

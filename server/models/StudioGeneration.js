@@ -1,4 +1,5 @@
 import mongoose from 'mongoose';
+import { noInlineMediaPlugin } from '../validation/inlineMedia.js';
 
 const itemSchema = new mongoose.Schema({
     // Google media UUID — used to mint signed CDN URLs via flow-agent /resign.
@@ -78,6 +79,8 @@ const studioGenerationSchema = new mongoose.Schema({
         default: () => new Date(Date.now() + 48 * 3600 * 1000)
     }
 }, { timestamps: true, toJSON: { virtuals: true } });
+
+studioGenerationSchema.plugin(noInlineMediaPlugin);
 
 studioGenerationSchema.index({ userId: 1, createdAt: -1 });
 studioGenerationSchema.index({ expiresAt: 1 });  // cleanup cron scan

@@ -1,5 +1,6 @@
 import mongoose from 'mongoose';
 import { slugify, generateUniqueSlugForModel } from '../utils/slugify.js';
+import { noInlineMediaPlugin } from '../validation/inlineMedia.js';
 
 const documentSchema = new mongoose.Schema({
     name: { type: String, required: true },
@@ -168,6 +169,8 @@ const courseSchema = new mongoose.Schema({
 }, {
     timestamps: true
 });
+
+courseSchema.plugin(noInlineMediaPlugin);
 
 // Virtual for final price after discount
 courseSchema.virtual('finalPrice').get(function() {

@@ -1,4 +1,5 @@
 import mongoose from 'mongoose';
+import { noInlineMediaPlugin } from '../validation/inlineMedia.js';
 
 const interiorAnalysisSchema = new mongoose.Schema({
     cacheKey: { type: String, required: true, index: true },
@@ -13,6 +14,8 @@ const interiorAnalysisSchema = new mongoose.Schema({
         index: { expires: 0 }
     }
 }, { timestamps: true });
+
+interiorAnalysisSchema.plugin(noInlineMediaPlugin);
 
 export default mongoose.models.InteriorAnalysis
     || mongoose.model('InteriorAnalysis', interiorAnalysisSchema, 'interior_analysis');

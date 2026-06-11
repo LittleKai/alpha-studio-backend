@@ -1,4 +1,5 @@
 import mongoose from 'mongoose';
+import { noInlineMediaPlugin } from '../validation/inlineMedia.js';
 
 const commentSchema = new mongoose.Schema({
     id: String,
@@ -25,5 +26,7 @@ const workflowDocumentSchema = new mongoose.Schema({
     timestamps: true,
     toJSON: { virtuals: true }
 });
+
+workflowDocumentSchema.plugin(noInlineMediaPlugin);
 
 export default mongoose.model('WorkflowDocument', workflowDocumentSchema);

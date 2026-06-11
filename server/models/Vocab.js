@@ -1,4 +1,5 @@
 import mongoose from 'mongoose';
+import { noInlineMediaPlugin } from '../validation/inlineMedia.js';
 
 const vocabPublicDeckSchema = new mongoose.Schema({
     deckId: { type: String, required: true, unique: true, index: true },
@@ -137,6 +138,14 @@ const vocabChineseDictionarySchema = new mongoose.Schema({
     definition: { type: String, required: true },
 }, { timestamps: true });
 
+[
+    vocabPublicDeckSchema,
+    vocabPublicFlashcardSchema,
+    vocabProfileSchema,
+    vocabPrivateDeckSchema,
+    vocabPrivateFlashcardSchema
+].forEach((schema) => schema.plugin(noInlineMediaPlugin));
+
 export const VocabPublicDeck = mongoose.model('VocabPublicDeck', vocabPublicDeckSchema);
 export const VocabPublicFlashcard = mongoose.model('VocabPublicFlashcard', vocabPublicFlashcardSchema);
 export const VocabDeckRating = mongoose.model('VocabDeckRating', vocabRatingSchema);
@@ -146,5 +155,4 @@ export const VocabFeedback = mongoose.model('VocabFeedback', vocabFeedbackSchema
 export const VocabPrivateDeck = mongoose.model('VocabPrivateDeck', vocabPrivateDeckSchema);
 export const VocabPrivateFlashcard = mongoose.model('VocabPrivateFlashcard', vocabPrivateFlashcardSchema);
 export const VocabChineseDictionary = mongoose.model('VocabChineseDictionary', vocabChineseDictionarySchema, 'vocab_chinese_dictionaries');
-
 

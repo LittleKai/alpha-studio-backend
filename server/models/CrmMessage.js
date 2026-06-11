@@ -1,5 +1,6 @@
 import mongoose from 'mongoose';
 import { CRM_MESSAGE_TYPES } from '../utils/crmLiveChat.js';
+import { noInlineMediaPlugin } from '../validation/inlineMedia.js';
 
 const crmMessageSchema = new mongoose.Schema({
     userId: {
@@ -95,6 +96,8 @@ const crmMessageSchema = new mongoose.Schema({
 }, {
     timestamps: true
 });
+
+crmMessageSchema.plugin(noInlineMediaPlugin);
 
 crmMessageSchema.virtual('zaloMsgId').get(function getZaloMsgId() {
     return this.providerMessageId;

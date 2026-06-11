@@ -1,4 +1,5 @@
 import mongoose from 'mongoose';
+import { noInlineMediaPlugin } from '../validation/inlineMedia.js';
 
 const interiorVersionSchema = new mongoose.Schema({
     index: {
@@ -86,6 +87,8 @@ const interiorProjectSchema = new mongoose.Schema({
 }, {
     timestamps: true
 });
+
+interiorProjectSchema.plugin(noInlineMediaPlugin);
 
 interiorProjectSchema.index({ userId: 1, isDeleted: 1, updatedAt: -1 });
 
