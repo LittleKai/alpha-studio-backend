@@ -3,7 +3,11 @@ import cors from 'cors';
 import cookieParser from 'cookie-parser';
 import dotenv from 'dotenv';
 import helmet from 'helmet';
-import connectDB from './db/connection.js';
+import connectDB, {
+    disconnectDB,
+    isDatabaseReady
+} from './db/connection.js';
+import { shutdown } from './db/lifecycle.js';
 import authRoutes from './routes/auth.js';
 import courseRoutes from './routes/courses.js';
 import partnerRoutes from './routes/partners.js';
@@ -42,12 +46,6 @@ dotenv.config();
 
 const app = express();
 const PORT = process.env.PORT || 3001;
-
-// Connect to MongoDB
-connectDB();
-
-// Configure B2 bucket CORS for browser direct upload
-configureBucketCors();
 
 // Security headers
 app.use(helmet({
@@ -144,6 +142,13 @@ app.get('/api/health', (req, res) => {
         success: true,
         message: 'Alpha Studio API is running',
         timestamp: new Date().toISOString()
+    });
+});
+app.get('/api/ready', (req, res) => {
+    const ready = isDatabaseReady();
+    res.status(ready ? 200 : 503).json({
+        success: ready,
+        message: ready ? 'Alpha Studio API is ready' : 'Database is not ready'
     });
 });
 
@@ -269,14 +274,47 @@ cron.schedule('0 * * * *', async () => {
     await runSubscriptionMaintenance();
 });
 
-// Start server
-const server = app.listen(PORT, () => {
-    console.log(`\n🚀 Alpha Studio API Server`);
-    console.log(`   Port: ${PORT}`);
-    console.log(`   Environment: ${process.env.NODE_ENV || 'development'}`);
-    console.log(`   API: http://localhost:${PORT}/api\n`);
-});
+let shuttingDown = false;
 
-// Node http.Server default timeout is 120s up to Node v12 (and some OS/network boundaries still enforce it).
-// Video generation can take 1-3 minutes; increase the timeout to 15 minutes to avoid 502/socket hang up.
-server.setTimeout(15 * 60 * 1000);
+function registerShutdownHandlers(server) {
+    const handleSignal = async (signal) => {
+        if (shuttingDown) return;
+        shuttingDown = true;
+        console.log(`${signal} received, shutting down`);
+        try {
+            await shutdown({ server, disconnect: disconnectDB });
+            process.exit(0);
+        } catch (error) {
+            console.error('Graceful shutdown failed:', error);
+            process.exit(1);
+        }
+    };
+
+    process.once('SIGINT', () => handleSignal('SIGINT'));
+    process.once('SIGTERM', () => handleSignal('SIGTERM'));
+}
+
+export async function startServer() {
+    await connectDB();
+    await configureBucketCors();
+
+    const server = app.listen(PORT, () => {
+        console.log('\nAlpha Studio API Server');
+        console.log(`   Port: ${PORT}`);
+        console.log(`   Environment: ${process.env.NODE_ENV || 'development'}`);
+        console.log(`   API: http://localhost:${PORT}/api\n`);
+    });
+
+    server.setTimeout(15 * 60 * 1000);
+    registerShutdownHandlers(server);
+    return server;
+}
+
+if (process.env.NODE_ENV !== 'test') {
+    startServer().catch((error) => {
+        console.error('Server startup failed:', error);
+        process.exitCode = 1;
+    });
+}
+
+export { app };
