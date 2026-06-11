@@ -1,4 +1,5 @@
 import mongoose from 'mongoose';
+import { RETENTION_MS } from '../retention/policy.js';
 
 const webhookLogSchema = new mongoose.Schema({
     // Source of webhook (casso, momo, vnpay, etc.)
@@ -74,7 +75,10 @@ const webhookLogSchema = new mongoose.Schema({
 });
 
 // Indexes for efficient querying
-webhookLogSchema.index({ createdAt: -1 });
+webhookLogSchema.index(
+    { createdAt: 1 },
+    { expireAfterSeconds: RETENTION_MS.webhook / 1000 }
+);
 webhookLogSchema.index({ 'parsedData.transactionCode': 1 });
 webhookLogSchema.index({ source: 1, status: 1 });
 

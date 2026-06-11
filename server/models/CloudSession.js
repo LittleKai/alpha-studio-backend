@@ -36,11 +36,16 @@ const cloudSessionSchema = new mongoose.Schema({
         type: String,
         enum: ['user_disconnect', 'admin_force', 'machine_offline', 'error', null],
         default: null
+    },
+    purgeAt: {
+        type: Date,
+        default: null
     }
 }, { timestamps: true });
 
 cloudSessionSchema.index({ userId: 1, status: 1 });
 cloudSessionSchema.index({ hostMachineId: 1, status: 1 });
 cloudSessionSchema.index({ status: 1, startedAt: 1 });
+cloudSessionSchema.index({ purgeAt: 1 }, { expireAfterSeconds: 0 });
 
 export default mongoose.model('CloudSession', cloudSessionSchema);
