@@ -1,5 +1,5 @@
 import {
-    S3Client, DeleteObjectCommand, PutObjectCommand, GetObjectCommand,
+    S3Client, DeleteObjectCommand, PutObjectCommand, GetObjectCommand, HeadObjectCommand,
     CreateMultipartUploadCommand, UploadPartCommand, CompleteMultipartUploadCommand,
     ListObjectsV2Command,
 } from '@aws-sdk/client-s3';
@@ -190,6 +190,29 @@ export async function deleteFile(key) {
         Bucket: process.env.B2_BUCKET_NAME,
         Key: key,
     }));
+}
+
+export async function headFile(key) {
+    try {
+        const response = await getS3().send(new HeadObjectCommand({
+            Bucket: process.env.B2_BUCKET_NAME,
+            Key: key,
+        }));
+        return {
+            exists: true,
+            size: response.ContentLength ?? null,
+            contentType: response.ContentType ?? null
+        };
+    } catch (error) {
+        if (error?.$metadata?.httpStatusCode === 404 || error?.name === 'NotFound') {
+            return {
+                exists: false,
+                size: null,
+                contentType: null
+            };
+        }
+        throw error;
+    }
 }
 
 /**
