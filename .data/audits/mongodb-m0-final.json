@@ -1,0 +1,1055 @@
+{
+  "generatedAt": "2026-06-12T03:21:50.520Z",
+  "indexMode": "dry-run",
+  "indexChanges": [],
+  "collections": [
+    {
+      "name": "api_usage",
+      "documentCount": 0,
+      "logicalSize": 0,
+      "storageSize": 4096,
+      "averageObjectSize": null,
+      "totalIndexSize": 20480,
+      "statsUnsupported": null,
+      "indexCount": 5,
+      "redundantIndexes": [
+        {
+          "name": "userId_1",
+          "reason": "Covered by leading fields of userId_1_billingPeriod_1"
+        }
+      ],
+      "classification": "remove-candidate",
+      "reason": "Collection is unknown to current models and empty.",
+      "recommendation": "Confirm no external writer, then archive metadata and remove manually."
+    },
+    {
+      "name": "articles",
+      "documentCount": 10,
+      "logicalSize": 109538,
+      "storageSize": 110592,
+      "averageObjectSize": 10953,
+      "totalIndexSize": 282624,
+      "statsUnsupported": null,
+      "indexCount": 4,
+      "redundantIndexes": [],
+      "classification": "keep",
+      "reason": "Collection is owned by an active application model.",
+      "recommendation": "Keep; remove only redundant indexes after query review."
+    },
+    {
+      "name": "chatmessages",
+      "documentCount": 8,
+      "logicalSize": 6383,
+      "storageSize": 36864,
+      "averageObjectSize": 797,
+      "totalIndexSize": 110592,
+      "statsUnsupported": null,
+      "indexCount": 3,
+      "redundantIndexes": [],
+      "classification": "keep-with-retention",
+      "reason": "Operational, log, session, or message history with bounded retention.",
+      "recommendation": "Keep TTL/index policy and monitor monthly growth."
+    },
+    {
+      "name": "cloudsessions",
+      "documentCount": 14,
+      "logicalSize": 4606,
+      "storageSize": 36864,
+      "averageObjectSize": 329,
+      "totalIndexSize": 147456,
+      "statsUnsupported": null,
+      "indexCount": 4,
+      "redundantIndexes": [],
+      "classification": "keep-with-retention",
+      "reason": "Operational, log, session, or message history with bounded retention.",
+      "recommendation": "Keep TTL/index policy and monitor monthly growth."
+    },
+    {
+      "name": "comments",
+      "documentCount": 3,
+      "logicalSize": 705,
+      "storageSize": 36864,
+      "averageObjectSize": 235,
+      "totalIndexSize": 184320,
+      "statsUnsupported": null,
+      "indexCount": 5,
+      "redundantIndexes": [],
+      "classification": "keep",
+      "reason": "Collection is owned by an active application model.",
+      "recommendation": "Keep; remove only redundant indexes after query review."
+    },
+    {
+      "name": "courses",
+      "documentCount": 2,
+      "logicalSize": 3160,
+      "storageSize": 36864,
+      "averageObjectSize": 1580,
+      "totalIndexSize": 368640,
+      "statsUnsupported": null,
+      "indexCount": 10,
+      "redundantIndexes": [],
+      "classification": "keep",
+      "reason": "Collection is owned by an active application model.",
+      "recommendation": "Keep; remove only redundant indexes after query review."
+    },
+    {
+      "name": "crmagentcommands",
+      "documentCount": 61,
+      "logicalSize": 55925,
+      "storageSize": 61440,
+      "averageObjectSize": 916,
+      "totalIndexSize": 331776,
+      "statsUnsupported": null,
+      "indexCount": 9,
+      "redundantIndexes": [
+        {
+          "name": "deviceId_1",
+          "reason": "Covered by leading fields of deviceId_1_status_1_createdAt_1"
+        }
+      ],
+      "classification": "keep-with-retention",
+      "reason": "Operational, log, session, or message history with bounded retention.",
+      "recommendation": "Keep TTL/index policy and monitor monthly growth."
+    },
+    {
+      "name": "crmaiusages",
+      "documentCount": 1,
+      "logicalSize": 352,
+      "storageSize": 36864,
+      "averageObjectSize": 352,
+      "totalIndexSize": 147456,
+      "statsUnsupported": null,
+      "indexCount": 4,
+      "redundantIndexes": [],
+      "classification": "keep",
+      "reason": "Collection is owned by an active application model.",
+      "recommendation": "Keep; remove only redundant indexes after query review."
+    },
+    {
+      "name": "crmauditlogs",
+      "documentCount": 16,
+      "logicalSize": 3748,
+      "storageSize": 36864,
+      "averageObjectSize": 234,
+      "totalIndexSize": 147456,
+      "statsUnsupported": null,
+      "indexCount": 4,
+      "redundantIndexes": [],
+      "classification": "keep-with-retention",
+      "reason": "Operational, log, session, or message history with bounded retention.",
+      "recommendation": "Keep TTL/index policy and monitor monthly growth."
+    },
+    {
+      "name": "crmbillingorders",
+      "documentCount": 1,
+      "logicalSize": 269,
+      "storageSize": 36864,
+      "averageObjectSize": 269,
+      "totalIndexSize": 147456,
+      "statsUnsupported": null,
+      "indexCount": 4,
+      "redundantIndexes": [],
+      "classification": "keep",
+      "reason": "Collection is owned by an active application model.",
+      "recommendation": "Keep; remove only redundant indexes after query review."
+    },
+    {
+      "name": "crmcampaigns",
+      "documentCount": 10,
+      "logicalSize": 7211,
+      "storageSize": 36864,
+      "averageObjectSize": 721,
+      "totalIndexSize": 147456,
+      "statsUnsupported": null,
+      "indexCount": 4,
+      "redundantIndexes": [
+        {
+          "name": "userId_1",
+          "reason": "Covered by leading fields of userId_1_status_1"
+        }
+      ],
+      "classification": "keep",
+      "reason": "Collection is owned by an active application model.",
+      "recommendation": "Keep; remove only redundant indexes after query review."
+    },
+    {
+      "name": "crmchatbotlogs",
+      "documentCount": 1,
+      "logicalSize": 602,
+      "storageSize": 36864,
+      "averageObjectSize": 602,
+      "totalIndexSize": 221184,
+      "statsUnsupported": null,
+      "indexCount": 6,
+      "redundantIndexes": [
+        {
+          "name": "userId_1",
+          "reason": "Covered by leading fields of userId_1_createdAt_-1"
+        }
+      ],
+      "classification": "keep-with-retention",
+      "reason": "Operational, log, session, or message history with bounded retention.",
+      "recommendation": "Keep TTL/index policy and monitor monthly growth."
+    },
+    {
+      "name": "crmchatbotrules",
+      "documentCount": 1,
+      "logicalSize": 365,
+      "storageSize": 36864,
+      "averageObjectSize": 365,
+      "totalIndexSize": 184320,
+      "statsUnsupported": null,
+      "indexCount": 5,
+      "redundantIndexes": [
+        {
+          "name": "userId_1",
+          "reason": "Covered by leading fields of userId_1_isActive_1_priority_1"
+        }
+      ],
+      "classification": "keep",
+      "reason": "Collection is owned by an active application model.",
+      "recommendation": "Keep; remove only redundant indexes after query review."
+    },
+    {
+      "name": "crmcontacts",
+      "documentCount": 0,
+      "logicalSize": 0,
+      "storageSize": 4096,
+      "averageObjectSize": null,
+      "totalIndexSize": 16384,
+      "statsUnsupported": null,
+      "indexCount": 4,
+      "redundantIndexes": [
+        {
+          "name": "userId_1",
+          "reason": "Covered by leading fields of userId_1_customerId_1"
+        }
+      ],
+      "classification": "keep",
+      "reason": "Collection is owned by an active application model.",
+      "recommendation": "Keep; remove only redundant indexes after query review."
+    },
+    {
+      "name": "crmconversations",
+      "documentCount": 18,
+      "logicalSize": 10504,
+      "storageSize": 45056,
+      "averageObjectSize": 583,
+      "totalIndexSize": 331776,
+      "statsUnsupported": null,
+      "indexCount": 9,
+      "redundantIndexes": [
+        {
+          "name": "userId_1",
+          "reason": "Covered by leading fields of userId_1_lastMessageAt_-1"
+        }
+      ],
+      "classification": "keep",
+      "reason": "Collection is owned by an active application model.",
+      "recommendation": "Keep; remove only redundant indexes after query review."
+    },
+    {
+      "name": "crmcustomers",
+      "documentCount": 1,
+      "logicalSize": 469,
+      "storageSize": 36864,
+      "averageObjectSize": 469,
+      "totalIndexSize": 294912,
+      "statsUnsupported": null,
+      "indexCount": 8,
+      "redundantIndexes": [
+        {
+          "name": "userId_1",
+          "reason": "Covered by leading fields of userId_1_createdAt_-1"
+        }
+      ],
+      "classification": "merge-candidate",
+      "reason": "Review overlap with crmcontacts and keep one canonical customer profile.",
+      "recommendation": "Review reads/writes and migrate references before any merge."
+    },
+    {
+      "name": "crmdevices",
+      "documentCount": 3,
+      "logicalSize": 1755,
+      "storageSize": 36864,
+      "averageObjectSize": 585,
+      "totalIndexSize": 258048,
+      "statsUnsupported": null,
+      "indexCount": 7,
+      "redundantIndexes": [
+        {
+          "name": "userId_1",
+          "reason": "Covered by leading fields of userId_1_status_1"
+        }
+      ],
+      "classification": "keep",
+      "reason": "Collection is owned by an active application model.",
+      "recommendation": "Keep; remove only redundant indexes after query review."
+    },
+    {
+      "name": "crmexecutionlogs",
+      "documentCount": 9,
+      "logicalSize": 5926,
+      "storageSize": 36864,
+      "averageObjectSize": 658,
+      "totalIndexSize": 221184,
+      "statsUnsupported": null,
+      "indexCount": 6,
+      "redundantIndexes": [
+        {
+          "name": "userId_1",
+          "reason": "Covered by leading fields of userId_1_campaignId_1"
+        }
+      ],
+      "classification": "keep-with-retention",
+      "reason": "Operational, log, session, or message history with bounded retention.",
+      "recommendation": "Keep TTL/index policy and monitor monthly growth."
+    },
+    {
+      "name": "crmgroupcheckpoints",
+      "documentCount": 0,
+      "logicalSize": 0,
+      "storageSize": 4096,
+      "averageObjectSize": null,
+      "totalIndexSize": 20480,
+      "statsUnsupported": null,
+      "indexCount": 5,
+      "redundantIndexes": [
+        {
+          "name": "userId_1",
+          "reason": "Covered by leading fields of userId_1_groupId_1_createdAt_-1"
+        }
+      ],
+      "classification": "keep",
+      "reason": "Collection is owned by an active application model.",
+      "recommendation": "Keep; remove only redundant indexes after query review."
+    },
+    {
+      "name": "crmgroupinsights",
+      "documentCount": 0,
+      "logicalSize": 0,
+      "storageSize": 4096,
+      "averageObjectSize": null,
+      "totalIndexSize": 32768,
+      "statsUnsupported": null,
+      "indexCount": 8,
+      "redundantIndexes": [
+        {
+          "name": "userId_1",
+          "reason": "Covered by leading fields of userId_1_status_1_priority_1_createdAt_-1"
+        }
+      ],
+      "classification": "keep",
+      "reason": "Collection is owned by an active application model.",
+      "recommendation": "Keep; remove only redundant indexes after query review."
+    },
+    {
+      "name": "crmgroupmessages",
+      "documentCount": 0,
+      "logicalSize": 0,
+      "storageSize": 4096,
+      "averageObjectSize": null,
+      "totalIndexSize": 24576,
+      "statsUnsupported": null,
+      "indexCount": 6,
+      "redundantIndexes": [
+        {
+          "name": "groupId_1",
+          "reason": "Covered by leading fields of groupId_1_sentAt_-1"
+        }
+      ],
+      "classification": "keep-with-retention",
+      "reason": "Operational, log, session, or message history with bounded retention.",
+      "recommendation": "Keep TTL/index policy and monitor monthly growth."
+    },
+    {
+      "name": "crmgroupsummaries",
+      "documentCount": 0,
+      "logicalSize": 0,
+      "storageSize": 4096,
+      "averageObjectSize": null,
+      "totalIndexSize": 20480,
+      "statsUnsupported": null,
+      "indexCount": 5,
+      "redundantIndexes": [
+        {
+          "name": "userId_1",
+          "reason": "Covered by leading fields of userId_1_groupId_1_createdAt_-1"
+        }
+      ],
+      "classification": "keep",
+      "reason": "Collection is owned by an active application model.",
+      "recommendation": "Keep; remove only redundant indexes after query review."
+    },
+    {
+      "name": "crmmessages",
+      "documentCount": 284,
+      "logicalSize": 243832,
+      "storageSize": 139264,
+      "averageObjectSize": 858,
+      "totalIndexSize": 311296,
+      "statsUnsupported": null,
+      "indexCount": 8,
+      "redundantIndexes": [
+        {
+          "name": "conversationId_1",
+          "reason": "Covered by leading fields of conversationId_1_createdAt_-1"
+        }
+      ],
+      "classification": "keep-with-retention",
+      "reason": "Operational, log, session, or message history with bounded retention.",
+      "recommendation": "Keep TTL/index policy and monitor monthly growth."
+    },
+    {
+      "name": "crmpairingsessions",
+      "documentCount": 3,
+      "logicalSize": 1178,
+      "storageSize": 36864,
+      "averageObjectSize": 392,
+      "totalIndexSize": 294912,
+      "statsUnsupported": null,
+      "indexCount": 8,
+      "redundantIndexes": [],
+      "classification": "keep-with-retention",
+      "reason": "Operational, log, session, or message history with bounded retention.",
+      "recommendation": "Keep TTL/index policy and monitor monthly growth."
+    },
+    {
+      "name": "crmsegments",
+      "documentCount": 0,
+      "logicalSize": 0,
+      "storageSize": 4096,
+      "averageObjectSize": null,
+      "totalIndexSize": 12288,
+      "statsUnsupported": null,
+      "indexCount": 3,
+      "redundantIndexes": [],
+      "classification": "keep",
+      "reason": "Collection is owned by an active application model.",
+      "recommendation": "Keep; remove only redundant indexes after query review."
+    },
+    {
+      "name": "crmsubscriptions",
+      "documentCount": 2,
+      "logicalSize": 608,
+      "storageSize": 36864,
+      "averageObjectSize": 304,
+      "totalIndexSize": 147456,
+      "statsUnsupported": null,
+      "indexCount": 4,
+      "redundantIndexes": [
+        {
+          "name": "userId_1",
+          "reason": "Covered by leading fields of userId_1_status_1"
+        }
+      ],
+      "classification": "keep",
+      "reason": "Collection is owned by an active application model.",
+      "recommendation": "Keep; remove only redundant indexes after query review."
+    },
+    {
+      "name": "crmtasks",
+      "documentCount": 0,
+      "logicalSize": 0,
+      "storageSize": 4096,
+      "averageObjectSize": null,
+      "totalIndexSize": 36864,
+      "statsUnsupported": null,
+      "indexCount": 9,
+      "redundantIndexes": [
+        {
+          "name": "userId_1",
+          "reason": "Covered by leading fields of userId_1_status_1_dueAt_1"
+        }
+      ],
+      "classification": "keep",
+      "reason": "Collection is owned by an active application model.",
+      "recommendation": "Keep; remove only redundant indexes after query review."
+    },
+    {
+      "name": "crmtemplates",
+      "documentCount": 11,
+      "logicalSize": 3670,
+      "storageSize": 36864,
+      "averageObjectSize": 333,
+      "totalIndexSize": 110592,
+      "statsUnsupported": null,
+      "indexCount": 3,
+      "redundantIndexes": [],
+      "classification": "keep",
+      "reason": "Collection is owned by an active application model.",
+      "recommendation": "Keep; remove only redundant indexes after query review."
+    },
+    {
+      "name": "crmzalogroups",
+      "documentCount": 48,
+      "logicalSize": 19630,
+      "storageSize": 45056,
+      "averageObjectSize": 408,
+      "totalIndexSize": 221184,
+      "statsUnsupported": null,
+      "indexCount": 6,
+      "redundantIndexes": [
+        {
+          "name": "userId_1",
+          "reason": "Covered by leading fields of userId_1_isManaged_1_lastMessageAt_-1"
+        }
+      ],
+      "classification": "keep",
+      "reason": "Collection is owned by an active application model.",
+      "recommendation": "Keep; remove only redundant indexes after query review."
+    },
+    {
+      "name": "enrollments",
+      "documentCount": 12,
+      "logicalSize": 7053,
+      "storageSize": 36864,
+      "averageObjectSize": 587,
+      "totalIndexSize": 147456,
+      "statsUnsupported": null,
+      "indexCount": 4,
+      "redundantIndexes": [],
+      "classification": "keep",
+      "reason": "Collection is owned by an active application model.",
+      "recommendation": "Keep; remove only redundant indexes after query review."
+    },
+    {
+      "name": "featuredstudents",
+      "documentCount": 3,
+      "logicalSize": 360,
+      "storageSize": 36864,
+      "averageObjectSize": 120,
+      "totalIndexSize": 110592,
+      "statsUnsupported": null,
+      "indexCount": 3,
+      "redundantIndexes": [],
+      "classification": "keep",
+      "reason": "Collection is owned by an active application model.",
+      "recommendation": "Keep; remove only redundant indexes after query review."
+    },
+    {
+      "name": "flowservers",
+      "documentCount": 1,
+      "logicalSize": 505,
+      "storageSize": 36864,
+      "averageObjectSize": 505,
+      "totalIndexSize": 110592,
+      "statsUnsupported": null,
+      "indexCount": 3,
+      "redundantIndexes": [],
+      "classification": "keep",
+      "reason": "Collection is owned by an active application model.",
+      "recommendation": "Keep; remove only redundant indexes after query review."
+    },
+    {
+      "name": "hostmachines",
+      "documentCount": 1,
+      "logicalSize": 390,
+      "storageSize": 36864,
+      "averageObjectSize": 390,
+      "totalIndexSize": 110592,
+      "statsUnsupported": null,
+      "indexCount": 3,
+      "redundantIndexes": [],
+      "classification": "keep",
+      "reason": "Collection is owned by an active application model.",
+      "recommendation": "Keep; remove only redundant indexes after query review."
+    },
+    {
+      "name": "interior_analysis",
+      "documentCount": 0,
+      "logicalSize": 0,
+      "storageSize": 4096,
+      "averageObjectSize": null,
+      "totalIndexSize": 16384,
+      "statsUnsupported": null,
+      "indexCount": 4,
+      "redundantIndexes": [],
+      "classification": "keep-with-retention",
+      "reason": "Operational, log, session, or message history with bounded retention.",
+      "recommendation": "Keep TTL/index policy and monitor monthly growth."
+    },
+    {
+      "name": "interior_quota",
+      "documentCount": 0,
+      "logicalSize": 0,
+      "storageSize": 4096,
+      "averageObjectSize": null,
+      "totalIndexSize": 12288,
+      "statsUnsupported": null,
+      "indexCount": 3,
+      "redundantIndexes": [],
+      "classification": "keep",
+      "reason": "Collection is owned by an active application model.",
+      "recommendation": "Keep; remove only redundant indexes after query review."
+    },
+    {
+      "name": "interior_renders",
+      "documentCount": 0,
+      "logicalSize": 0,
+      "storageSize": 4096,
+      "averageObjectSize": null,
+      "totalIndexSize": 12288,
+      "statsUnsupported": null,
+      "indexCount": 3,
+      "redundantIndexes": [],
+      "classification": "keep",
+      "reason": "Collection is owned by an active application model.",
+      "recommendation": "Keep; remove only redundant indexes after query review."
+    },
+    {
+      "name": "interioragentlogs",
+      "documentCount": 20,
+      "logicalSize": 1100276,
+      "storageSize": 499712,
+      "averageObjectSize": 55013,
+      "totalIndexSize": 331776,
+      "statsUnsupported": null,
+      "indexCount": 9,
+      "redundantIndexes": [
+        {
+          "name": "userId_1",
+          "reason": "Covered by leading fields of userId_1_createdAt_-1"
+        },
+        {
+          "name": "projectId_1",
+          "reason": "Covered by leading fields of projectId_1_createdAt_-1"
+        }
+      ],
+      "classification": "keep-with-retention",
+      "reason": "Operational, log, session, or message history with bounded retention.",
+      "recommendation": "Keep TTL/index policy and monitor monthly growth."
+    },
+    {
+      "name": "interiorailogs",
+      "documentCount": 21,
+      "logicalSize": 302228,
+      "storageSize": 147456,
+      "averageObjectSize": 14391,
+      "totalIndexSize": 221184,
+      "statsUnsupported": null,
+      "indexCount": 6,
+      "redundantIndexes": [
+        {
+          "name": "userId_1",
+          "reason": "Covered by leading fields of userId_1_createdAt_-1"
+        },
+        {
+          "name": "projectId_1",
+          "reason": "Covered by leading fields of projectId_1_createdAt_-1"
+        }
+      ],
+      "classification": "keep-with-retention",
+      "reason": "Operational, log, session, or message history with bounded retention.",
+      "recommendation": "Keep TTL/index policy and monitor monthly growth."
+    },
+    {
+      "name": "interiorprojects",
+      "documentCount": 35,
+      "logicalSize": 238419,
+      "storageSize": 131072,
+      "averageObjectSize": 6811,
+      "totalIndexSize": 147456,
+      "statsUnsupported": null,
+      "indexCount": 4,
+      "redundantIndexes": [
+        {
+          "name": "userId_1",
+          "reason": "Covered by leading fields of userId_1_isDeleted_1_updatedAt_-1"
+        }
+      ],
+      "classification": "keep",
+      "reason": "Collection is owned by an active application model.",
+      "recommendation": "Keep; remove only redundant indexes after query review."
+    },
+    {
+      "name": "interiortemplates",
+      "documentCount": 274,
+      "logicalSize": 427332,
+      "storageSize": 237568,
+      "averageObjectSize": 1559,
+      "totalIndexSize": 307200,
+      "statsUnsupported": null,
+      "indexCount": 7,
+      "redundantIndexes": [
+        {
+          "name": "status_1",
+          "reason": "Covered by leading fields of status_1_category_1_updatedAt_-1"
+        }
+      ],
+      "classification": "keep",
+      "reason": "Collection is owned by an active application model.",
+      "recommendation": "Keep; remove only redundant indexes after query review."
+    },
+    {
+      "name": "jobs",
+      "documentCount": 1,
+      "logicalSize": 1011,
+      "storageSize": 36864,
+      "averageObjectSize": 1011,
+      "totalIndexSize": 221184,
+      "statsUnsupported": null,
+      "indexCount": 6,
+      "redundantIndexes": [],
+      "classification": "keep",
+      "reason": "Collection is owned by an active application model.",
+      "recommendation": "Keep; remove only redundant indexes after query review."
+    },
+    {
+      "name": "partners",
+      "documentCount": 1,
+      "logicalSize": 1127,
+      "storageSize": 36864,
+      "averageObjectSize": 1127,
+      "totalIndexSize": 258048,
+      "statsUnsupported": null,
+      "indexCount": 7,
+      "redundantIndexes": [],
+      "classification": "keep",
+      "reason": "Collection is owned by an active application model.",
+      "recommendation": "Keep; remove only redundant indexes after query review."
+    },
+    {
+      "name": "projects",
+      "documentCount": 0,
+      "logicalSize": 0,
+      "storageSize": 4096,
+      "averageObjectSize": null,
+      "totalIndexSize": 16384,
+      "statsUnsupported": null,
+      "indexCount": 4,
+      "redundantIndexes": [],
+      "classification": "remove-candidate",
+      "reason": "Collection is unknown to current models and empty.",
+      "recommendation": "Confirm no external writer, then archive metadata and remove manually."
+    },
+    {
+      "name": "prompts",
+      "documentCount": 1,
+      "logicalSize": 1322,
+      "storageSize": 36864,
+      "averageObjectSize": 1322,
+      "totalIndexSize": 442368,
+      "statsUnsupported": null,
+      "indexCount": 12,
+      "redundantIndexes": [],
+      "classification": "keep",
+      "reason": "Collection is owned by an active application model.",
+      "recommendation": "Keep; remove only redundant indexes after query review."
+    },
+    {
+      "name": "resources",
+      "documentCount": 2,
+      "logicalSize": 1962,
+      "storageSize": 36864,
+      "averageObjectSize": 981,
+      "totalIndexSize": 442368,
+      "statsUnsupported": null,
+      "indexCount": 12,
+      "redundantIndexes": [],
+      "classification": "keep",
+      "reason": "Collection is owned by an active application model.",
+      "recommendation": "Keep; remove only redundant indexes after query review."
+    },
+    {
+      "name": "reviews",
+      "documentCount": 1,
+      "logicalSize": 270,
+      "storageSize": 36864,
+      "averageObjectSize": 270,
+      "totalIndexSize": 147456,
+      "statsUnsupported": null,
+      "indexCount": 4,
+      "redundantIndexes": [],
+      "classification": "keep",
+      "reason": "Collection is owned by an active application model.",
+      "recommendation": "Keep; remove only redundant indexes after query review."
+    },
+    {
+      "name": "students",
+      "documentCount": 0,
+      "logicalSize": 0,
+      "storageSize": 4096,
+      "averageObjectSize": null,
+      "totalIndexSize": 12288,
+      "statsUnsupported": null,
+      "indexCount": 3,
+      "redundantIndexes": [],
+      "classification": "remove-candidate",
+      "reason": "Collection is unknown to current models and empty.",
+      "recommendation": "Confirm no external writer, then archive metadata and remove manually."
+    },
+    {
+      "name": "studio_sessions",
+      "documentCount": 0,
+      "logicalSize": 0,
+      "storageSize": 4096,
+      "averageObjectSize": null,
+      "totalIndexSize": 16384,
+      "statsUnsupported": null,
+      "indexCount": 4,
+      "redundantIndexes": [],
+      "classification": "remove-candidate",
+      "reason": "Collection is unknown to current models and empty.",
+      "recommendation": "Confirm no external writer, then archive metadata and remove manually."
+    },
+    {
+      "name": "studiogenerations",
+      "documentCount": 5,
+      "logicalSize": 4565,
+      "storageSize": 36864,
+      "averageObjectSize": 913,
+      "totalIndexSize": 147456,
+      "statsUnsupported": null,
+      "indexCount": 4,
+      "redundantIndexes": [
+        {
+          "name": "userId_1",
+          "reason": "Covered by leading fields of userId_1_createdAt_-1"
+        }
+      ],
+      "classification": "keep-with-retention",
+      "reason": "Operational, log, session, or message history with bounded retention.",
+      "recommendation": "Keep TTL/index policy and monitor monthly growth."
+    },
+    {
+      "name": "systemsettings",
+      "documentCount": 9,
+      "logicalSize": 1672,
+      "storageSize": 36864,
+      "averageObjectSize": 185,
+      "totalIndexSize": 73728,
+      "statsUnsupported": null,
+      "indexCount": 2,
+      "redundantIndexes": [],
+      "classification": "keep",
+      "reason": "Collection is owned by an active application model.",
+      "recommendation": "Keep; remove only redundant indexes after query review."
+    },
+    {
+      "name": "transactions",
+      "documentCount": 22,
+      "logicalSize": 9751,
+      "storageSize": 36864,
+      "averageObjectSize": 443,
+      "totalIndexSize": 331776,
+      "statsUnsupported": null,
+      "indexCount": 9,
+      "redundantIndexes": [
+        {
+          "name": "type_1",
+          "reason": "Covered by leading fields of type_1_createdAt_-1"
+        }
+      ],
+      "classification": "keep",
+      "reason": "Collection is owned by an active application model.",
+      "recommendation": "Keep; remove only redundant indexes after query review."
+    },
+    {
+      "name": "transformations",
+      "documentCount": 0,
+      "logicalSize": 0,
+      "storageSize": 4096,
+      "averageObjectSize": null,
+      "totalIndexSize": 20480,
+      "statsUnsupported": null,
+      "indexCount": 5,
+      "redundantIndexes": [],
+      "classification": "remove-candidate",
+      "reason": "Collection is unknown to current models and empty.",
+      "recommendation": "Confirm no external writer, then archive metadata and remove manually."
+    },
+    {
+      "name": "users",
+      "documentCount": 18,
+      "logicalSize": 11529,
+      "storageSize": 36864,
+      "averageObjectSize": 640,
+      "totalIndexSize": 147456,
+      "statsUnsupported": null,
+      "indexCount": 4,
+      "redundantIndexes": [],
+      "classification": "keep",
+      "reason": "Collection is owned by an active application model.",
+      "recommendation": "Keep; remove only redundant indexes after query review."
+    },
+    {
+      "name": "vocab_chinese_dictionaries",
+      "documentCount": 66447,
+      "logicalSize": 10459792,
+      "storageSize": 9617408,
+      "averageObjectSize": 157,
+      "totalIndexSize": 5083136,
+      "statsUnsupported": null,
+      "indexCount": 4,
+      "redundantIndexes": [],
+      "classification": "keep",
+      "reason": "Collection is owned by an active application model.",
+      "recommendation": "Keep; remove only redundant indexes after query review."
+    },
+    {
+      "name": "vocabdeckratings",
+      "documentCount": 0,
+      "logicalSize": 0,
+      "storageSize": 4096,
+      "averageObjectSize": null,
+      "totalIndexSize": 16384,
+      "statsUnsupported": null,
+      "indexCount": 4,
+      "redundantIndexes": [],
+      "classification": "keep",
+      "reason": "Collection is owned by an active application model.",
+      "recommendation": "Keep; remove only redundant indexes after query review."
+    },
+    {
+      "name": "vocabfeedbacks",
+      "documentCount": 0,
+      "logicalSize": 0,
+      "storageSize": 4096,
+      "averageObjectSize": null,
+      "totalIndexSize": 8192,
+      "statsUnsupported": null,
+      "indexCount": 2,
+      "redundantIndexes": [],
+      "classification": "keep",
+      "reason": "Collection is owned by an active application model.",
+      "recommendation": "Keep; remove only redundant indexes after query review."
+    },
+    {
+      "name": "vocabimportlinks",
+      "documentCount": 0,
+      "logicalSize": 0,
+      "storageSize": 4096,
+      "averageObjectSize": null,
+      "totalIndexSize": 24576,
+      "statsUnsupported": null,
+      "indexCount": 6,
+      "redundantIndexes": [
+        {
+          "name": "userId_1",
+          "reason": "Covered by leading fields of userId_1_publicDeckId_1"
+        }
+      ],
+      "classification": "keep",
+      "reason": "Collection is owned by an active application model.",
+      "recommendation": "Keep; remove only redundant indexes after query review."
+    },
+    {
+      "name": "vocabprivatedecks",
+      "documentCount": 2,
+      "logicalSize": 917,
+      "storageSize": 36864,
+      "averageObjectSize": 458,
+      "totalIndexSize": 184320,
+      "statsUnsupported": null,
+      "indexCount": 5,
+      "redundantIndexes": [],
+      "classification": "keep",
+      "reason": "Collection is owned by an active application model.",
+      "recommendation": "Keep; remove only redundant indexes after query review."
+    },
+    {
+      "name": "vocabprivateflashcards",
+      "documentCount": 2,
+      "logicalSize": 1196,
+      "storageSize": 36864,
+      "averageObjectSize": 598,
+      "totalIndexSize": 184320,
+      "statsUnsupported": null,
+      "indexCount": 5,
+      "redundantIndexes": [],
+      "classification": "keep",
+      "reason": "Collection is owned by an active application model.",
+      "recommendation": "Keep; remove only redundant indexes after query review."
+    },
+    {
+      "name": "vocabprofiles",
+      "documentCount": 1,
+      "logicalSize": 268,
+      "storageSize": 36864,
+      "averageObjectSize": 268,
+      "totalIndexSize": 110592,
+      "statsUnsupported": null,
+      "indexCount": 3,
+      "redundantIndexes": [],
+      "classification": "keep",
+      "reason": "Collection is owned by an active application model.",
+      "recommendation": "Keep; remove only redundant indexes after query review."
+    },
+    {
+      "name": "vocabpublicdecks",
+      "documentCount": 0,
+      "logicalSize": 0,
+      "storageSize": 4096,
+      "averageObjectSize": null,
+      "totalIndexSize": 32768,
+      "statsUnsupported": null,
+      "indexCount": 8,
+      "redundantIndexes": [],
+      "classification": "keep",
+      "reason": "Collection is owned by an active application model.",
+      "recommendation": "Keep; remove only redundant indexes after query review."
+    },
+    {
+      "name": "vocabpublicflashcards",
+      "documentCount": 0,
+      "logicalSize": 0,
+      "storageSize": 4096,
+      "averageObjectSize": null,
+      "totalIndexSize": 8192,
+      "statsUnsupported": null,
+      "indexCount": 2,
+      "redundantIndexes": [],
+      "classification": "keep",
+      "reason": "Collection is owned by an active application model.",
+      "recommendation": "Keep; remove only redundant indexes after query review."
+    },
+    {
+      "name": "webhooklogs",
+      "documentCount": 1,
+      "logicalSize": 1585,
+      "storageSize": 36864,
+      "averageObjectSize": 1585,
+      "totalIndexSize": 221184,
+      "statsUnsupported": null,
+      "indexCount": 6,
+      "redundantIndexes": [
+        {
+          "name": "source_1",
+          "reason": "Covered by leading fields of source_1_status_1"
+        }
+      ],
+      "classification": "keep-with-retention",
+      "reason": "Operational, log, session, or message history with bounded retention.",
+      "recommendation": "Keep TTL/index policy and monitor monthly growth."
+    },
+    {
+      "name": "workflowdocuments",
+      "documentCount": 2,
+      "logicalSize": 728,
+      "storageSize": 36864,
+      "averageObjectSize": 364,
+      "totalIndexSize": 36864,
+      "statsUnsupported": null,
+      "indexCount": 1,
+      "redundantIndexes": [],
+      "classification": "keep",
+      "reason": "Collection is owned by an active application model.",
+      "recommendation": "Keep; remove only redundant indexes after query review."
+    },
+    {
+      "name": "workflowprojects",
+      "documentCount": 2,
+      "logicalSize": 8028,
+      "storageSize": 36864,
+      "averageObjectSize": 4014,
+      "totalIndexSize": 36864,
+      "statsUnsupported": null,
+      "indexCount": 1,
+      "redundantIndexes": [],
+      "classification": "keep",
+      "reason": "Collection is owned by an active application model.",
+      "recommendation": "Keep; remove only redundant indexes after query review."
+    }
+  ]
+}
