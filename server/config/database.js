@@ -19,6 +19,7 @@ export function buildMongoOptions(env = process.env) {
     }
 
     return {
+        autoIndex: false,
         maxPoolSize,
         minPoolSize,
         serverSelectionTimeoutMS: positiveInt(env, 'MONGODB_SERVER_SELECTION_TIMEOUT_MS', 5000),

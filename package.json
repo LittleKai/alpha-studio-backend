@@ -16,6 +16,7 @@
     "db:migrate-passwords": "node server/db/migrate-passwords.js",
     "db:m0:migrate": "node scripts/migrate-mongodb-m0.mjs",
     "db:m0:rollback": "node scripts/rollback-mongodb-m0.mjs",
+    "db:m0:audit": "node scripts/audit-mongodb-m0.mjs",
     "seed:interior-templates": "node scripts/seed-interior-templates.mjs"
   },
   "keywords": [

@@ -105,7 +105,6 @@ const transactionSchema = new mongoose.Schema({
 
 // Indexes for faster queries
 transactionSchema.index({ userId: 1, createdAt: -1 });
-transactionSchema.index({ transactionCode: 1 });
 transactionSchema.index({ status: 1 });
 transactionSchema.index({ type: 1, createdAt: -1 });
 transactionSchema.index({ serviceType: 1 });

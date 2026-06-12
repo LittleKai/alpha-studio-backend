@@ -4,6 +4,7 @@ import { buildMongoOptions } from '../server/config/database.js';
 
 test('uses Atlas M0-friendly pool defaults', () => {
     assert.deepEqual(buildMongoOptions({}), {
+        autoIndex: false,
         maxPoolSize: 5,
         minPoolSize: 0,
         serverSelectionTimeoutMS: 5000,
@@ -20,6 +21,7 @@ test('accepts explicit pool settings', () => {
         MONGODB_SOCKET_TIMEOUT_MS: '30000',
         MONGODB_MAX_IDLE_TIME_MS: '45000'
     }), {
+        autoIndex: false,
         maxPoolSize: 4,
         minPoolSize: 1,
         serverSelectionTimeoutMS: 6000,
