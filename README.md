@@ -32,6 +32,7 @@ Required variables:
 - `MONGODB_URI` - MongoDB connection string
 - `JWT_SECRET` - Secret key for JWT tokens
 - `FRONTEND_URL` - Frontend URL for CORS
+- `FRONTEND_URLS` / `CORS_ORIGINS` - Optional comma or space separated extra browser origins
 - `STORAGE_PROVIDER` - `b2` in production, `local` for development only
 
 ### 3. Test database connection
@@ -201,8 +202,15 @@ MONGODB_URI=your_production_mongodb_uri
 JWT_SECRET=your_secure_random_string
 PORT=3001
 NODE_ENV=production
-FRONTEND_URL=https://your-frontend-domain.vercel.app
+FRONTEND_URL=https://giaiphapsangtao.com
+# Optional extra origins, comma or space separated
+FRONTEND_URLS=https://www.giaiphapsangtao.com
 ```
+
+The backend also has built-in CORS defaults for
+`https://giaiphapsangtao.com`, `https://www.giaiphapsangtao.com`, and the
+legacy Vercel domain. Keep Fly.io secrets aligned with the active frontend
+domains so browser preflight requests receive `Access-Control-Allow-Origin`.
 
 ## Related
 

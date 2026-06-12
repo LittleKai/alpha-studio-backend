@@ -1,5 +1,12 @@
 # Project Summary
 
+**Production CORS Domain Fix (2026-06-12):** Backend CORS defaults now include
+`https://giaiphapsangtao.com` and `https://www.giaiphapsangtao.com`, supports
+comma/space-separated extra origins via `FRONTEND_URLS` or `CORS_ORIGINS`, and
+normalizes trailing slash/path env values. This prevents Fly.io preflight
+requests from returning 500 without `Access-Control-Allow-Origin` when
+`FRONTEND_URL` is missing or stale.
+
 **Hybrid Local-First CRM Chatbot (2026-06-12):** Added agent-authenticated
 chatbot config, AI generation, and idempotent audit endpoints. Local-first
 inbound events now accept bounded conversation metadata without `content` and
@@ -72,7 +79,7 @@ If selected templates already match the latest library version, the endpoint ret
 **Phase 12 Update (2026-05-19):** Backend now hosts the self-extending interior template library. New model `InteriorTemplate` (status: seed/pending/approved/deprecated). New endpoints: `GET /api/interior/templates` (engine catalog load, returns seed+approved deduped by highest version), `POST /api/interior/templates` (user commits a project inline template to pending), and `/api/admin/interior-templates` CRUD (list/getOne/approve/reject/edit/deprecate). `/api/interior/projects/:id/chat` now extracts AI-emitted `tplNew` blocks into `modelJson.inlineTemplates[id]`, replaces with `tpl: id`, and surfaces created ids in `data.meta.newInlineTemplates`. DSL validation lives in `server/utils/templateValidator.js` (AST whitelist mirror of the engine `expression.js`). Seed script `scripts/seed-interior-templates.mjs` upserts the 7 built-in templates from `tools/interior-design-engine/src/templates/` (idempotent).
 
 **Phase 11 Update (2026-05-19):** `server/routes/interior.js` now validates the compact template contract: top-level `palette`, optional `inlineTemplates`, and module/detail items using either legacy `width/height/depth` boxes or `tpl/style` template references. The default project model uses `sliding-2door` with `palette: "wood-oak"`, and `/api/interior` prompts include the built-in template catalog while no longer promoting CSG hints.
-**Last Updated:** 2026-06-12 (MongoDB Atlas M0 Refactor)
+**Last Updated:** 2026-06-12 (Production CORS Domain Fix)
 **Updated By:** Antigravity
 
 
@@ -361,7 +368,8 @@ alpha-studio-backend/
 
 ### CORS Configuration
 - Development: localhost:3000, localhost:5173, 127.0.0.1:5173
-- Production: Set via `FRONTEND_URL` environment variable
+- Production defaults: `https://giaiphapsangtao.com`, `https://www.giaiphapsangtao.com`, `https://alphastudio.vercel.app`
+- Extra production/staging origins: `FRONTEND_URL`, `FRONTEND_URL_PROD`, `FRONTEND_URLS`, or `CORS_ORIGINS`
 - Supports credentials for cookie-based auth
 - Methods: GET, POST, PUT, PATCH, DELETE, OPTIONS
 
@@ -472,7 +480,8 @@ alpha-studio-backend/
 
 ### CORS Configuration
 - Development: localhost:3000, localhost:5173, 127.0.0.1:5173
-- Production: Set via `FRONTEND_URL` environment variable
+- Production defaults: `https://giaiphapsangtao.com`, `https://www.giaiphapsangtao.com`, `https://alphastudio.vercel.app`
+- Extra production/staging origins: `FRONTEND_URL`, `FRONTEND_URL_PROD`, `FRONTEND_URLS`, or `CORS_ORIGINS`
 - Supports credentials for cookie-based auth
 - Methods: GET, POST, PUT, PATCH, DELETE, OPTIONS
 

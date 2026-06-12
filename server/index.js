@@ -42,6 +42,7 @@ import FlowServer from './models/FlowServer.js';
 import StudioGeneration from './models/StudioGeneration.js';
 import { buildEndedSessionUpdate } from './retention/terminalUpdates.js';
 import { localStorageMount } from './storage/localStorageMount.js';
+import { buildAllowedOrigins, buildCorsOptions } from './config/cors.js';
 
 // Load env variables
 dotenv.config();
@@ -55,45 +56,9 @@ app.use(helmet({
     crossOriginResourcePolicy: { policy: 'cross-origin' }
 }));
 
-// CORS configuration
-const allowedOrigins = [
-    'null',
-    'http://localhost:3000',
-    'http://localhost:5173',
-    'http://localhost:3002',
-    'http://127.0.0.1:3001',
-    'http://127.0.0.1:3002',
-    'http://127.0.0.1:5173',
-    'https://alphastudio.vercel.app'
-];
+console.log('Allowed CORS origins:', buildAllowedOrigins(process.env));
 
-// Add production frontend URL from env (without trailing slash)
-if (process.env.FRONTEND_URL) {
-    const frontendUrl = process.env.FRONTEND_URL.replace(/\/$/, '');
-    if (!allowedOrigins.includes(frontendUrl)) {
-        allowedOrigins.push(frontendUrl);
-    }
-}
-
-console.log('Allowed CORS origins:', allowedOrigins);
-
-app.use(cors({
-    origin: function(origin, callback) {
-        // Allow requests with no origin (mobile apps, curl, etc.) and
-        // Origin: null from local file:// workshop pages.
-        if (!origin) return callback(null, true);
-
-        if (origin === 'null' || allowedOrigins.includes(origin)) {
-            callback(null, true);
-        } else {
-            console.warn('CORS blocked origin:', origin);
-            callback(new Error('Not allowed by CORS'));
-        }
-    },
-    credentials: true,
-    methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization']
-}));
+app.use(cors(buildCorsOptions(process.env)));
 // 5mb headroom for prompts, settings, and the legacy inline-base64 reference
 // image path. Studio's primary path is now B2 temp upload (FE → B2 → URL),
 // so payloads stay small. Default 100kb is too tight for any base64 image.
