@@ -40,6 +40,7 @@ import HostMachine from './models/HostMachine.js';
 import CloudSession from './models/CloudSession.js';
 import FlowServer from './models/FlowServer.js';
 import StudioGeneration from './models/StudioGeneration.js';
+import { buildEndedSessionUpdate } from './retention/terminalUpdates.js';
 
 // Load env variables
 dotenv.config();
@@ -198,9 +199,7 @@ cron.schedule('* * * * *', async () => {
             });
 
             for (const session of activeSessions) {
-                session.status = 'ended';
-                session.endedAt = new Date();
-                session.endReason = 'machine_offline';
+                Object.assign(session, buildEndedSessionUpdate('machine_offline'));
                 await session.save();
             }
 

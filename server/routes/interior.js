@@ -20,6 +20,7 @@ import { runAgentLoop } from '../agent-runner/runner.js';
 import { closeSse, setSseHeaders, writeEvent } from '../agent-runner/sse.js';
 import { registerInteriorTools } from '../tools/interior/index.js';
 import { ensureDraft as ensureInteriorDraft } from '../tools/interior/common.js';
+import { buildTerminalAgentUpdate } from '../retention/terminalUpdates.js';
 
 const AI_LOG_MAX_FIELD = 64 * 1024;
 
@@ -1169,7 +1170,11 @@ function pickNextTurnModel({ primaryModel, delegateFlash, lastStepTool, lastStep
 async function persistRunState(logId, patch) {
     if (!logId) return;
     try {
-        await InteriorAgentLog.updateOne({ _id: logId }, { $set: { ...patch, lastActiveAt: new Date() } });
+        const compacted = buildTerminalAgentUpdate(patch);
+        await InteriorAgentLog.updateOne(
+            { _id: logId },
+            { $set: { ...compacted, lastActiveAt: new Date() } }
+        );
     } catch (err) {
         console.warn('[interior:agent-log] persist failed:', err.message);
     }

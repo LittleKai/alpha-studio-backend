@@ -3,6 +3,7 @@ import { authMiddleware, adminOnly } from '../middleware/auth.js';
 import HostMachine from '../models/HostMachine.js';
 import CloudSession from '../models/CloudSession.js';
 import FlowServer from '../models/FlowServer.js';
+import { buildEndedSessionUpdate } from '../retention/terminalUpdates.js';
 
 const router = express.Router();
 
@@ -136,9 +137,7 @@ router.post('/disconnect', authMiddleware, async (req, res) => {
         }
 
         // Update session
-        session.status = 'ended';
-        session.endedAt = new Date();
-        session.endReason = 'user_disconnect';
+        Object.assign(session, buildEndedSessionUpdate('user_disconnect'));
         await session.save();
 
         // Decrement container count
@@ -701,9 +700,7 @@ router.post('/admin/sessions/:id/force-end', authMiddleware, adminOnly, async (r
             console.error('Agent destroy error (continuing anyway):', agentError);
         }
 
-        session.status = 'ended';
-        session.endedAt = new Date();
-        session.endReason = 'admin_force';
+        Object.assign(session, buildEndedSessionUpdate('admin_force'));
         await session.save();
 
         await HostMachine.findByIdAndUpdate(host._id, {

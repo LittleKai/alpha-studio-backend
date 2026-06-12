@@ -54,6 +54,7 @@ import {
     createAgentSecret,
     replaceActiveDevice
 } from '../utils/crmDeviceSessions.js';
+import { buildTerminalCommandUpdate } from '../retention/terminalUpdates.js';
 
 const router = express.Router();
 
@@ -1496,7 +1497,11 @@ router.post('/agent/commands/next', agentAuthMiddleware, async (req, res) => {
 
         await CrmAgentCommand.updateMany(
             { deviceId: device._id, status: 'queued', expiresAt: { $exists: true, $lte: now } },
-            { $set: { status: 'expired', finishedAt: now, errorMessage: 'Command TTL expired before agent claim.' } }
+            {
+                $set: buildTerminalCommandUpdate('expired', now, {
+                    errorMessage: 'Command TTL expired before agent claim.'
+                })
+            }
         );
 
         // Find the oldest queued command for this device
@@ -1593,10 +1598,12 @@ router.post('/agent/commands/:id/result', agentAuthMiddleware, async (req, res) 
             });
         }
 
-        command.status = success ? 'succeeded' : 'failed';
+        Object.assign(
+            command,
+            buildTerminalCommandUpdate(success ? 'succeeded' : 'failed')
+        );
         if (result) command.result = result;
         if (errorMessage) command.errorMessage = errorMessage;
-        command.finishedAt = new Date();
         await command.save();
 
         if (command.type === 'zalo.message.send' && command.payload?.crmMessageId) {
