@@ -71,7 +71,6 @@ articleSchema.pre('save', function (next) {
 
 // Indexes
 articleSchema.index({ category: 1, status: 1, order: 1 });
-articleSchema.index({ slug: 1 }, { unique: true });
 articleSchema.index({
     'title.vi': 'text',
     'title.en': 'text',
