@@ -13,6 +13,21 @@ const crmChatbotLogSchema = new mongoose.Schema({
         default: null,
         index: true
     },
+    idempotencyKey: {
+        type: String,
+        trim: true,
+        default: null
+    },
+    accountId: {
+        type: String,
+        trim: true,
+        default: ''
+    },
+    threadId: {
+        type: String,
+        trim: true,
+        default: ''
+    },
     messageId: {
         type: mongoose.Schema.Types.ObjectId,
         ref: 'CrmMessage',
@@ -57,6 +72,13 @@ const crmChatbotLogSchema = new mongoose.Schema({
 });
 
 crmChatbotLogSchema.index({ userId: 1, createdAt: -1 });
+crmChatbotLogSchema.index(
+    { userId: 1, idempotencyKey: 1 },
+    {
+        unique: true,
+        partialFilterExpression: { idempotencyKey: { $type: 'string' } }
+    }
+);
 
 const CrmChatbotLog = mongoose.model('CrmChatbotLog', crmChatbotLogSchema);
 

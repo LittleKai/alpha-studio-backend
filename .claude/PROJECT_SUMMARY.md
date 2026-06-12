@@ -1,5 +1,11 @@
 # Project Summary
 
+**Hybrid Local-First CRM Chatbot (2026-06-12):** Added agent-authenticated
+chatbot config, AI generation, and idempotent audit endpoints. Local-first
+inbound events now accept bounded conversation metadata without `content` and
+never execute or send chatbot replies in the cloud. The Windows bridge owns
+debounce, rules, handoff, Zalo dispatch, local persistence, and SSE.
+
 **MongoDB Atlas M0 Refactor (2026-06-12):** Added pooled singleton connection
 defaults with runtime `autoIndex=false`, object-storage adapters, inline-media
 validation, bounded workflow history, verified Interior version archives,

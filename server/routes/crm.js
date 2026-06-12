@@ -54,6 +54,12 @@ import {
     createAgentSecret,
     replaceActiveDevice
 } from '../utils/crmDeviceSessions.js';
+import {
+    buildChatbotConfigSnapshot,
+    hasHandoffKeyword,
+    matchChatbotRule,
+    normalizeChatbotDebounceSeconds
+} from '../utils/crmChatbot.js';
 import { buildTerminalCommandUpdate } from '../retention/terminalUpdates.js';
 
 const router = express.Router();
@@ -93,14 +99,18 @@ const CHATBOT_DEFAULT_AI_MODEL = 'gemini-3-flash-preview';
 const CHATBOT_PRO_AI_MODEL = 'gemini-3.1-pro-preview';
 
 const defaultChatbotSettings = {
+    enabled: true,
     aiEnabled: true,
     aiModel: CHATBOT_DEFAULT_AI_MODEL,
     systemPrompt: 'Bạn là một người hỗ trợ tư vấn khách hàng Zalo. Hãy phản hồi tự nhiên, ngắn gọn và đời thường như một người thật, tránh viết quá dài (dưới 40 từ). Đặc biệt: CHỈ gửi lời chào (như Chào bạn, Dạ chào anh/chị) ở câu đầu tiên của cuộc hội thoại, từ các câu tiếp theo tuyệt đối không lặp lại câu chào hỏi nữa mà trả lời thẳng vào vấn đề.',
     soulPrompt: 'Bạn là nhân viên tư vấn Zalo của doanh nghiệp: chuyên nghiệp, gần gũi, hiểu sản phẩm/dịch vụ, không tiết lộ mình là AI, không nói về hệ thống nội bộ.',
     responseRules: '- Trả lời bằng tiếng Việt theo ngôn ngữ của khách.\n- Không bịa thông tin ngoài kho kiến thức; nếu thiếu dữ liệu thì đề nghị chuyển nhân viên.\n- Không gửi mật khẩu, token, cookie hoặc dữ liệu nhạy cảm.\n- Khi cần gửi file/ảnh, chỉ nêu đúng tài liệu phù hợp trong kho kiến thức để agent Zalo gửi.',
     temperature: 0.7,
+    debounceSeconds: 5,
     personalAudience: 'all',
     groupAudience: 'none',
+    selectedGroupKeys: [],
+    handoffKeywords: ['nhan vien', 'nguoi that', 'tu van vien', 'gap admin', 'human'],
     knowledgeSnippets: []
 };
 
@@ -117,7 +127,10 @@ async function getChatbotSettings(userId) {
     const settings = { ...defaultChatbotSettings, ...(setting?.value || {}) };
     return {
         ...settings,
-        aiModel: normalizeChatbotAiModel(settings.aiModel || settings.model)
+        aiModel: normalizeChatbotAiModel(settings.aiModel || settings.model),
+        debounceSeconds: normalizeChatbotDebounceSeconds(
+            settings.debounceSeconds
+        )
     };
 }
 
@@ -130,8 +143,15 @@ async function saveChatbotSettings(userId, value) {
         soulPrompt: String(value.soulPrompt || defaultChatbotSettings.soulPrompt).slice(0, 8000),
         responseRules: String(value.responseRules || defaultChatbotSettings.responseRules).slice(0, 8000),
         temperature: Number.isFinite(Number(value.temperature)) ? Number(value.temperature) : defaultChatbotSettings.temperature,
+        debounceSeconds: normalizeChatbotDebounceSeconds(value.debounceSeconds),
         personalAudience: ['all', 'crmOnly'].includes(value.personalAudience) ? value.personalAudience : defaultChatbotSettings.personalAudience,
         groupAudience: ['none', 'tagOnly', 'selected'].includes(value.groupAudience) ? value.groupAudience : defaultChatbotSettings.groupAudience,
+        selectedGroupKeys: Array.isArray(value.selectedGroupKeys)
+            ? value.selectedGroupKeys.map((item) => String(item).trim()).filter(Boolean).slice(0, 500)
+            : [],
+        handoffKeywords: Array.isArray(value.handoffKeywords)
+            ? value.handoffKeywords.map((item) => String(item).trim()).filter(Boolean).slice(0, 50)
+            : defaultChatbotSettings.handoffKeywords,
         knowledgeSnippets: Array.isArray(value.knowledgeSnippets)
             ? value.knowledgeSnippets.map((item) => String(item).slice(0, 4000)).slice(0, 20)
             : []
@@ -232,34 +252,21 @@ function normalizeThreadType(value) {
     return value === 'group' ? 'group' : 'user';
 }
 
-function matchChatbotRule(rule, message) {
-    const text = String(message || '').toLowerCase();
-    const keywords = Array.isArray(rule.keywords) ? rule.keywords : [];
-    return keywords.some((keyword) => {
-        const key = String(keyword || '').toLowerCase().trim();
-        if (!key) return false;
-        if (rule.matchMode === 'exact') return text === key;
-        if (rule.matchMode === 'startsWith') return text.startsWith(key);
-        return text.includes(key);
-    });
-}
-
-function hasHandoffKeyword(settingsOrRule, message) {
-    const handoffKeywords = settingsOrRule?.handoffKeywords || ['nhan vien', 'nguoi that', 'tu van vien', 'gap admin', 'human'];
-    const text = String(message || '').toLowerCase();
-    return handoffKeywords.some((keyword) => text.includes(String(keyword).toLowerCase()));
-}
-
 async function upsertConversationFromInbound({ userId, deviceId, event, enforceManagedGroup = false }) {
     const accountId = String(event.accountId || '').trim();
     const threadId = String(event.threadId || '').trim();
     const threadType = normalizeThreadType(event.threadType);
-    const content = String(event.content || '').trim();
+    const isMetadataOnly = event.localFirst === true;
+    const content = String(
+        isMetadataOnly ? event.lastMessagePreview || '' : event.content || ''
+    ).trim();
     const providerMessageId = String(event.providerMessageId || '').trim();
-    const receivedAt = event.timestamp ? new Date(event.timestamp) : new Date();
+    const receivedAt = (event.lastMessageAt || event.timestamp)
+        ? new Date(event.lastMessageAt || event.timestamp)
+        : new Date();
     const messageType = normalizeCrmMessageType(event.messageType);
 
-    if (!accountId || !threadId || !content) {
+    if (!accountId || !threadId || (!isMetadataOnly && !content)) {
         const error = new Error('accountId, threadId va content la bat buoc.');
         error.statusCode = 400;
         throw error;
@@ -271,6 +278,43 @@ async function upsertConversationFromInbound({ userId, deviceId, event, enforceM
         if (enforceManagedGroup && (!managedGroup || !managedGroup.isManaged)) {
             return { ignored: true, reason: 'group_not_managed' };
         }
+    }
+
+    if (isMetadataOnly) {
+        const existingConversation = await CrmConversation.findOne({
+            userId, accountId, threadId, threadType
+        });
+        const metadataCustomer = threadType === 'user'
+            ? await CrmCustomer.findOne({
+                userId,
+                $or: [
+                    { zaloThreadId: threadId },
+                    { zaloUserId: event.senderId || threadId }
+                ]
+            })
+            : null;
+        const conversation = await CrmConversation.findOneAndUpdate(
+            { userId, accountId, threadId, threadType },
+            {
+                $set: {
+                    userId,
+                    deviceId,
+                    accountId,
+                    threadId,
+                    threadType,
+                    customerId: metadataCustomer?._id || existingConversation?.customerId || null,
+                    displayName: event.displayName || existingConversation?.displayName || threadId,
+                    avatarUrl: event.avatarUrl || existingConversation?.avatarUrl || '',
+                    lastMessagePreview: previewText(content),
+                    lastMessageAt: receivedAt,
+                    lastInboundAt: receivedAt
+                },
+                $inc: { unreadCount: Number(event.unreadCountDelta) || 1 },
+                $setOnInsert: { tags: [], notes: '', assignedStatus: 'open' }
+            },
+            { upsert: true, new: true, setDefaultsOnInsert: true }
+        );
+        return { conversation, message: null, ignored: false, metadataOnly: true };
     }
 
     let customer = null;
@@ -3004,6 +3048,222 @@ router.post('/agent/events/message', agentAuthMiddleware, async (req, res) => {
     } catch (error) {
         console.error('Agent message event error:', error);
         res.status(error.statusCode || 500).json({ success: false, message: error.message || 'Loi server khi ghi nhan tin nhan agent.' });
+    }
+});
+
+router.get('/agent/chatbot/config', agentAuthMiddleware, async (req, res) => {
+    try {
+        const userId = req.crmDevice.userId;
+        const [settings, rules, crmConversations, managedGroups] = await Promise.all([
+            getChatbotSettings(userId),
+            CrmChatbotRule.find({ userId, isActive: true })
+                .sort({ priority: 1, createdAt: -1 })
+                .lean(),
+            CrmConversation.find({
+                userId,
+                threadType: 'user',
+                customerId: { $ne: null }
+            }).select('accountId threadId').lean(),
+            CrmZaloGroup.find({ userId, isManaged: true })
+                .select('accountId groupId').lean()
+        ]);
+        const managedKeys = new Set(
+            managedGroups.map((group) => `${group.accountId}:${group.groupId}`)
+        );
+        const selectedGroupKeys = (settings.selectedGroupKeys || [])
+            .filter((key) => managedKeys.has(key));
+        const versionSource = JSON.stringify({
+            settings,
+            rules: rules.map((rule) => [rule._id, rule.updatedAt]),
+            crmThreadKeys: crmConversations.map(
+                (conversation) => `${conversation.accountId}:${conversation.threadId}`
+            ),
+            selectedGroupKeys
+        });
+        const version = crypto
+            .createHash('sha256')
+            .update(versionSource)
+            .digest('hex');
+        const snapshot = buildChatbotConfigSnapshot({
+            version,
+            settings,
+            rules: rules.map((rule) => ({
+                id: String(rule._id),
+                name: rule.name,
+                keywords: rule.keywords || [],
+                matchMode: rule.matchMode,
+                response: rule.response,
+                isActive: rule.isActive,
+                priority: rule.priority,
+                channelScope: rule.channelScope,
+                handoffKeywords: rule.handoffKeywords || [],
+                businessHours: rule.businessHours || { enabled: false }
+            })),
+            crmThreadKeys: crmConversations.map(
+                (conversation) => `${conversation.accountId}:${conversation.threadId}`
+            ),
+            selectedGroupKeys
+        });
+        res.json({ success: true, data: snapshot });
+    } catch (error) {
+        console.error('Agent chatbot config error:', error);
+        res.status(500).json({
+            success: false,
+            code: 'CHATBOT_CONFIG_UNAVAILABLE',
+            message: 'Khong the tai cau hinh chatbot.'
+        });
+    }
+});
+
+router.post(
+    '/agent/chatbot/generate',
+    crmAiLimiter,
+    agentAuthMiddleware,
+    async (req, res) => {
+        try {
+            const userId = req.crmDevice.userId;
+            const settings = await getChatbotSettings(userId);
+            if (!settings.enabled || !settings.aiEnabled) {
+                return res.status(409).json({
+                    success: false,
+                    code: 'AI_DISABLED',
+                    message: 'Chatbot AI dang tat.'
+                });
+            }
+            const subscription = await CrmSubscription.findOne({
+                userId,
+                status: 'active',
+                periodEnd: { $gt: new Date() }
+            });
+            if (!subscription) {
+                return res.status(403).json({
+                    success: false,
+                    code: 'SUBSCRIPTION_REQUIRED',
+                    message: 'Can goi Alpha CRM dang hoat dong.'
+                });
+            }
+            req.user = { _id: userId };
+            req.crmSubscription = subscription;
+
+            const messages = Array.isArray(req.body.messages)
+                ? req.body.messages
+                    .map((message) => String(message?.content || '').trim())
+                    .filter(Boolean)
+                : [];
+            if (messages.length === 0) {
+                return res.status(400).json({
+                    success: false,
+                    code: 'MESSAGE_REQUIRED',
+                    message: 'Can noi dung tin nhan.'
+                });
+            }
+            const customerMessage = messages.join('\n').slice(0, 12000);
+            const aiInstructions = [
+                settings.systemPrompt,
+                settings.soulPrompt ? `Soul / vai tro:\n${settings.soulPrompt}` : '',
+                settings.responseRules ? `Quy tac bat buoc:\n${settings.responseRules}` : ''
+            ].filter(Boolean).join('\n\n');
+            const knowledge = settings.knowledgeSnippets?.length
+                ? `\n\nKien thuc noi bo:\n${settings.knowledgeSnippets.join('\n---\n')}`
+                : '';
+            const promptContent = `${aiInstructions}${knowledge}\n\nTin nhan khach hang: ${customerMessage}`;
+            const quotaUnits = getChatbotModelQuotaUnits(settings.aiModel);
+            const { aiResponse, usageDoc, quota } = await runCrmAiWithQuota(req, {
+                promptContent,
+                sessionId: `crm-chatbot-agent:${userId}:${String(req.body.conversationKey || '')}`,
+                requestType: 'chatbot_reply',
+                systemPrompt: aiInstructions,
+                model: settings.aiModel,
+                temperature: settings.temperature,
+                forceGcliDirect: true,
+                quotaUnits
+            });
+            res.json({
+                success: true,
+                data: {
+                    reply: String(aiResponse.text || '').trim(),
+                    usage: {
+                        id: usageDoc._id,
+                        model: aiResponse.model || settings.aiModel,
+                        quota
+                    }
+                }
+            });
+        } catch (error) {
+            console.error('Agent chatbot generate error:', error);
+            const quotaExceeded = error.statusCode === 403
+                && /quota/i.test(error.message || '');
+            res.status(error.statusCode || 502).json({
+                success: false,
+                code: quotaExceeded ? 'QUOTA_EXCEEDED' : 'AI_UNAVAILABLE',
+                message: error.message || 'Chatbot AI khong kha dung.'
+            });
+        }
+    }
+);
+
+router.post('/agent/chatbot/audit', agentAuthMiddleware, async (req, res) => {
+    try {
+        const userId = req.crmDevice.userId;
+        const idempotencyKey = String(req.body.idempotencyKey || '').trim();
+        if (!idempotencyKey) {
+            return res.status(400).json({
+                success: false,
+                code: 'IDEMPOTENCY_KEY_REQUIRED',
+                message: 'Can idempotencyKey.'
+            });
+        }
+        const outcome = String(req.body.outcome || 'skipped');
+        const modeMap = {
+            matched: 'keyword',
+            ai: 'ai',
+            handoff: 'handoff',
+            skipped: 'none',
+            failed: 'none'
+        };
+        if (!Object.prototype.hasOwnProperty.call(modeMap, outcome)) {
+            return res.status(400).json({
+                success: false,
+                code: 'INVALID_AUDIT_OUTCOME',
+                message: 'Audit outcome khong hop le.'
+            });
+        }
+        const status = outcome === 'failed'
+            ? 'failed'
+            : ['handoff', 'skipped'].includes(outcome)
+                ? 'skipped'
+                : 'succeeded';
+        const update = {
+            userId,
+            idempotencyKey,
+            accountId: String(req.body.accountId || '').slice(0, 200),
+            threadId: String(req.body.threadId || '').slice(0, 200),
+            mode: modeMap[outcome],
+            promptPreview: previewText(
+                Array.isArray(req.body.sourceMessageIds)
+                    ? req.body.sourceMessageIds.join(',')
+                    : ''
+            ),
+            responsePreview: previewText(req.body.responsePreview || ''),
+            status,
+            errorMessage: previewText(req.body.error || req.body.reason || '', 1000)
+        };
+        if (req.body.ruleId && /^[a-f\d]{24}$/i.test(String(req.body.ruleId))) {
+            update.ruleId = req.body.ruleId;
+        }
+        const log = await CrmChatbotLog.findOneAndUpdate(
+            { userId, idempotencyKey },
+            { $setOnInsert: update },
+            { upsert: true, new: true, setDefaultsOnInsert: true }
+        );
+        res.json({ success: true, data: log });
+    } catch (error) {
+        console.error('Agent chatbot audit error:', error);
+        res.status(500).json({
+            success: false,
+            code: 'CHATBOT_AUDIT_FAILED',
+            message: 'Khong the ghi audit chatbot.'
+        });
     }
 });
 
