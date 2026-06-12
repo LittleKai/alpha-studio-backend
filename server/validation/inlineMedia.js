@@ -34,6 +34,14 @@ export function assertNoInlineMedia(value, {
     seen = new WeakSet()
 } = {}) {
     if (value === null || value === undefined) return;
+    if (value instanceof Date) return;
+    if (
+        value.constructor?.name === 'ObjectId' ||
+        value.constructor?.name === 'ObjectID' ||
+        (value._bsontype && value._bsontype !== 'Binary')
+    ) {
+        return;
+    }
     if (isBinary(value)) throw new InlineMediaError(path);
     if (typeof value === 'string') {
         if (looksLikeInlineBase64(value, path)) throw new InlineMediaError(path);
