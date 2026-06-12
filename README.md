@@ -32,6 +32,7 @@ Required variables:
 - `MONGODB_URI` - MongoDB connection string
 - `JWT_SECRET` - Secret key for JWT tokens
 - `FRONTEND_URL` - Frontend URL for CORS
+- `STORAGE_PROVIDER` - `b2` in production, `local` for development only
 
 ### 3. Test database connection
 
@@ -57,6 +58,67 @@ npm start
 ```
 
 Server runs on `http://localhost:3001` by default.
+
+## File And Media Storage
+
+MongoDB stores metadata, object keys, public/download URLs, status, and data
+relationships only. It must not store file bytes, BSON binary media, data URLs,
+or raw base64 payloads.
+
+The upload contract is:
+
+1. The client requests a presigned upload URL from the API.
+2. The client uploads bytes directly to Backblaze B2.
+3. The API receives and persists only the URL, key, filename, MIME type, size,
+   checksum, and business metadata.
+4. Model validation rejects data URLs, media-shaped base64, Buffers, and BSON
+   binary values.
+5. `STORAGE_PROVIDER=local` uses `LOCAL_STORAGE_ROOT` for development and tests
+   only; production should use `STORAGE_PROVIDER=b2`.
+
+Interior project versions keep the newest 20 versions in MongoDB. Older
+versions are checksum-verified JSON objects in storage; MongoDB keeps archive
+metadata and hydrates the original API response when projects are read.
+
+## MongoDB Atlas M0 Operations
+
+Application startup uses one Mongoose connection lifecycle with an M0-friendly
+pool (`maxPoolSize=5`, `minPoolSize=0`) and `autoIndex=false`. Index changes are
+explicit maintenance operations.
+
+Dry-run media scan:
+
+```bash
+npm run db:m0:migrate
+```
+
+Apply media migration after reviewing dry-run output. Back up the database and
+keep the manifest with the database backup:
+
+```bash
+npm run db:m0:migrate -- --apply --manifest .data/migrations/mongodb-m0-2026-06-12.jsonl
+```
+
+Audit collections and indexes:
+
+```bash
+npm run db:m0:audit -- --output .data/audits/mongodb-m0
+npm run db:m0:audit -- --apply-indexes --output .data/audits/mongodb-m0-after
+```
+
+Rollback defaults to dry-run. Apply rollback only with the exact manifest from
+the matching migration:
+
+```bash
+npm run db:m0:rollback -- --manifest .data/migrations/mongodb-m0-2026-06-12.jsonl
+npm run db:m0:rollback -- --apply --manifest .data/migrations/mongodb-m0-2026-06-12.jsonl
+```
+
+Apply mode writes separate `*.failures.jsonl` and `*.rollback.jsonl` result
+files. Verify object checksums, failure/conflict counts, API reads, TTL indexes,
+and Atlas storage metrics before deleting any backup. Business collections are
+never auto-dropped; merge/remove candidates require a separate reviewed
+migration.
 
 ## API Endpoints
 

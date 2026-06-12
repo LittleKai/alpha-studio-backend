@@ -1,5 +1,12 @@
 # Project Summary
 
+**MongoDB Atlas M0 Refactor (2026-06-12):** Added pooled singleton connection
+defaults with runtime `autoIndex=false`, object-storage adapters, inline-media
+validation, bounded workflow history, verified Interior version archives,
+retention/`purgeAt` policies, safe media migration and rollback manifests, and
+collection/index audit tooling. MongoDB now stores media metadata/URLs rather
+than file bytes; business collections are never dropped automatically.
+
 **VocabFlip Release Metadata Cache Update (2026-06-11):** Updated `GET /api/vocab/releases/latest` backend route to prioritize fetching from CDN `version.json` over database querying, caching successful CDN fetches in the database `vocab_latest_release` setting automatically. Updated fallback release version to 1.1.6.
 
 **CRM Release Script Update (2026-06-08):** Updated `scripts/release-to-b2.js` to remove the Flutter Web build and copy steps as requested, reducing the release steps from 6 to 5. Bounded B2 upload and metadata update now only processes Android (APK) and Windows (ZIP) build packages.
@@ -59,7 +66,7 @@ If selected templates already match the latest library version, the endpoint ret
 **Phase 12 Update (2026-05-19):** Backend now hosts the self-extending interior template library. New model `InteriorTemplate` (status: seed/pending/approved/deprecated). New endpoints: `GET /api/interior/templates` (engine catalog load, returns seed+approved deduped by highest version), `POST /api/interior/templates` (user commits a project inline template to pending), and `/api/admin/interior-templates` CRUD (list/getOne/approve/reject/edit/deprecate). `/api/interior/projects/:id/chat` now extracts AI-emitted `tplNew` blocks into `modelJson.inlineTemplates[id]`, replaces with `tpl: id`, and surfaces created ids in `data.meta.newInlineTemplates`. DSL validation lives in `server/utils/templateValidator.js` (AST whitelist mirror of the engine `expression.js`). Seed script `scripts/seed-interior-templates.mjs` upserts the 7 built-in templates from `tools/interior-design-engine/src/templates/` (idempotent).
 
 **Phase 11 Update (2026-05-19):** `server/routes/interior.js` now validates the compact template contract: top-level `palette`, optional `inlineTemplates`, and module/detail items using either legacy `width/height/depth` boxes or `tpl/style` template references. The default project model uses `sliding-2door` with `palette: "wood-oak"`, and `/api/interior` prompts include the built-in template catalog while no longer promoting CSG hints.
-**Last Updated:** 2026-06-11 (VocabFlip Release Metadata Cache Update)
+**Last Updated:** 2026-06-12 (MongoDB Atlas M0 Refactor)
 **Updated By:** Antigravity
 
 
@@ -580,12 +587,15 @@ alpha-studio-backend/
 ### Environment Variables:
 ```env
 MONGODB_URI=mongodb+srv://...       # MongoDB connection string
+MONGODB_MAX_POOL_SIZE=5
+MONGODB_MIN_POOL_SIZE=0
 JWT_SECRET=your_secret_key          # JWT signing secret
 PORT=3001                           # Server port (default: 3001)
 NODE_ENV=development                # Environment mode
 FRONTEND_URL=https://...            # Frontend URL for CORS
 CASSO_WEBHOOK_SECRET=your_secret    # Casso webhook verification secret
 # Backblaze B2
+STORAGE_PROVIDER=b2
 B2_ENDPOINT=https://s3.us-west-004.backblazeb2.com
 B2_REGION=us-west-004
 B2_ACCESS_KEY_ID=your_key_id
@@ -609,6 +619,9 @@ npm start            # Start production server
 npm run db:test      # Test MongoDB connection
 npm run db:init      # Initialize database with sample data
 npm run db:migrate-passwords  # Hash existing plain-text passwords
+npm run db:m0:migrate          # Dry-run inline media scan
+npm run db:m0:audit            # Live collection/index audit
+npm run db:m0:rollback -- --manifest <path>  # Dry-run rollback
 ```
 
 ---
