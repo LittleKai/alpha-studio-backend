@@ -1,4 +1,5 @@
 import mongoose from 'mongoose';
+import { RETENTION_MS } from '../retention/policy.js';
 
 const chatMessageSchema = new mongoose.Schema({
     userId: {
@@ -22,8 +23,11 @@ const chatMessageSchema = new mongoose.Schema({
     toObject: { virtuals: true }
 });
 
-chatMessageSchema.index({ userId: 1, createdAt: 1 });
 chatMessageSchema.index({ userId: 1, createdAt: -1 });
+chatMessageSchema.index(
+    { createdAt: 1 },
+    { expireAfterSeconds: RETENTION_MS.chatHistory / 1000 }
+);
 
 const ChatMessage = mongoose.model('ChatMessage', chatMessageSchema);
 

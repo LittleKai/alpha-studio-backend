@@ -1,5 +1,6 @@
 import mongoose from 'mongoose';
 import { slugify, generateUniqueSlugForModel } from '../utils/slugify.js';
+import { noInlineMediaPlugin } from '../validation/inlineMedia.js';
 
 const partnerSchema = new mongoose.Schema({
     slug: {
@@ -104,6 +105,8 @@ const partnerSchema = new mongoose.Schema({
 }, {
     timestamps: true
 });
+
+partnerSchema.plugin(noInlineMediaPlugin);
 
 // Pre-save hook to auto-generate slug
 partnerSchema.pre('save', async function(next) {

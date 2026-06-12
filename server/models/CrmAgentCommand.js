@@ -64,6 +64,10 @@ const crmAgentCommandSchema = new mongoose.Schema({
     expiresAt: {
         type: Date,
         default: () => new Date(Date.now() + 24 * 60 * 60 * 1000)
+    },
+    purgeAt: {
+        type: Date,
+        default: null
     }
 }, {
     timestamps: true
@@ -79,8 +83,7 @@ crmAgentCommandSchema.index(
     }
 );
 
-// TTL index: MongoDB will automatically delete documents once expiresAt has passed
-crmAgentCommandSchema.index({ expiresAt: 1 }, { expireAfterSeconds: 0 });
+crmAgentCommandSchema.index({ purgeAt: 1 }, { expireAfterSeconds: 0 });
 
 const CrmAgentCommand = mongoose.model('CrmAgentCommand', crmAgentCommandSchema);
 

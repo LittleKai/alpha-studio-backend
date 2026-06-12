@@ -1,4 +1,6 @@
 import mongoose from 'mongoose';
+import { noInlineMediaPlugin } from '../validation/inlineMedia.js';
+import { limitDocumentComments } from '../retention/interiorVersionArchive.js';
 
 const commentSchema = new mongoose.Schema({
     id: String,
@@ -24,6 +26,11 @@ const workflowDocumentSchema = new mongoose.Schema({
 }, {
     timestamps: true,
     toJSON: { virtuals: true }
+});
+
+workflowDocumentSchema.plugin(noInlineMediaPlugin);
+workflowDocumentSchema.pre('validate', function boundComments() {
+    this.comments = limitDocumentComments(this.comments);
 });
 
 export default mongoose.model('WorkflowDocument', workflowDocumentSchema);

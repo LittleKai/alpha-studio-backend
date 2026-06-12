@@ -18,3 +18,9 @@ test('crm.js endpoints explicitly return LOCAL_BRIDGE_REQUIRED', () => {
     const code = readFileSync(join(__dirname, '../crm.js'), 'utf-8');
     assert.match(code, /LOCAL_BRIDGE_REQUIRED/);
 });
+
+test('metadata-only agent events update conversation without cloud messages', () => {
+    const code = readFileSync(join(__dirname, '../crm.js'), 'utf-8');
+    assert.match(code, /isMetadataOnly = event\.localFirst === true/);
+    assert.match(code, /return \{ conversation, message: null, ignored: false, metadataOnly: true \}/);
+});

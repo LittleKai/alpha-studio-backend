@@ -5,8 +5,16 @@ import User from '../models/User.js';
 import WebhookLog from '../models/WebhookLog.js';
 import { fulfillCrmBillingOrder } from '../utils/crmBilling.js';
 import { authMiddleware, adminOnly } from '../middleware/auth.js';
+import { sanitizeWebhook } from '../utils/webhookSanitizer.js';
 
 const router = express.Router();
+
+function webhookDiagnostic(req, payload = req.body) {
+    return sanitizeWebhook({
+        headers: req.headers,
+        payload
+    });
+}
 
 // Casso Webhook Secret (get from Casso dashboard)
 const CASSO_WEBHOOK_SECRET = process.env.CASSO_WEBHOOK_SECRET || '';
@@ -116,24 +124,20 @@ const getCreditsForAmount = (amount) => {
  * }
  */
 router.post('/webhook', async (req, res) => {
-    console.log('=== CASSO WEBHOOK RECEIVED ===');
-    console.log('Headers:', JSON.stringify(req.headers, null, 2));
-    console.log('Body:', JSON.stringify(req.body, null, 2));
-    console.log('==============================');
-
     // Always return 200 to Casso
     try {
         // Verify webhook
         if (!verifyCassoWebhook(req)) {
             console.error('Invalid Casso webhook signature');
             // Log invalid webhook
+            const diagnostic = webhookDiagnostic(req);
             await WebhookLog.create({
                 source: 'casso',
-                payload: req.body,
+                payload: diagnostic.payload,
                 status: 'error',
                 errorMessage: 'Invalid webhook signature',
                 ipAddress: req.ip,
-                headers: req.headers
+                headers: diagnostic.headers
             });
             return res.status(200).json({ success: false, message: 'Invalid signature' });
         }
@@ -143,13 +147,14 @@ router.post('/webhook', async (req, res) => {
         // Check for error
         if (webhookData.error !== 0) {
             console.error('Casso webhook error:', webhookData.error);
+            const diagnostic = webhookDiagnostic(req, webhookData);
             await WebhookLog.create({
                 source: 'casso',
-                payload: webhookData,
+                payload: diagnostic.payload,
                 status: 'error',
                 errorMessage: `Casso error code: ${webhookData.error}`,
                 ipAddress: req.ip,
-                headers: req.headers
+                headers: diagnostic.headers
             });
             return res.status(200).json({ success: false, message: 'Webhook error' });
         }
@@ -158,13 +163,14 @@ router.post('/webhook', async (req, res) => {
         const txData = webhookData.data;
         if (!txData) {
             console.error('No transaction data in webhook');
+            const diagnostic = webhookDiagnostic(req, webhookData);
             await WebhookLog.create({
                 source: 'casso',
-                payload: webhookData,
+                payload: diagnostic.payload,
                 status: 'error',
                 errorMessage: 'No transaction data in webhook',
                 ipAddress: req.ip,
-                headers: req.headers
+                headers: diagnostic.headers
             });
             return res.status(200).json({ success: false, message: 'No data' });
         }
@@ -182,12 +188,16 @@ router.post('/webhook', async (req, res) => {
             bankName
         } = txData;
 
-        console.log(`Processing transaction: ${bankTxId}, amount: ${amount}, desc: ${description}`);
+        console.log('[payment:webhook] processing', {
+            bankTransactionId: bankTxId,
+            amount
+        });
 
         // Create webhook log entry
+        const diagnostic = webhookDiagnostic(req, txData);
         const webhookLog = new WebhookLog({
             source: 'casso',
-            payload: txData,
+            payload: diagnostic.payload,
             parsedData: {
                 transactionCode: null,
                 amount: amount,
@@ -197,7 +207,7 @@ router.post('/webhook', async (req, res) => {
             },
             status: 'processing',
             ipAddress: req.ip,
-            headers: req.headers
+            headers: diagnostic.headers
         });
 
         // Extract transfer content from description (format: ALPHAXXXXXX or CRMXXXXXX)
@@ -325,13 +335,14 @@ router.post('/webhook', async (req, res) => {
     } catch (error) {
         console.error('Webhook processing error:', error);
         // Log error
+        const diagnostic = webhookDiagnostic(req);
         await WebhookLog.create({
             source: 'casso',
-            payload: req.body,
+            payload: diagnostic.payload,
             status: 'error',
             errorMessage: error.message,
             ipAddress: req.ip,
-            headers: req.headers
+            headers: diagnostic.headers
         });
         return res.status(200).json({ success: false, message: 'Processing error' });
     }

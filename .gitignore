@@ -29,3 +29,6 @@ build/
 
 # Coverage
 coverage/
+
+# Local storage, migration manifests, and audit output
+.data/

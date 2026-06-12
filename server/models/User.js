@@ -1,5 +1,6 @@
 import mongoose from 'mongoose';
 import bcrypt from 'bcryptjs';
+import { noInlineMediaPlugin } from '../validation/inlineMedia.js';
 
 const userSchema = new mongoose.Schema({
     email: {
@@ -127,6 +128,8 @@ const userSchema = new mongoose.Schema({
 }, {
     timestamps: true
 });
+
+userSchema.plugin(noInlineMediaPlugin);
 
 // Hash password before saving
 userSchema.pre('save', async function() {

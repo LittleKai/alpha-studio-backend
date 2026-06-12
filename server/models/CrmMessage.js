@@ -1,5 +1,7 @@
 import mongoose from 'mongoose';
 import { CRM_MESSAGE_TYPES } from '../utils/crmLiveChat.js';
+import { noInlineMediaPlugin } from '../validation/inlineMedia.js';
+import { RETENTION_MS } from '../retention/policy.js';
 
 const crmMessageSchema = new mongoose.Schema({
     userId: {
@@ -96,6 +98,8 @@ const crmMessageSchema = new mongoose.Schema({
     timestamps: true
 });
 
+crmMessageSchema.plugin(noInlineMediaPlugin);
+
 crmMessageSchema.virtual('zaloMsgId').get(function getZaloMsgId() {
     return this.providerMessageId;
 });
@@ -104,6 +108,10 @@ crmMessageSchema.set('toJSON', { virtuals: true });
 crmMessageSchema.set('toObject', { virtuals: true });
 
 crmMessageSchema.index({ conversationId: 1, createdAt: -1 });
+crmMessageSchema.index(
+    { createdAt: 1 },
+    { expireAfterSeconds: RETENTION_MS.crmHistory / 1000 }
+);
 crmMessageSchema.index(
     { userId: 1, accountId: 1, providerMessageId: 1 },
     {

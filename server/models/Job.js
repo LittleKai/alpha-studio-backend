@@ -1,4 +1,5 @@
 import mongoose from 'mongoose';
+import { noInlineMediaPlugin } from '../validation/inlineMedia.js';
 
 const jobSchema = new mongoose.Schema({
     title: {
@@ -122,6 +123,8 @@ const jobSchema = new mongoose.Schema({
 }, {
     timestamps: true
 });
+
+jobSchema.plugin(noInlineMediaPlugin);
 
 // Virtual for salary display
 jobSchema.virtual('salaryDisplay').get(function() {

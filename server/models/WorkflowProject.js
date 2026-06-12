@@ -1,4 +1,6 @@
 import mongoose from 'mongoose';
+import { noInlineMediaPlugin } from '../validation/inlineMedia.js';
+import { limitWorkflowHistory } from '../retention/interiorVersionArchive.js';
 
 const expenseEntrySchema = new mongoose.Schema({
     id: String,
@@ -56,6 +58,14 @@ const workflowProjectSchema = new mongoose.Schema({
 }, {
     timestamps: true,
     toJSON: { virtuals: true }
+});
+
+workflowProjectSchema.plugin(noInlineMediaPlugin);
+workflowProjectSchema.pre('validate', function boundEmbeddedHistory() {
+    const bounded = limitWorkflowHistory(this);
+    this.chatHistory = bounded.chatHistory;
+    this.expenseLog = bounded.expenseLog;
+    this.tasks = bounded.tasks;
 });
 
 export default mongoose.model('WorkflowProject', workflowProjectSchema);

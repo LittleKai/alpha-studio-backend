@@ -1,4 +1,5 @@
 import mongoose from 'mongoose';
+import { RETENTION_MS } from '../retention/policy.js';
 
 const crmExecutionLogSchema = new mongoose.Schema({
     userId: {
@@ -102,6 +103,10 @@ const crmExecutionLogSchema = new mongoose.Schema({
 });
 
 crmExecutionLogSchema.index({ userId: 1, campaignId: 1 });
+crmExecutionLogSchema.index(
+    { createdAt: 1 },
+    { expireAfterSeconds: RETENTION_MS.crmHistory / 1000 }
+);
 
 const CrmExecutionLog = mongoose.model('CrmExecutionLog', crmExecutionLogSchema);
 

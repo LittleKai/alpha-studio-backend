@@ -3,7 +3,11 @@ import cors from 'cors';
 import cookieParser from 'cookie-parser';
 import dotenv from 'dotenv';
 import helmet from 'helmet';
-import connectDB from './db/connection.js';
+import connectDB, {
+    disconnectDB,
+    isDatabaseReady
+} from './db/connection.js';
+import { shutdown } from './db/lifecycle.js';
 import authRoutes from './routes/auth.js';
 import courseRoutes from './routes/courses.js';
 import partnerRoutes from './routes/partners.js';
@@ -36,6 +40,9 @@ import HostMachine from './models/HostMachine.js';
 import CloudSession from './models/CloudSession.js';
 import FlowServer from './models/FlowServer.js';
 import StudioGeneration from './models/StudioGeneration.js';
+import { buildEndedSessionUpdate } from './retention/terminalUpdates.js';
+import { localStorageMount } from './storage/localStorageMount.js';
+import { buildAllowedOrigins, buildCorsOptions } from './config/cors.js';
 
 // Load env variables
 dotenv.config();
@@ -43,62 +50,25 @@ dotenv.config();
 const app = express();
 const PORT = process.env.PORT || 3001;
 
-// Connect to MongoDB
-connectDB();
-
-// Configure B2 bucket CORS for browser direct upload
-configureBucketCors();
-
 // Security headers
 app.use(helmet({
     // Allow cross-origin resource loading for CDN/B2 assets
     crossOriginResourcePolicy: { policy: 'cross-origin' }
 }));
 
-// CORS configuration
-const allowedOrigins = [
-    'null',
-    'http://localhost:3000',
-    'http://localhost:5173',
-    'http://localhost:3002',
-    'http://127.0.0.1:3001',
-    'http://127.0.0.1:3002',
-    'http://127.0.0.1:5173',
-    'https://alphastudio.vercel.app'
-];
+console.log('Allowed CORS origins:', buildAllowedOrigins(process.env));
 
-// Add production frontend URL from env (without trailing slash)
-if (process.env.FRONTEND_URL) {
-    const frontendUrl = process.env.FRONTEND_URL.replace(/\/$/, '');
-    if (!allowedOrigins.includes(frontendUrl)) {
-        allowedOrigins.push(frontendUrl);
-    }
-}
-
-console.log('Allowed CORS origins:', allowedOrigins);
-
-app.use(cors({
-    origin: function(origin, callback) {
-        // Allow requests with no origin (mobile apps, curl, etc.) and
-        // Origin: null from local file:// workshop pages.
-        if (!origin) return callback(null, true);
-
-        if (origin === 'null' || allowedOrigins.includes(origin)) {
-            callback(null, true);
-        } else {
-            console.warn('CORS blocked origin:', origin);
-            callback(new Error('Not allowed by CORS'));
-        }
-    },
-    credentials: true,
-    methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization']
-}));
+app.use(cors(buildCorsOptions(process.env)));
 // 5mb headroom for prompts, settings, and the legacy inline-base64 reference
 // image path. Studio's primary path is now B2 temp upload (FE → B2 → URL),
 // so payloads stay small. Default 100kb is too tight for any base64 image.
 app.use(express.json({ limit: '5mb' }));
 app.use(cookieParser());
+
+const localMount = localStorageMount(process.env);
+if (localMount) {
+    app.use(localMount.route, express.static(localMount.root));
+}
 
 // Request logging (development)
 if (process.env.NODE_ENV !== 'production') {
@@ -146,6 +116,13 @@ app.get('/api/health', (req, res) => {
         timestamp: new Date().toISOString()
     });
 });
+app.get('/api/ready', (req, res) => {
+    const ready = isDatabaseReady();
+    res.status(ready ? 200 : 503).json({
+        success: ready,
+        message: ready ? 'Alpha Studio API is ready' : 'Database is not ready'
+    });
+});
 
 // 404 handler
 app.use((req, res) => {
@@ -157,6 +134,12 @@ app.use((req, res) => {
 
 // Error handler
 app.use((err, req, res, next) => {
+    if (err?.code === 'INLINE_MEDIA_NOT_ALLOWED') {
+        return res.status(422).json({
+            success: false,
+            message: `Inline file/media is not allowed at ${err.path}. Upload it first and store its URL.`
+        });
+    }
     console.error('Server error:', err);
     res.status(500).json({
         success: false,
@@ -164,8 +147,15 @@ app.use((err, req, res, next) => {
     });
 });
 
+let cronStarted = false;
+
+function startCronJobs() {
+    if (cronStarted) return;
+    cronStarted = true;
+
 // Cron: check host machines heartbeat every 60 seconds
 cron.schedule('* * * * *', async () => {
+    if (!isDatabaseReady()) return;
     try {
         const twoMinutesAgo = new Date(Date.now() - 2 * 60 * 1000);
 
@@ -187,9 +177,7 @@ cron.schedule('* * * * *', async () => {
             });
 
             for (const session of activeSessions) {
-                session.status = 'ended';
-                session.endedAt = new Date();
-                session.endReason = 'machine_offline';
+                Object.assign(session, buildEndedSessionUpdate('machine_offline'));
                 await session.save();
             }
 
@@ -218,6 +206,7 @@ cron.schedule('* * * * *', async () => {
 
 // Cron: purge expired StudioGeneration (and unsaved items) every 30 minutes
 cron.schedule('*/30 * * * *', async () => {
+    if (!isDatabaseReady()) return;
     try {
         const now = new Date();
         // Only delete gens where EVERY item is unsaved — preserve saved B2 artifacts.
@@ -260,17 +249,53 @@ cron.schedule('0 * * * *', async () => {
 
 // Cron: CRM Subscription maintenance (run hourly to expire or auto-renew)
 cron.schedule('0 * * * *', async () => {
+    if (!isDatabaseReady()) return;
     await runSubscriptionMaintenance();
 });
+}
 
-// Start server
-const server = app.listen(PORT, () => {
-    console.log(`\n🚀 Alpha Studio API Server`);
-    console.log(`   Port: ${PORT}`);
-    console.log(`   Environment: ${process.env.NODE_ENV || 'development'}`);
-    console.log(`   API: http://localhost:${PORT}/api\n`);
-});
+let shuttingDown = false;
 
-// Node http.Server default timeout is 120s up to Node v12 (and some OS/network boundaries still enforce it).
-// Video generation can take 1-3 minutes; increase the timeout to 15 minutes to avoid 502/socket hang up.
-server.setTimeout(15 * 60 * 1000);
+function registerShutdownHandlers(server) {
+    const handleSignal = async (signal) => {
+        if (shuttingDown) return;
+        shuttingDown = true;
+        console.log(`${signal} received, shutting down`);
+        try {
+            await shutdown({ server, disconnect: disconnectDB });
+            process.exit(0);
+        } catch (error) {
+            console.error('Graceful shutdown failed:', error);
+            process.exit(1);
+        }
+    };
+
+    process.once('SIGINT', () => handleSignal('SIGINT'));
+    process.once('SIGTERM', () => handleSignal('SIGTERM'));
+}
+
+export async function startServer() {
+    await connectDB();
+    await configureBucketCors();
+    startCronJobs();
+
+    const server = app.listen(PORT, () => {
+        console.log('\nAlpha Studio API Server');
+        console.log(`   Port: ${PORT}`);
+        console.log(`   Environment: ${process.env.NODE_ENV || 'development'}`);
+        console.log(`   API: http://localhost:${PORT}/api\n`);
+    });
+
+    server.setTimeout(15 * 60 * 1000);
+    registerShutdownHandlers(server);
+    return server;
+}
+
+if (process.env.NODE_ENV !== 'test') {
+    startServer().catch((error) => {
+        console.error('Server startup failed:', error);
+        process.exitCode = 1;
+    });
+}
+
+export { app };

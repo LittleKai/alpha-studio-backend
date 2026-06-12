@@ -1,4 +1,5 @@
 import mongoose from 'mongoose';
+import { noInlineMediaPlugin } from '../validation/inlineMedia.js';
 
 // Helper function to generate slug
 function generateSlug(title) {
@@ -171,6 +172,8 @@ const resourceSchema = new mongoose.Schema({
 }, {
     timestamps: true
 });
+
+resourceSchema.plugin(noInlineMediaPlugin);
 
 // Pre-save hook to generate slug
 resourceSchema.pre('save', function(next) {

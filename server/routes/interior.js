@@ -20,6 +20,14 @@ import { runAgentLoop } from '../agent-runner/runner.js';
 import { closeSse, setSseHeaders, writeEvent } from '../agent-runner/sse.js';
 import { registerInteriorTools } from '../tools/interior/index.js';
 import { ensureDraft as ensureInteriorDraft } from '../tools/interior/common.js';
+import { buildTerminalAgentUpdate } from '../retention/terminalUpdates.js';
+import {
+    archiveInteriorVersions,
+    deleteStorageObjects,
+    hydrateInteriorVersions,
+    prepareInteriorVersionBranch
+} from '../retention/interiorVersionArchive.js';
+import { createStorage } from '../storage/index.js';
 
 const AI_LOG_MAX_FIELD = 64 * 1024;
 
@@ -75,6 +83,13 @@ const INTERIOR_WORKSHOP_COMPONENTS_DIR = path.join(INTERIOR_WORKSHOP_DIR, 'compo
 const INTERIOR_WORKSHOP_BUNDLE_PATH = path.join(INTERIOR_WORKSHOP_DIR, 'data', 'template-bundle.js');
 const interiorRegistry = new ToolRegistry();
 const interiorSkills = new SkillLoader(INTERIOR_SKILLS_DIR);
+let interiorStorage;
+
+function getInteriorStorage() {
+    interiorStorage ||= createStorage();
+    return interiorStorage;
+}
+
 await interiorSkills.init();
 registerInteriorTools(interiorRegistry, interiorSkills);
 console.log(`Interior agent ready: ${interiorRegistry.list().length} tools, ${interiorSkills.list().length} skills`);
@@ -111,13 +126,18 @@ function isUnlimited(role) {
 
 async function serializeProject(project) {
     const raw = typeof project.toObject === 'function' ? project.toObject() : project;
-    const versions = await Promise.all((raw.versions || []).map(async (version) => ({
+    const hydratedVersions = await hydrateInteriorVersions({
+        project: raw,
+        storage: getInteriorStorage()
+    });
+    const versions = await Promise.all(hydratedVersions.map(async (version) => ({
         ...version,
         _id: version._id?.toString?.() || version._id,
         refImageUrls: await presignImageUrls(version.refImageUrls)
     })));
+    const { versionArchives: _versionArchives, ...publicProject } = raw;
     return {
-        ...raw,
+        ...publicProject,
         _id: raw._id?.toString?.() || raw._id,
         userId: raw.userId?.toString?.() || raw.userId,
         versions
@@ -1169,7 +1189,11 @@ function pickNextTurnModel({ primaryModel, delegateFlash, lastStepTool, lastStep
 async function persistRunState(logId, patch) {
     if (!logId) return;
     try {
-        await InteriorAgentLog.updateOne({ _id: logId }, { $set: { ...patch, lastActiveAt: new Date() } });
+        const compacted = buildTerminalAgentUpdate(patch);
+        await InteriorAgentLog.updateOne(
+            { _id: logId },
+            { $set: { ...compacted, lastActiveAt: new Date() } }
+        );
     } catch (err) {
         console.warn('[interior:agent-log] persist failed:', err.message);
     }
@@ -1770,9 +1794,8 @@ router.post('/projects/:id/chat', authMiddleware, async (req, res) => {
         // Git-like branching: náº¿u user Ä‘Ă£ rollback (currentVersionIndex < max),
         // thĂ¬ truncate cĂ¡c version "future" trÆ°á»›c khi push Ä‘á»ƒ giá»¯ chuá»—i linear.
         const currentIdx = project.currentVersionIndex;
-        if (project.versions.some((v) => v.index > currentIdx)) {
-            project.versions = project.versions.filter((v) => v.index <= currentIdx);
-        }
+        const storage = getInteriorStorage();
+        const obsoleteArchiveKeys = await prepareInteriorVersionBranch({ project, storage });
         const nextIndex = project.versions.length > 0
             ? Math.max(...project.versions.map((version) => version.index)) + 1
             : 0;
@@ -1789,7 +1812,9 @@ router.post('/projects/:id/chat', authMiddleware, async (req, res) => {
             proposalText: proposalContext || undefined
         });
         project.currentVersionIndex = nextIndex;
+        await archiveInteriorVersions({ project, storage });
         await project.save();
+        await deleteStorageObjects(storage, obsoleteArchiveKeys);
 
         recordInteriorAiLog({
             userId: req.user._id, projectId: project._id, stage: 'apply',
@@ -2109,12 +2134,19 @@ router.post('/projects/:id/rollback', authMiddleware, async (req, res) => {
 
         const targetVersionId = typeof req.body?.targetVersionId === 'string' ? req.body.targetVersionId : '';
         const targetVersionIndex = Number.isInteger(req.body?.targetVersionIndex) ? req.body.targetVersionIndex : null;
-        const target = project.versions.find((version) => (
+        const allVersions = await hydrateInteriorVersions({
+            project,
+            storage: getInteriorStorage()
+        });
+        const target = allVersions.find((version) => (
             (targetVersionId && version._id?.toString() === targetVersionId)
             || (targetVersionIndex !== null && version.index === targetVersionIndex)
         ));
         if (!target) return res.status(404).json({ success: false, message: 'KhĂ´ng tĂ¬m tháº¥y phiĂªn báº£n cáº§n khĂ´i phá»¥c.' });
 
+        if (!project.versions.some((version) => version.index === target.index)) {
+            project.versions.push(target);
+        }
         // Git-like rollback: chá»‰ di chuyá»ƒn con trá» currentVersionIndex vá» target.
         // Versions sau target váº«n Ä‘Æ°á»£c giá»¯ â€” frontend filter chat theo currentVersionIndex.
         // Náº¿u user gá»­i prompt má»›i sau rollback, route /chat sáº½ truncate versions > currentVersionIndex.

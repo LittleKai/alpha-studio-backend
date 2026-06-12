@@ -1,5 +1,6 @@
 import mongoose from 'mongoose';
 import { CRM_MESSAGE_TYPES } from '../utils/crmLiveChat.js';
+import { RETENTION_MS } from '../retention/policy.js';
 
 const crmGroupMessageSchema = new mongoose.Schema({
     userId: {
@@ -58,6 +59,10 @@ const crmGroupMessageSchema = new mongoose.Schema({
 });
 
 crmGroupMessageSchema.index({ groupId: 1, sentAt: -1 });
+crmGroupMessageSchema.index(
+    { createdAt: 1 },
+    { expireAfterSeconds: RETENTION_MS.crmHistory / 1000 }
+);
 crmGroupMessageSchema.index(
     { userId: 1, accountId: 1, providerMessageId: 1 },
     {

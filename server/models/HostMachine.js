@@ -50,6 +50,5 @@ const hostMachineSchema = new mongoose.Schema({
 }, { timestamps: true });
 
 hostMachineSchema.index({ status: 1, enabled: 1 });
-hostMachineSchema.index({ machineId: 1 }, { unique: true });
 
 export default mongoose.model('HostMachine', hostMachineSchema);

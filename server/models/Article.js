@@ -1,4 +1,5 @@
 import mongoose from 'mongoose';
+import { noInlineMediaPlugin } from '../validation/inlineMedia.js';
 
 const articleSchema = new mongoose.Schema({
     title: {
@@ -48,6 +49,8 @@ const articleSchema = new mongoose.Schema({
     timestamps: true
 });
 
+articleSchema.plugin(noInlineMediaPlugin);
+
 // Auto-generate slug from Vietnamese title before save
 articleSchema.pre('save', function (next) {
     if (this.isModified('title.vi') || !this.slug) {
@@ -68,7 +71,6 @@ articleSchema.pre('save', function (next) {
 
 // Indexes
 articleSchema.index({ category: 1, status: 1, order: 1 });
-articleSchema.index({ slug: 1 }, { unique: true });
 articleSchema.index({
     'title.vi': 'text',
     'title.en': 'text',

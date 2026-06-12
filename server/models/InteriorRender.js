@@ -1,4 +1,5 @@
 import mongoose from 'mongoose';
+import { noInlineMediaPlugin } from '../validation/inlineMedia.js';
 
 const interiorRenderSchema = new mongoose.Schema({
     cacheKey: { type: String, required: true, index: true },
@@ -8,6 +9,8 @@ const interiorRenderSchema = new mongoose.Schema({
     renderUrl: { type: String, default: '' },
     modelSnapshot: { type: mongoose.Schema.Types.Mixed }
 }, { timestamps: true });
+
+interiorRenderSchema.plugin(noInlineMediaPlugin);
 
 export default mongoose.models.InteriorRender
     || mongoose.model('InteriorRender', interiorRenderSchema, 'interior_renders');
