@@ -1,4 +1,5 @@
 import { sha256 } from '../../storage/storageMetadata.js';
+import { encodeManifestValue } from './manifest.js';
 
 function manifestEntry(action, uploaded, status) {
     return {
@@ -6,7 +7,7 @@ function manifestEntry(action, uploaded, status) {
         collection: action.collection,
         documentId: action.documentId,
         fieldPath: action.fieldPath,
-        beforeValue: action.beforeValue,
+        beforeValue: encodeManifestValue(action.beforeValue),
         afterValue: uploaded.url,
         object: {
             provider: uploaded.provider,
