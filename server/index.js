@@ -182,8 +182,15 @@ app.use((err, req, res, next) => {
     });
 });
 
+let cronStarted = false;
+
+function startCronJobs() {
+    if (cronStarted) return;
+    cronStarted = true;
+
 // Cron: check host machines heartbeat every 60 seconds
 cron.schedule('* * * * *', async () => {
+    if (!isDatabaseReady()) return;
     try {
         const twoMinutesAgo = new Date(Date.now() - 2 * 60 * 1000);
 
@@ -234,6 +241,7 @@ cron.schedule('* * * * *', async () => {
 
 // Cron: purge expired StudioGeneration (and unsaved items) every 30 minutes
 cron.schedule('*/30 * * * *', async () => {
+    if (!isDatabaseReady()) return;
     try {
         const now = new Date();
         // Only delete gens where EVERY item is unsaved — preserve saved B2 artifacts.
@@ -276,8 +284,10 @@ cron.schedule('0 * * * *', async () => {
 
 // Cron: CRM Subscription maintenance (run hourly to expire or auto-renew)
 cron.schedule('0 * * * *', async () => {
+    if (!isDatabaseReady()) return;
     await runSubscriptionMaintenance();
 });
+}
 
 let shuttingDown = false;
 
@@ -302,6 +312,7 @@ function registerShutdownHandlers(server) {
 export async function startServer() {
     await connectDB();
     await configureBucketCors();
+    startCronJobs();
 
     const server = app.listen(PORT, () => {
         console.log('\nAlpha Studio API Server');
