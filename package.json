@@ -14,6 +14,7 @@
     "db:test": "node server/db/test-connection.js",
     "db:init": "node server/db/init-collections.js",
     "db:migrate-passwords": "node server/db/migrate-passwords.js",
+    "db:m0:migrate": "node scripts/migrate-mongodb-m0.mjs",
     "seed:interior-templates": "node scripts/seed-interior-templates.mjs"
   },
   "keywords": [
