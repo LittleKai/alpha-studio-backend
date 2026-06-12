@@ -58,6 +58,18 @@ const interiorVersionSchema = new mongoose.Schema({
     }
 });
 
+const interiorVersionArchiveSchema = new mongoose.Schema({
+    provider: { type: String, required: true },
+    key: { type: String, required: true },
+    url: { type: String, default: '' },
+    checksum: { type: String, required: true },
+    size: { type: Number, required: true },
+    fromIndex: { type: Number, required: true },
+    toIndex: { type: Number, required: true },
+    count: { type: Number, required: true },
+    createdAt: { type: Date, default: Date.now }
+}, { _id: false });
+
 const interiorProjectSchema = new mongoose.Schema({
     userId: {
         type: mongoose.Schema.Types.ObjectId,
@@ -77,6 +89,10 @@ const interiorProjectSchema = new mongoose.Schema({
     },
     versions: {
         type: [interiorVersionSchema],
+        default: []
+    },
+    versionArchives: {
+        type: [interiorVersionArchiveSchema],
         default: []
     },
     isDeleted: {

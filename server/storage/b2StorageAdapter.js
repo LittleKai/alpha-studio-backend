@@ -1,5 +1,6 @@
 import {
     deleteFile,
+    downloadFile,
     headFile,
     uploadFile
 } from '../utils/b2Storage.js';
@@ -9,10 +10,12 @@ export class B2StorageAdapter {
     constructor({
         putObject = ({ key, body, contentType }) => uploadFile(key, body, contentType),
         headObject = headFile,
+        getObject = downloadFile,
         deleteObject = deleteFile
     } = {}) {
         this.putObject = putObject;
         this.headObject = headObject;
+        this.getObject = getObject;
         this.deleteObject = deleteObject;
     }
 
@@ -35,6 +38,10 @@ export class B2StorageAdapter {
 
     async head(key) {
         return this.headObject(key);
+    }
+
+    async get(key) {
+        return this.getObject(key);
     }
 
     async delete(key) {

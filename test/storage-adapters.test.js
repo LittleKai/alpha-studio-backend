@@ -24,6 +24,7 @@ test('local adapter uploads, verifies, resolves, and deletes bytes', async () =>
     assert.equal(result.url, 'http://localhost/files/migration/test.txt');
     assert.equal(result.checksum.length, 64);
     assert.equal(await adapter.exists(result.key), true);
+    assert.equal((await adapter.get(result.key)).toString(), 'hello');
     assert.equal(await readFile(path.join(root, result.key), 'utf8'), 'hello');
 
     await adapter.delete(result.key);
@@ -60,6 +61,7 @@ test('B2 adapter delegates to injected object operations', async () => {
             size: 5,
             contentType: 'text/plain'
         }),
+        getObject: async () => Buffer.from('hello'),
         deleteObject: async (key) => calls.push(['delete', key])
     });
 
@@ -74,6 +76,7 @@ test('B2 adapter delegates to injected object operations', async () => {
     assert.equal(result.url, 'https://cdn/a.txt');
     assert.equal(result.checksum.length, 64);
     assert.equal(await adapter.exists('a.txt'), true);
+    assert.equal((await adapter.get('a.txt')).toString(), 'hello');
 
     await adapter.delete('a.txt');
     assert.equal(calls.at(-1)[0], 'delete');

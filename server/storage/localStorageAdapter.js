@@ -1,4 +1,4 @@
-import { access, mkdir, rename, rm, writeFile } from 'node:fs/promises';
+import { access, mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { buildStorageMetadata } from './storageMetadata.js';
 
@@ -41,6 +41,10 @@ export class LocalStorageAdapter {
             if (error?.code === 'ENOENT') return false;
             throw error;
         }
+    }
+
+    async get(key) {
+        return readFile(this.resolveKey(key));
     }
 
     async delete(key) {

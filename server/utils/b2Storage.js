@@ -215,6 +215,23 @@ export async function headFile(key) {
     }
 }
 
+export async function downloadFile(key) {
+    const response = await getS3().send(new GetObjectCommand({
+        Bucket: process.env.B2_BUCKET_NAME,
+        Key: key,
+    }));
+    if (!response.Body) return Buffer.alloc(0);
+    if (typeof response.Body.transformToByteArray === 'function') {
+        return Buffer.from(await response.Body.transformToByteArray());
+    }
+
+    const chunks = [];
+    for await (const chunk of response.Body) {
+        chunks.push(Buffer.from(chunk));
+    }
+    return Buffer.concat(chunks);
+}
+
 /**
  * Upload bytes from the backend directly to B2.
  * Used when the backend receives a file (e.g. proxied from the flow agent)
