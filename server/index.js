@@ -41,6 +41,7 @@ import CloudSession from './models/CloudSession.js';
 import FlowServer from './models/FlowServer.js';
 import StudioGeneration from './models/StudioGeneration.js';
 import { buildEndedSessionUpdate } from './retention/terminalUpdates.js';
+import { localStorageMount } from './storage/localStorageMount.js';
 
 // Load env variables
 dotenv.config();
@@ -98,6 +99,11 @@ app.use(cors({
 // so payloads stay small. Default 100kb is too tight for any base64 image.
 app.use(express.json({ limit: '5mb' }));
 app.use(cookieParser());
+
+const localMount = localStorageMount(process.env);
+if (localMount) {
+    app.use(localMount.route, express.static(localMount.root));
+}
 
 // Request logging (development)
 if (process.env.NODE_ENV !== 'production') {

@@ -29,11 +29,12 @@ export async function rollbackManifestEntries({
 }) {
     const candidates = entries.filter((entry) => (
         entry.migration === 'mongodb-m0-v1'
-        && entry.status === 'applied'
+        && (entry.status === 'applied' || entry.status === 'conflict')
     )).reverse();
     const summary = {
         planned: candidates.length,
         restored: 0,
+        cleaned: 0,
         conflicts: 0,
         failed: 0
     };
@@ -41,6 +42,21 @@ export async function rollbackManifestEntries({
 
     for (const entry of candidates) {
         try {
+            if (entry.status === 'conflict') {
+                if (entry.object?.migrationOwned === true && entry.object.key) {
+                    await storage.delete(entry.object.key);
+                    summary.cleaned += 1;
+                    await appendResult(rollbackResult(entry, 'cleaned-conflict-object', {
+                        objectDeleted: true
+                    }));
+                } else {
+                    await appendResult(rollbackResult(entry, 'skipped-unowned-conflict-object', {
+                        objectDeleted: false
+                    }));
+                }
+                continue;
+            }
+
             const result = await getCollection(entry.collection).updateOne(
                 {
                     _id: documentIdForQuery(entry.documentId),

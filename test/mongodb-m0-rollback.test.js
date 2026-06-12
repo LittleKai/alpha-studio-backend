@@ -97,3 +97,23 @@ test('rollback never deletes objects not owned by the migration', async () => {
     assert.equal(summary.restored, 1);
     assert.equal(deletes, 0);
 });
+
+test('rollback cleans migration-owned uploads from apply conflicts', async () => {
+    const deleted = [];
+    let updates = 0;
+    const results = [];
+    const summary = await rollbackManifestEntries({
+        entries: [entry({ status: 'conflict' })],
+        apply: true,
+        getCollection: () => ({
+            updateOne: async () => { updates += 1; }
+        }),
+        storage: { delete: async (key) => deleted.push(key) },
+        appendResult: async (result) => results.push(result)
+    });
+
+    assert.equal(summary.cleaned, 1);
+    assert.equal(updates, 0);
+    assert.deepEqual(deleted, ['avatar.txt']);
+    assert.equal(results[0].status, 'cleaned-conflict-object');
+});
