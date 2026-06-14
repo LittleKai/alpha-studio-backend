@@ -170,6 +170,45 @@ function stageZaloBackendForWindows(winReleaseDir) {
         ].join('\r\n'),
         'utf8'
     );
+
+    // Generate a production .env with safe defaults so the backend starts
+    // with the same feature set as development mode.
+    // Secrets/credentials are NOT included — they are created at runtime.
+    const prodEnvLines = [
+        '# Auto-generated production defaults by release-to-b2.js',
+        '# Edit this file to customise your local backend settings.',
+        '',
+        'PORT=8787',
+        'NODE_ENV=production',
+        '',
+        '# Channel mode: personal_zca | official_oa | mock',
+        'ZALO_CHANNEL_MODE=personal_zca',
+        '',
+        '# Loopback security',
+        'LOCAL_BIND_HOST=127.0.0.1',
+        'LOCAL_BIND_PORT=8787',
+        '',
+        '# Cloud CRM API',
+        'CRM_CLOUD_API_URL=https://alpha-studio-backend.fly.dev/api',
+        'CRM_AGENT_MODE=enabled',
+        '',
+        '# Local-first Live Chat (full message storage on this PC)',
+        'LOCAL_FIRST_LIVE_CHAT=true',
+        '',
+        '# Safety defaults',
+        'ZALO_ALLOW_PERSONAL_AUTOMATION=true',
+        'ZALO_ALLOW_FRIEND_AUTOMATION=false',
+        'ZALO_ALLOW_GROUP_AUTOMATION=false',
+        'ZALO_REQUIRE_HUMAN_APPROVAL=true',
+        'ZALO_MAX_BATCH_SIZE=20',
+        'ZALO_DAILY_SEND_LIMIT=100',
+        ''
+    ];
+    fs.writeFileSync(
+        path.join(serviceReleaseDir, '.env'),
+        prodEnvLines.join('\r\n'),
+        'utf8'
+    );
 }
 
 /**
@@ -315,7 +354,7 @@ async function main() {
     // 4. Stage local backend and compress Windows Release directory
     console.log('\n[4/5] Staging local Zalo backend and zipping Windows release folder...');
     const winReleaseDir = path.join(CRM_DIR, 'build/windows/x64/runner/Release');
-    const zipDestPath = path.join(CRM_DIR, `build/alpha-crm-windows-v${versionStr}.zip`);
+    const zipDestPath = path.join(CRM_DIR, 'build/alpha-crm-windows.zip');
 
     if (fs.existsSync(zipDestPath)) {
         fs.unlinkSync(zipDestPath);
@@ -351,7 +390,7 @@ async function main() {
 
     const apkLocalPath = path.join(CRM_DIR, 'build/app/outputs/flutter-apk/app-release.apk');
     const apkKey = `crm-app/releases/alpha-crm-v${versionStr}.apk`;
-    const winKey = `crm-app/releases/alpha-crm-windows-v${versionStr}.zip`;
+    const winKey = 'crm-app/releases/alpha-crm-windows.zip';
 
     const apkSize = fs.statSync(apkLocalPath).size;
     const winSize = fs.statSync(zipDestPath).size;
@@ -421,7 +460,7 @@ async function main() {
                 size: apkSize
             },
             {
-                name: `alpha-crm-windows-v${versionStr}.zip`,
+                name: 'alpha-crm-windows.zip',
                 browser_download_url: winUrl,
                 size: winSize
             }

@@ -104,7 +104,7 @@ function zipWindowsRelease(versionStr) {
         throw new Error(`Windows release folder not found at: ${winReleaseDir}`);
     }
 
-    const zipDestPath = path.join(VOCAB_DIR, `build/vocabflip-windows-v${versionStr}.zip`);
+    const zipDestPath = path.join(VOCAB_DIR, 'build/vocabflip-windows.zip');
     if (fs.existsSync(zipDestPath)) {
         fs.unlinkSync(zipDestPath);
     }
@@ -185,7 +185,7 @@ async function updateVersionMetadata(s3, versionStr, releaseNotes, apk, windowsZ
                 size: apk.size,
             },
             {
-                name: `vocabflip-windows-v${versionStr}.zip`,
+                name: 'vocabflip-windows.zip',
                 browser_download_url: windowsZip.url,
                 size: windowsZip.size,
             },
@@ -298,7 +298,7 @@ async function main() {
     const s3 = createB2Client();
     const apkPath = path.join(VOCAB_DIR, 'build/app/outputs/flutter-apk/app-release.apk');
     const apkKey = `${B2_APP_PREFIX}/releases/vocabflip-v${versionStr}.apk`;
-    const winKey = `${B2_APP_PREFIX}/releases/vocabflip-windows-v${versionStr}.zip`;
+    const winKey = `${B2_APP_PREFIX}/releases/vocabflip-windows.zip`;
     const apk = await uploadFile(s3, apkKey, apkPath, 'application/vnd.android.package-archive');
     const windowsZip = await uploadFile(s3, winKey, zipPath, 'application/zip');
 
