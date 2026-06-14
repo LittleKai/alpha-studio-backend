@@ -132,11 +132,11 @@ router.post('/generate-cards', authMiddleware, async (req, res) => {
         }
 
         // Map model type to correct GCLI models
-        let modelName = 'gemini-3.1-flash-lite';
+        let modelName = 'gemini-3-flash-preview';
         if (model === 'pro') {
             modelName = 'gemini-3.1-pro-preview';
         } else if (model === 'flash') {
-            modelName = 'gemini-3.1-flash-lite';
+            modelName = 'gemini-3-flash-preview';
         } else if (model) {
             modelName = model;
         }

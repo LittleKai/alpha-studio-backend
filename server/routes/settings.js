@@ -14,8 +14,8 @@ const PUBLIC_KEYS = [
     'gcliBotModel'
 ];
 
-const GCLI_BOT_ALLOWED_MODELS = ['gemini-3.1-flash-lite', 'gemini-3-flash-preview'];
-const GCLI_BOT_DEFAULT_MODEL = 'gemini-3.1-flash-lite';
+const GCLI_BOT_ALLOWED_MODELS = ['gemini-3-flash-preview', 'gemini-3.1-pro-preview', 'gemini-2.5-flash', 'gemini-2.5-pro'];
+const GCLI_BOT_DEFAULT_MODEL = 'gemini-3-flash-preview';
 
 router.get('/public', async (req, res) => {
     try {

@@ -310,7 +310,7 @@ export async function callOpenClaw(content, sessionId) {
  */
 export async function callGcliDirect(content, options = {}) {
     const url = process.env.GCLI_DIRECT_URL || 'https://gcli.ggchan.dev/v1/chat/completions';
-    const model = options.model || process.env.GCLI_DIRECT_MODEL || 'gemini-3.1-flash-lite';
+    const model = options.model || process.env.GCLI_DIRECT_MODEL || 'gemini-3-flash-preview';
     // Key pool + retry handled inside fetchGcliWithRetry. Each retry picks a
     // fresh key (weighted random) so multi-key envs naturally rotate around a
     // rate-limited key.
@@ -396,7 +396,7 @@ export async function shouldUseOpenClawForChat() {
 
 export async function getGcliBotModel() {
     const setting = await SystemSetting.findOne({ key: 'gcliBotModel' }).lean();
-    return setting?.value || process.env.GCLI_DIRECT_MODEL || 'gemini-3.1-flash-lite';
+    return setting?.value || process.env.GCLI_DIRECT_MODEL || 'gemini-3-flash-preview';
 }
 
 export async function callConfiguredAiProvider(content, sessionId, options = {}) {
