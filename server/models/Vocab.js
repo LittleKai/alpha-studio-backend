@@ -156,3 +156,10 @@ export const VocabPrivateDeck = mongoose.model('VocabPrivateDeck', vocabPrivateD
 export const VocabPrivateFlashcard = mongoose.model('VocabPrivateFlashcard', vocabPrivateFlashcardSchema);
 export const VocabChineseDictionary = mongoose.model('VocabChineseDictionary', vocabChineseDictionarySchema, 'vocab_chinese_dictionaries');
 
+const vocabAiUsageSchema = new mongoose.Schema({
+    userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true, unique: true, index: true },
+    freeUsesRemaining: { type: Number, default: 3 },
+}, { timestamps: true });
+
+export const VocabAiUsage = mongoose.model('VocabAiUsage', vocabAiUsageSchema);
+
