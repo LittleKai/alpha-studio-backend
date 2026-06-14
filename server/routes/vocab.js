@@ -300,6 +300,7 @@ router.get('/public-decks', async (req, res) => {
             sort_by = 'popular',
             descending = 'true',
             limit = 20,
+            skip = 0,
         } = req.query;
 
         const query = { isActive: true };
@@ -321,6 +322,7 @@ router.get('/public-decks', async (req, res) => {
 
         const decks = await VocabPublicDeck.find(query)
             .sort({ [sortField]: String(descending) === 'false' ? 1 : -1 })
+            .skip(Number(skip) || 0)
             .limit(Math.min(Number(limit) || 20, 100));
 
         return ok(res, decks.map(serializeDeck));
