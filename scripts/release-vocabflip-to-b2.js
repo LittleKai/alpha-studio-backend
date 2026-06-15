@@ -267,7 +267,15 @@ async function main() {
         process.exit(1);
     }
 
-    const action = process.argv[2];
+    const args = process.argv.slice(2);
+    let platform = 'all';
+    const platformArgIndex = args.findIndex(a => a.startsWith('--platform='));
+    if (platformArgIndex !== -1) {
+        platform = args[platformArgIndex].split('=')[1];
+        args.splice(platformArgIndex, 1);
+    }
+
+    const action = args[0];
     const noBumpActions = new Set(['none', 'skip', 'current', 'nobump']);
     const currentFullVersion = getPubspecVersion();
     let targetFullVersion = currentFullVersion;
@@ -281,35 +289,64 @@ async function main() {
     }
 
     const versionStr = targetFullVersion.split('+')[0];
-    const releaseNotes = process.argv.slice(3).join(' ') || `Automated VocabFlip release v${versionStr}`;
+    const releaseNotes = args.slice(1).join(' ') || `Automated VocabFlip release v${versionStr}`;
 
-    console.log('\n[1/5] Building Android APK...');
-    run('flutter build apk --release', VOCAB_DIR);
+    if (platform === 'all' || platform === 'android') {
+        console.log('\n[1/5] Building Android APK...');
+        run('flutter build apk --release', VOCAB_DIR);
+    } else {
+        console.log('\n[1/5] Skipping Android APK build (--platform=' + platform + ')');
+    }
 
-    console.log('\n[2/5] Building Windows app...');
-    run('flutter build windows --release', VOCAB_DIR);
-    const zipPath = zipWindowsRelease(versionStr);
+    let zipPath;
+    if (platform === 'all' || platform === 'windows') {
+        console.log('\n[2/5] Building Windows app...');
+        run('flutter build windows --release', VOCAB_DIR);
+        zipPath = zipWindowsRelease(versionStr);
+    } else {
+        console.log('\n[2/5] Skipping Windows app build (--platform=' + platform + ')');
+    }
 
-    console.log('\n[3/5] Building Web app and publishing to frontend public/vocab...');
-    run('flutter build web --release --base-href "/vocab/"', VOCAB_DIR);
-    copyWebBuild();
+    if (platform === 'all' || platform === 'web') {
+        console.log('\n[3/5] Building Web app and publishing to frontend public/vocab...');
+        run('flutter build web --release --base-href "/vocab/"', VOCAB_DIR);
+        copyWebBuild();
+    } else {
+        console.log('\n[3/5] Skipping Web app build (--platform=' + platform + ')');
+    }
 
-    console.log('\n[4/5] Uploading APK and Windows ZIP to B2...');
-    const s3 = createB2Client();
-    const apkPath = path.join(VOCAB_DIR, 'build/app/outputs/flutter-apk/app-release.apk');
-    const apkKey = `${B2_APP_PREFIX}/releases/vocabflip-v${versionStr}.apk`;
-    const winKey = `${B2_APP_PREFIX}/releases/vocabflip-windows.zip`;
-    const apk = await uploadFile(s3, apkKey, apkPath, 'application/vnd.android.package-archive');
-    const windowsZip = await uploadFile(s3, winKey, zipPath, 'application/zip');
+    if (platform === 'all' || platform === 'android' || platform === 'windows') {
+        console.log('\n[4/5] Uploading APK and Windows ZIP to B2...');
+        const s3 = createB2Client();
+        let apk, windowsZip;
+        
+        if (platform === 'all' || platform === 'android') {
+            const apkPath = path.join(VOCAB_DIR, 'build/app/outputs/flutter-apk/app-release.apk');
+            const apkKey = `${B2_APP_PREFIX}/releases/vocabflip-v${versionStr}.apk`;
+            apk = await uploadFile(s3, apkKey, apkPath, 'application/vnd.android.package-archive');
+        }
+        
+        if (platform === 'all' || platform === 'windows') {
+            const winKey = `${B2_APP_PREFIX}/releases/vocabflip-windows.zip`;
+            windowsZip = await uploadFile(s3, winKey, zipPath, 'application/zip');
+        }
 
-    console.log('\n[5/5] Updating release metadata...');
-    await updateVersionMetadata(s3, versionStr, releaseNotes, apk, windowsZip);
-    await cleanupOldReleases(s3);
+        if (platform === 'all') {
+            console.log('\n[5/5] Updating release metadata...');
+            await updateVersionMetadata(s3, versionStr, releaseNotes, apk, windowsZip);
+            await cleanupOldReleases(s3);
+        } else {
+            console.log('\n[5/5] Skipping metadata update for partial build');
+        }
 
-    console.log('\n=== VOCABFLIP RELEASE FINISHED ===');
-    console.log(`Android: ${apk.url}`);
-    console.log(`Windows: ${windowsZip.url}`);
-    console.log(`Metadata: ${CDN_BASE_URL}/${B2_APP_PREFIX}/version.json`);
+        console.log('\n=== VOCABFLIP RELEASE FINISHED ===');
+        if (apk) console.log(`Android: ${apk.url}`);
+        if (windowsZip) console.log(`Windows: ${windowsZip.url}`);
+        if (platform === 'all') console.log(`Metadata: ${CDN_BASE_URL}/${B2_APP_PREFIX}/version.json`);
+    } else {
+        console.log('\n=== VOCABFLIP WEB-ONLY RELEASE FINISHED ===');
+        console.log(`Web app copied to public directory.`);
+    }
 }
 
 main();
