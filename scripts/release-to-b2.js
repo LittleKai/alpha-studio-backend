@@ -4,6 +4,7 @@ import { fileURLToPath } from 'url';
 import { execSync } from 'child_process';
 import { S3Client, PutObjectCommand, GetObjectCommand, ListObjectsV2Command, DeleteObjectsCommand } from '@aws-sdk/client-s3';
 import dotenv from 'dotenv';
+import readline from 'readline';
 
 // Resolve directory paths in ES Modules
 const __filename = fileURLToPath(import.meta.url);
@@ -81,6 +82,39 @@ function calculateNextVersion(currentVersion, action) {
     }
 
     return `${major}.${minor}.${patch}+${build}`;
+}
+
+/**
+ * Compares two semver strings (major.minor.patch)
+ * Returns > 0 if v1 > v2, < 0 if v1 < v2, 0 if equal
+ */
+function compareSemver(v1, v2) {
+    const p1 = v1.split('.').map(Number);
+    const p2 = v2.split('.').map(Number);
+    for (let i = 0; i < 3; i++) {
+        const n1 = p1[i] || 0;
+        const n2 = p2[i] || 0;
+        if (n1 !== n2) {
+            return n1 - n2;
+        }
+    }
+    return 0;
+}
+
+/**
+ * Prompts user for confirmation in the terminal
+ */
+function askConfirmation(query) {
+    const rl = readline.createInterface({
+        input: process.stdin,
+        output: process.stdout
+    });
+    return new Promise((resolve) => {
+        rl.question(query, (answer) => {
+            rl.close();
+            resolve(answer.trim());
+        });
+    });
 }
 
 function copyRequiredDirectory(sourcePath, destPath) {
@@ -313,6 +347,27 @@ async function main() {
     if (action && action !== 'none' && action !== 'skip' && action !== 'current' && action !== 'nobump') {
         console.log(`Current version in pubspec.yaml: ${currentFullVersion}`);
         targetFullVersion = calculateNextVersion(currentFullVersion, action);
+
+        const currentSemver = currentFullVersion.split('+')[0];
+        const targetSemver = targetFullVersion.split('+')[0];
+
+        if (compareSemver(targetSemver, currentSemver) < 0) {
+            console.warn(`\n⚠️  CẢNH BÁO: Bạn đang thực hiện hạ cấp phiên bản (Downgrade)!`);
+            console.warn(`   Phiên bản hiện tại: ${currentSemver}`);
+            console.warn(`   Phiên bản đích:     ${targetSemver}`);
+
+            if (process.stdin.isTTY) {
+                const answer = await askConfirmation(`Bạn có chắc chắn muốn hạ cấp phiên bản không? (y/N): `);
+                if (answer.toLowerCase() !== 'y' && answer.toLowerCase() !== 'yes') {
+                    console.log('❌ Đã hủy quá trình phát hành.');
+                    process.exit(1);
+                }
+            } else {
+                console.error('❌ Lỗi: Không được phép hạ cấp phiên bản trong chế độ không tương tác (Non-interactive mode).');
+                process.exit(1);
+            }
+        }
+
         updatePubspecVersion(targetFullVersion);
     } else {
         console.log(`Using current version from pubspec.yaml: ${currentFullVersion} (no version bump requested)`);
@@ -334,7 +389,8 @@ async function main() {
     // 2. Build Windows EXE
     console.log('\n[2/5] Building Flutter Windows Executable...');
     try {
-        execSync('flutter build windows --release', { cwd: CRM_DIR, stdio: 'inherit' });
+        const buildNum = targetFullVersion.split('+')[1] || '1';
+        execSync(`flutter build windows --release --build-name=${versionStr} --build-number=${buildNum}`, { cwd: CRM_DIR, stdio: 'inherit' });
         console.log('✅ Windows build files generated successfully!');
     } catch (err) {
         console.error('❌ Error building Windows app:', err.message);
