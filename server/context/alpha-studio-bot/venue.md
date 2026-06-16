@@ -37,8 +37,8 @@ Alpha Studio (tại địa chỉ https://giaiphapsangtao.com/) là một nền t
   - Ghép nối thiết bị: Người dùng tải ứng dụng Windows Client và ứng dụng di động Android APK (Pair Connector), sau đó quét mã QR từ điện thoại để liên kết bot Zalo.
   - Hạn mức AI (AI Quota) hàng tháng hỗ trợ soạn thảo, tối ưu kịch bản và phản hồi tin nhắn tự động.
 - **Gói dịch vụ & gia hạn**:
-  - Giấy phép chính gia hạn hàng tháng (1 tháng) giá 525 credits (hoặc 500.000đ) bao gồm 1000 lượt yêu cầu AI.
-  - Có các gói mua thêm hạn mức AI vĩnh viễn (AI Top-up): Gói +200 lượt AI (100 credits hoặc 100.000đ), gói +1000 lượt AI (500 credits hoặc 500.000đ), và gói +2000 lượt AI (1000 credits hoặc 1.000.000đ).
+  - Giấy phép chính gia hạn hàng tháng (1 tháng) giá 5250 credits (hoặc 500.000đ) bao gồm 1000 lượt yêu cầu AI.
+  - Có các gói mua thêm hạn mức AI vĩnh viễn (AI Top-up): Gói +200 lượt AI (1000 credits hoặc 100.000đ), gói +1000 lượt AI (5000 credits hoặc 500.000đ), và gói +2000 lượt AI (10000 credits hoặc 1.000.000đ).
   - Hỗ trợ thanh toán nhanh bằng số dư Ví Credits hoặc quét mã VietQR tự động duyệt 24/7.
 
 ## Học viện AI Academy & Kho tài nguyên

@@ -1,7 +1,8 @@
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { execSync } from 'child_process';
+import { execSync, spawn } from 'child_process';
+import http from 'http';
 import { S3Client, PutObjectCommand, GetObjectCommand, ListObjectsV2Command, DeleteObjectsCommand } from '@aws-sdk/client-s3';
 import dotenv from 'dotenv';
 import readline from 'readline';
@@ -129,6 +130,153 @@ function copyRequiredDirectory(sourcePath, destPath) {
     fs.cpSync(sourcePath, destPath, { recursive: true });
 }
 
+/**
+ * Copies only the runtime dependency closure of the given root packages from a
+ * source node_modules into a destination node_modules (flat install layout).
+ * Used to ship just the native better-sqlite3 closure beside the esbuild bundle,
+ * instead of the whole node_modules tree. Follows each package's "dependencies"
+ * recursively. dereference:true flattens any junction/symlink so the staged copy
+ * is a real folder (regression guard for the session-#52 junction bug).
+ * Returns the Set of staged package names.
+ */
+function stageDependencyClosure(srcNodeModules, destNodeModules, rootPackages, ignorePackages = []) {
+    const ignore = new Set(ignorePackages);
+    const visited = new Set();
+    const queue = [...rootPackages];
+    while (queue.length > 0) {
+        const pkgName = queue.shift();
+        if (visited.has(pkgName) || ignore.has(pkgName)) continue;
+        const srcPkgDir = path.join(srcNodeModules, pkgName);
+        if (!fs.existsSync(srcPkgDir)) {
+            throw new Error(
+                `[stage] Runtime dependency "${pkgName}" not found in ${srcNodeModules}. ` +
+                `Run "npm install" in the backend before releasing.`
+            );
+        }
+        visited.add(pkgName);
+        fs.cpSync(srcPkgDir, path.join(destNodeModules, pkgName), {
+            recursive: true,
+            dereference: true,
+        });
+        try {
+            const meta = JSON.parse(
+                fs.readFileSync(path.join(srcPkgDir, 'package.json'), 'utf8')
+            );
+            for (const dep of Object.keys(meta.dependencies || {})) {
+                if (!visited.has(dep)) queue.push(dep);
+            }
+        } catch { /* no resolvable dependencies to follow */ }
+    }
+    return visited;
+}
+
+/**
+ * Polls http://127.0.0.1:<port>/health until it returns 200 {status:'ok'} or times out.
+ * Resolves true if healthy, false on timeout.
+ */
+function waitForHealth(port, timeoutMs) {
+    return new Promise((resolve) => {
+        const deadline = Date.now() + timeoutMs;
+        const retry = () => {
+            if (Date.now() >= deadline) { resolve(false); return; }
+            setTimeout(tryOnce, 500);
+        };
+        const tryOnce = () => {
+            const req = http.get(
+                { host: '127.0.0.1', port, path: '/health', timeout: 2000 },
+                (res) => {
+                    let body = '';
+                    res.on('data', (c) => { body += c; });
+                    res.on('end', () => {
+                        try {
+                            const json = JSON.parse(body);
+                            if (res.statusCode === 200 && json.status === 'ok') {
+                                resolve(true);
+                                return;
+                            }
+                        } catch { /* not ready yet */ }
+                        retry();
+                    });
+                }
+            );
+            req.on('error', retry);
+            req.on('timeout', () => { req.destroy(); retry(); });
+        };
+        tryOnce();
+    });
+}
+
+/**
+ * Hardening guard: asserts the bundle + native addon are present and boots the staged
+ * backend on a throwaway port to confirm it serves /health before we zip & upload.
+ * Throws (aborting the release) if anything is wrong.
+ */
+async function verifyStagedBackend(serviceReleaseDir) {
+    // 1. The esbuild bundle must exist (this is the single production entrypoint).
+    const bundlePath = path.join(serviceReleaseDir, 'dist', 'server.cjs');
+    if (!fs.existsSync(bundlePath)) {
+        throw new Error(
+            `[verify] Bundled backend entrypoint missing: ${bundlePath}. ` +
+            `Run "npm run bundle" in the backend and re-run the release.`
+        );
+    }
+
+    // 2. The native addon better-sqlite3 cannot be inlined, so its compiled binary must be
+    //    staged as a real file (not a junction/symlink). Regression guard for session-#52.
+    const nativeAddon = path.join(
+        serviceReleaseDir, 'node_modules', 'better-sqlite3', 'build', 'Release', 'better_sqlite3.node'
+    );
+    const addonStat = fs.lstatSync(nativeAddon); // throws if missing
+    if (addonStat.isSymbolicLink()) {
+        throw new Error(
+            `[verify] better-sqlite3 native addon is a symlink/junction, not a real file: ${nativeAddon}.`
+        );
+    }
+
+    // 3. Smoke-test: boot the staged backend on a throwaway port and wait for /health.
+    const nodeExe = path.join(serviceReleaseDir, 'node.exe');
+    const entryJs = path.join(serviceReleaseDir, 'dist', 'server.cjs');
+    const SMOKE_PORT = 8799;
+
+    console.log(`[verify] Smoke-testing staged backend on port ${SMOKE_PORT}...`);
+    const child = spawn(nodeExe, [entryJs], {
+        cwd: serviceReleaseDir,
+        env: {
+            ...process.env,
+            PORT: String(SMOKE_PORT),
+            LOCAL_BIND_PORT: String(SMOKE_PORT),
+            NODE_ENV: 'production',
+        },
+        stdio: 'inherit',
+    });
+
+    let healthy = false;
+    try {
+        healthy = await waitForHealth(SMOKE_PORT, 15000);
+    } finally {
+        try {
+            if (process.platform === 'win32') {
+                execSync(`taskkill /PID ${child.pid} /T /F`, { stdio: 'ignore' });
+            } else {
+                child.kill('SIGKILL');
+            }
+        } catch { /* process may already be gone */ }
+    }
+
+    // Remove the ephemeral active-port.json the smoke-test wrote so it is not shipped.
+    try {
+        fs.rmSync(path.join(serviceReleaseDir, '.data', 'active-port.json'), { force: true });
+    } catch { /* ignore */ }
+
+    if (!healthy) {
+        throw new Error(
+            '[verify] Staged backend failed the /health smoke-test — release aborted. ' +
+            'Inspect the staged dist/ and node_modules under ' + serviceReleaseDir + '.'
+        );
+    }
+    console.log('[verify] Staged backend responded healthy on /health. OK.');
+}
+
 function stageZaloBackendForWindows(winReleaseDir) {
     const serviceReleaseDir = path.join(winReleaseDir, 'zalo-bot-service');
 
@@ -152,10 +300,19 @@ function stageZaloBackendForWindows(winReleaseDir) {
         path.join(ZALO_BOT_SERVICE_DIR, 'dist'),
         path.join(serviceReleaseDir, 'dist')
     );
-    copyRequiredDirectory(
+    // The backend ships as a single esbuild bundle (dist/server.cjs). Only the native
+    // addon better-sqlite3 cannot be inlined into JS, so stage just its runtime closure
+    // instead of the full 50MB+ node_modules tree. dereference:true flattens any
+    // junction/symlink (regression guard for the session-#52 zca-js junction bug).
+    const stagedDeps = stageDependencyClosure(
         path.join(ZALO_BOT_SERVICE_DIR, 'node_modules'),
-        path.join(serviceReleaseDir, 'node_modules')
+        path.join(serviceReleaseDir, 'node_modules'),
+        ['better-sqlite3'],
+        // prebuild-install only runs during "npm install" (to fetch the prebuilt binary);
+        // it is never required at runtime, so skip it and its ~25-package install-time tree.
+        ['prebuild-install']
     );
+    console.log(`Staged ${stagedDeps.size} native backend dependencies: ${[...stagedDeps].join(', ')}`);
 
     for (const fileName of ['package.json', 'package-lock.json', '.env.example', 'README.md']) {
         const sourcePath = path.join(ZALO_BOT_SERVICE_DIR, fileName);
@@ -175,7 +332,7 @@ function stageZaloBackendForWindows(winReleaseDir) {
             'setlocal',
             'set "SERVICE_DIR=%~dp0zalo-bot-service"',
             'set "NODE_EXE=%SERVICE_DIR%\\node.exe"',
-            'set "ENTRY_JS=%SERVICE_DIR%\\dist\\server.js"',
+            'set "ENTRY_JS=%SERVICE_DIR%\\dist\\server.cjs"',
             'if "%NODE_ENV%"=="" set "NODE_ENV=production"',
             'if not exist "%NODE_EXE%" (',
             '  echo Missing bundled Node.js runtime: "%NODE_EXE%" 1>&2',
@@ -397,11 +554,11 @@ async function main() {
         process.exit(1);
     }
 
-    // 3. Build local Zalo backend for the Windows package
-    console.log('\n[3/5] Building local Zalo backend...');
+    // 3. Build + bundle local Zalo backend for the Windows package
+    console.log('\n[3/5] Building local Zalo backend (esbuild single-file bundle)...');
     try {
-        execSync('npm.cmd run build', { cwd: ZALO_BOT_SERVICE_DIR, stdio: 'inherit' });
-        console.log('Local Zalo backend built successfully!');
+        execSync('npm.cmd run bundle', { cwd: ZALO_BOT_SERVICE_DIR, stdio: 'inherit' });
+        console.log('Local Zalo backend built + bundled successfully!');
     } catch (err) {
         console.error('Error building local Zalo backend:', err.message);
         process.exit(1);
@@ -419,6 +576,7 @@ async function main() {
     try {
         stageZaloBackendForWindows(winReleaseDir);
         console.log('Local Zalo backend staged beside the Windows app.');
+        await verifyStagedBackend(path.join(winReleaseDir, 'zalo-bot-service'));
 
         // Utilize native PowerShell Compress-Archive since the workspace is on Windows
         const zipCmd = `powershell -Command "Compress-Archive -Path '${winReleaseDir}\\*' -DestinationPath '${zipDestPath}' -Force"`;

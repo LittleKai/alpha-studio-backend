@@ -120,13 +120,13 @@ router.post('/generate-cards', authMiddleware, async (req, res) => {
             return res.status(404).json({ error: 'User not found' });
         }
 
-        const cost = 5; // 5 credits (coins) per generation when out of free uses
+        const cost = 50; // 50 credits (coins) per generation when out of free uses
         const usesFree = usage.freeUsesRemaining > 0;
 
-        if (!usesFree) {
+        if (!usesFree && user) {
             if (user.balance < cost) {
                 return res.status(400).json({
-                    error: 'Không đủ số dư để thực hiện thao tác này. Mỗi lượt tạo thẻ cần 5 xu.'
+                    error: 'Không đủ số dư để thực hiện thao tác này. Mỗi lượt tạo thẻ cần 50 credit.'
                 });
             }
         }

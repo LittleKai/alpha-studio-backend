@@ -499,17 +499,19 @@ router.post('/webhook-logs/:id/assign-user', async (req, res) => {
             return res.status(400).json({ success: false, message: 'Invalid amount in webhook' });
         }
 
-        // Calculate credits based on amount (using base rate: 1000 VND = 1 credit)
+        // Calculate credits based on amount (using base rate: 100 VND = 1 credit)
         // Or find matching package
         const CREDIT_PACKAGES = [
-            { price: 10000, credits: 10 },
-            { price: 100000, credits: 100 },
-            { price: 200000, credits: 210 },
-            { price: 500000, credits: 550 },
-            { price: 1000000, credits: 1120 }
+            { price: 10000, credits: 1000 },
+            { price: 20000, credits: 2000 },
+            { price: 50000, credits: 5000 },
+            { price: 100000, credits: 10000 },
+            { price: 200000, credits: 21000 },
+            { price: 500000, credits: 55000 },
+            { price: 1000000, credits: 112000 }
         ];
         const pkg = CREDIT_PACKAGES.find(p => p.price === amount);
-        const credits = pkg ? pkg.credits : Math.floor(amount / 1000);
+        const credits = pkg ? pkg.credits : Math.floor(amount / 100);
 
         // Create transaction record
         const transactionCode = `WEBHOOK${Date.now()}${Math.random().toString(36).substring(2, 6).toUpperCase()}`;

@@ -29,11 +29,11 @@ const BANK_INFO = {
 
 // Credit packages configuration
 const CREDIT_PACKAGES = [
-    { id: 'pkg0', credits: 500, price: 50000, label: '500 Credits' },
-    { id: 'pkg1', credits: 100, price: 100000, label: '100 Credits' },
-    { id: 'pkg2', credits: 210, price: 200000, label: '210 Credits', bonus: '+5%' },
-    { id: 'pkg3', credits: 550, price: 500000, label: '550 Credits', bonus: '+10%', popular: true },
-    { id: 'pkg4', credits: 1120, price: 1000000, label: '1.120 Credits', bonus: '+12%' }
+    { id: 'pkg_20k', credits: 2000, price: 20000, label: '2000 Credits' },
+    { id: 'pkg0', credits: 5000, price: 50000, label: '5000 Credits' },
+    { id: 'pkg1', credits: 10000, price: 100000, label: '10000 Credits' },
+    { id: 'pkg2', credits: 21000, price: 200000, label: '21000 Credits', bonus: '+5%' },
+    { id: 'pkg3', credits: 55000, price: 500000, label: '55000 Credits', bonus: '+10%', popular: true }
 ];
 
 /**
@@ -94,9 +94,9 @@ const getCreditsForAmount = (amount) => {
     const pkg = CREDIT_PACKAGES.find(p => p.price === amount);
     if (pkg) return pkg.credits;
 
-    // If exact match not found, calculate based on base rate (1000 VND = 1 credit)
+    // If exact match not found, calculate based on base rate (100 VND = 1 credit)
     // with no bonus
-    return Math.floor(amount / 1000);
+    return Math.floor(amount / 100);
 };
 
 /**

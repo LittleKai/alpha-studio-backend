@@ -8,7 +8,7 @@ export const CRM_PLANS = {
         id: 'crm_monthly',
         name: 'Gói Alpha CRM Hàng Tháng',
         priceVnd: 500000,
-        priceCredits: 525,
+        priceCredits: 5250,
         includedAiLimit: 1000,
         deviceLimit: 1,
         durationDays: 30
@@ -20,21 +20,21 @@ export const CRM_AI_PACKS = {
         id: 'crm_ai_pack_100',
         name: 'Gói AI Top-up 200',
         priceVnd: 50000,
-        priceCredits: 50,
+        priceCredits: 500,
         extraAiLimit: 200
     },
     crm_ai_pack_500: {
         id: 'crm_ai_pack_500',
         name: 'Gói AI Top-up 1000',
         priceVnd: 200000,
-        priceCredits: 200,
+        priceCredits: 2000,
         extraAiLimit: 1000
     },
     crm_ai_pack_1000: {
         id: 'crm_ai_pack_1000',
         name: 'Gói AI Top-up 2000',
         priceVnd: 350000,
-        priceCredits: 350,
+        priceCredits: 3500,
         extraAiLimit: 2000
     }
 };

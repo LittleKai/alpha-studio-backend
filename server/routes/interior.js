@@ -72,8 +72,8 @@ async function presignImageUrls(urls) {
 
 const router = express.Router();
 
-const INTERIOR_AI_CREDIT_COST = 1;
-const INTERIOR_AGENT_CREDIT_COST = 2;
+const INTERIOR_AI_CREDIT_COST = 10;
+const INTERIOR_AGENT_CREDIT_COST = 20;
 const MAX_USER_PROMPT_CHARS = 8000;
 const MAX_VERSIONS_PER_PROJECT = 300;
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
