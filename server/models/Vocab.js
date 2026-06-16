@@ -163,3 +163,14 @@ const vocabAiUsageSchema = new mongoose.Schema({
 
 export const VocabAiUsage = mongoose.model('VocabAiUsage', vocabAiUsageSchema);
 
+const vocabDictionaryCacheSchema = new mongoose.Schema({
+    key: { type: String, required: true, unique: true, index: true },
+    responseBody: { type: String, required: true },
+    contentType: { type: String, default: null },
+    statusCode: { type: Number, default: 200 },
+}, { timestamps: true });
+
+vocabDictionaryCacheSchema.index({ createdAt: 1 }, { expireAfterSeconds: 7 * 24 * 60 * 60 });
+
+export const VocabDictionaryCache = mongoose.model('VocabDictionaryCache', vocabDictionaryCacheSchema);
+

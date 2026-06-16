@@ -1,5 +1,6 @@
 import express from 'express';
 import mongoose from 'mongoose';
+import crypto from 'crypto';
 import { authMiddleware } from '../middleware/auth.js';
 import User from '../models/User.js';
 import Transaction from '../models/Transaction.js';
@@ -14,6 +15,7 @@ import {
     VocabPrivateDeck,
     VocabPrivateFlashcard,
     VocabChineseDictionary,
+    VocabDictionaryCache,
 } from '../models/Vocab.js';
 
 const router = express.Router();
@@ -794,14 +796,15 @@ router.get('/my-decks/cards/:cardId', authMiddleware, async (req, res) => {
 router.get('/my-decks/:deckId', authMiddleware, async (req, res) => {
     try {
         const uId = userId(req);
-        const deck = await VocabPrivateDeck.findOne({ deckId: req.params.deckId, userId: uId });
+        const deckId = req.params.deckId.toUpperCase();
+        const deck = await VocabPrivateDeck.findOne({ deckId, userId: uId });
         if (!deck) {
             return res.status(404).json({ success: false, message: 'Deck not found' });
         }
 
         const now = new Date();
         const counts = await VocabPrivateFlashcard.aggregate([
-            { $match: { deckId: req.params.deckId, userId: new mongoose.Types.ObjectId(uId.toString()) } },
+            { $match: { deckId, userId: new mongoose.Types.ObjectId(uId.toString()) } },
             {
                 $group: {
                     _id: "$deckId",
@@ -905,7 +908,8 @@ router.post('/my-decks', authMiddleware, async (req, res) => {
 router.put('/my-decks/:deckId', authMiddleware, async (req, res) => {
     try {
         const uId = userId(req);
-        const deck = await VocabPrivateDeck.findOne({ deckId: req.params.deckId, userId: uId });
+        const deckId = req.params.deckId.toUpperCase();
+        const deck = await VocabPrivateDeck.findOne({ deckId, userId: uId });
         if (!deck) {
             return res.status(404).json({ success: false, message: 'Deck not found' });
         }
@@ -942,12 +946,13 @@ router.put('/my-decks/:deckId', authMiddleware, async (req, res) => {
 router.delete('/my-decks/:deckId', authMiddleware, async (req, res) => {
     try {
         const uId = userId(req);
-        const deck = await VocabPrivateDeck.findOne({ deckId: req.params.deckId, userId: uId });
+        const deckId = req.params.deckId.toUpperCase();
+        const deck = await VocabPrivateDeck.findOne({ deckId, userId: uId });
         if (!deck) {
             return res.status(404).json({ success: false, message: 'Deck not found' });
         }
 
-        await VocabPrivateFlashcard.deleteMany({ deckId: req.params.deckId, userId: uId });
+        await VocabPrivateFlashcard.deleteMany({ deckId, userId: uId });
         await VocabPrivateDeck.deleteOne({ _id: deck._id });
 
         return ok(res, null, 'Deck deleted');
@@ -960,12 +965,13 @@ router.delete('/my-decks/:deckId', authMiddleware, async (req, res) => {
 router.get('/my-decks/:deckId/cards', authMiddleware, async (req, res) => {
     try {
         const uId = userId(req);
-        const deck = await VocabPrivateDeck.findOne({ deckId: req.params.deckId, userId: uId });
+        const deckId = req.params.deckId.toUpperCase();
+        const deck = await VocabPrivateDeck.findOne({ deckId, userId: uId });
         if (!deck) {
             return res.status(404).json({ success: false, message: 'Deck not found' });
         }
 
-        const cards = await VocabPrivateFlashcard.find({ deckId: req.params.deckId, userId: uId }).sort({ createdAt: 1 });
+        const cards = await VocabPrivateFlashcard.find({ deckId, userId: uId }).sort({ createdAt: 1 });
         return ok(res, cards.map(serializePrivateFlashcard));
     } catch (error) {
         console.error('Get private cards error:', error);
@@ -976,14 +982,15 @@ router.get('/my-decks/:deckId/cards', authMiddleware, async (req, res) => {
 router.get('/my-decks/:deckId/due-cards', authMiddleware, async (req, res) => {
     try {
         const uId = userId(req);
-        const deck = await VocabPrivateDeck.findOne({ deckId: req.params.deckId, userId: uId });
+        const deckId = req.params.deckId.toUpperCase();
+        const deck = await VocabPrivateDeck.findOne({ deckId, userId: uId });
         if (!deck) {
             return res.status(404).json({ success: false, message: 'Deck not found' });
         }
 
         const now = new Date();
         const cards = await VocabPrivateFlashcard.find({
-            deckId: req.params.deckId,
+            deckId,
             userId: uId,
             $or: [
                 { repetitions: 0 },
@@ -1008,7 +1015,8 @@ router.get('/my-decks/:deckId/due-cards', authMiddleware, async (req, res) => {
 router.post('/my-decks/:deckId/cards', authMiddleware, async (req, res) => {
     try {
         const uId = userId(req);
-        const deck = await VocabPrivateDeck.findOne({ deckId: req.params.deckId, userId: uId });
+        const deckId = req.params.deckId.toUpperCase();
+        const deck = await VocabPrivateDeck.findOne({ deckId, userId: uId });
         if (!deck) {
             return res.status(404).json({ success: false, message: 'Deck not found' });
         }
@@ -1023,7 +1031,7 @@ router.post('/my-decks/:deckId/cards', authMiddleware, async (req, res) => {
 
         const card = await VocabPrivateFlashcard.create({
             cardId,
-            deckId: req.params.deckId,
+            deckId,
             userId: uId,
             front: body.front,
             frontPhonetic: body.front_phonetic || null,
@@ -1052,7 +1060,8 @@ router.post('/my-decks/:deckId/cards', authMiddleware, async (req, res) => {
 router.post('/my-decks/:deckId/cards/batch', authMiddleware, async (req, res) => {
     try {
         const uId = userId(req);
-        const deck = await VocabPrivateDeck.findOne({ deckId: req.params.deckId, userId: uId });
+        const deckId = req.params.deckId.toUpperCase();
+        const deck = await VocabPrivateDeck.findOne({ deckId, userId: uId });
         if (!deck) {
             return res.status(404).json({ success: false, message: 'Deck not found' });
         }
@@ -1066,7 +1075,7 @@ router.post('/my-decks/:deckId/cards/batch', authMiddleware, async (req, res) =>
             const cardId = String(c.id || new mongoose.Types.ObjectId().toString());
             return {
                 cardId,
-                deckId: req.params.deckId,
+                deckId,
                 userId: uId,
                 front: c.front,
                 frontPhonetic: c.front_phonetic || null,
@@ -1223,6 +1232,106 @@ router.delete('/my-decks/:deckId/cards/:cardId', authMiddleware, async (req, res
     } catch (error) {
         console.error('Delete private card error:', error);
         return res.status(500).json({ success: false, message: 'Cannot delete card' });
+    }
+});
+
+router.post('/dictionary/proxy', authMiddleware, async (req, res) => {
+    try {
+        const { url, method, headers, data } = req.body;
+
+        if (!url) {
+            return res.status(400).json({ success: false, message: 'URL is required' });
+        }
+
+        // Whitelist validation to prevent SSRF
+        const allowedHosts = [
+            'dict.laban.vn',
+            'mazii.net',
+            'jisho.org',
+            'api.dictionaryapi.dev'
+        ];
+
+        let parsedUrl;
+        try {
+            parsedUrl = new URL(url);
+        } catch (e) {
+            return res.status(400).json({ success: false, message: 'Invalid URL' });
+        }
+
+        if (!allowedHosts.includes(parsedUrl.host)) {
+            return res.status(403).json({ success: false, message: 'Forbidden: Host not allowed' });
+        }
+
+        // Generate cache key based on URL, method, and request data
+        const cacheKey = crypto.createHash('sha256').update(JSON.stringify({ url, method, data })).digest('hex');
+
+        // Check cache first
+        const cached = await VocabDictionaryCache.findOne({ key: cacheKey });
+        if (cached) {
+            if (cached.contentType) {
+                res.setHeader('Content-Type', cached.contentType);
+            }
+            return res.status(cached.statusCode).send(cached.responseBody);
+        }
+
+        // Clean headers to forward, excluding host/origin/cookie/auth
+        const cleanHeaders = {};
+        if (headers) {
+            for (const [key, value] of Object.entries(headers)) {
+                const lowerKey = key.toLowerCase();
+                if (
+                    lowerKey !== 'host' &&
+                    lowerKey !== 'origin' &&
+                    lowerKey !== 'referer' &&
+                    lowerKey !== 'cookie' &&
+                    lowerKey !== 'authorization'
+                ) {
+                    cleanHeaders[key] = value;
+                }
+            }
+        }
+
+        // Ensure user-agent is set
+        if (!cleanHeaders['user-agent'] && !cleanHeaders['User-Agent']) {
+            cleanHeaders['User-Agent'] = 'VocabFlip/1.0';
+        }
+
+        const fetchOptions = {
+            method: method || 'GET',
+            headers: cleanHeaders,
+        };
+
+        if (data && (method === 'POST' || method === 'PUT' || method === 'PATCH')) {
+            fetchOptions.body = typeof data === 'object' ? JSON.stringify(data) : data;
+        }
+
+        const response = await fetch(url, fetchOptions);
+        const responseData = await response.text();
+        const contentType = response.headers.get('content-type');
+
+        // Only cache successful or non-server-error responses (2xx/3xx/404)
+        if (response.status < 500) {
+            try {
+                await VocabDictionaryCache.create({
+                    key: cacheKey,
+                    responseBody: responseData,
+                    contentType,
+                    statusCode: response.status,
+                });
+            } catch (cacheError) {
+                console.error('Failed to write to dictionary cache:', cacheError);
+            }
+        }
+
+        if (contentType) {
+            res.setHeader('Content-Type', contentType);
+        }
+
+        return res.status(response.status).send(responseData);
+
+    } catch (error) {
+        console.error('Dictionary proxy error:', error);
+        return res.status(500).json({ success: false, message: 'Proxy request failed' });
     }
 });
 
