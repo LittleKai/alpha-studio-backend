@@ -3115,6 +3115,77 @@ router.get('/agent/chatbot/config', agentAuthMiddleware, async (req, res) => {
     }
 });
 
+// Derive a sendable media type from a file name/URL extension. Mirrors the
+// Flutter KnowledgeAttachmentType logic so the bridge can route the send.
+function guessChatbotAttachmentType(nameOrUrl) {
+    const ext = String(nameOrUrl || '')
+        .split('?')[0]
+        .split('#')[0]
+        .split('.')
+        .pop()
+        .toLowerCase();
+    if (['jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp', 'heic', 'heif'].includes(ext)) return 'image';
+    if (['mp4', 'mov', 'webm', 'mkv', 'avi', 'm4v'].includes(ext)) return 'video';
+    if (['mp3', 'wav', 'm4a', 'aac', 'ogg', 'opus'].includes(ext)) return 'audio';
+    return 'file';
+}
+
+// Knowledge snippets serialize attachments as:
+//   - [File] Tên: NAME | URL: URL | Mô tả: DESC
+// Extract them into a catalog the AI can reference by short id (F1, F2, ...).
+function extractChatbotAttachmentCatalog(snippets) {
+    const catalog = [];
+    const seenUrls = new Set();
+    const lineRe = /\[File\]\s*Tên:\s*(.+?)\s*\|\s*URL:\s*(\S+)\s*(?:\|\s*Mô tả:\s*(.*))?$/;
+    for (const snippet of snippets || []) {
+        for (const rawLine of String(snippet).split('\n')) {
+            const match = rawLine.match(lineRe);
+            if (!match) continue;
+            const name = (match[1] || '').trim();
+            const url = (match[2] || '').trim();
+            if (!/^https?:\/\//i.test(url) || seenUrls.has(url)) continue;
+            seenUrls.add(url);
+            catalog.push({
+                id: `F${catalog.length + 1}`,
+                name,
+                url,
+                type: guessChatbotAttachmentType(name || url),
+                desc: (match[3] || '').trim()
+            });
+        }
+    }
+    return catalog;
+}
+
+// Resolve [[SEND:Fx]] markers from the AI reply into concrete attachments and
+// strip them (plus any stray filename markers) from the customer-facing text.
+function resolveChatbotReplyAttachments(rawReply, catalog) {
+    const byId = new Map(catalog.map((item) => [item.id.toUpperCase(), item]));
+    const picked = [];
+    const pickedUrls = new Set();
+    let text = String(rawReply || '').replace(
+        /\[\[\s*SEND\s*:\s*([^\]]+?)\s*\]\]/gi,
+        (_, ids) => {
+            for (const part of String(ids).split(/[\s,]+/)) {
+                const item = byId.get(part.trim().toUpperCase());
+                if (item && !pickedUrls.has(item.url)) {
+                    pickedUrls.add(item.url);
+                    picked.push({ type: item.type, url: item.url, name: item.name });
+                }
+            }
+            return '';
+        }
+    );
+    // Defensive: the AI sometimes still types a filename marker instead of (or
+    // alongside) the SEND marker. Never leak those as text.
+    text = text.replace(/\[(?:File|Image|Video|Audio|Tệp|Ảnh)\]\s*[^\[\n]*/gi, '');
+    text = text
+        .replace(/[ \t]+\n/g, '\n')
+        .replace(/\n{3,}/g, '\n\n')
+        .trim();
+    return { reply: text, attachments: picked };
+}
+
 router.post(
     '/agent/chatbot/generate',
     crmAiLimiter,
@@ -3166,7 +3237,19 @@ router.post(
             const knowledge = settings.knowledgeSnippets?.length
                 ? `\n\nKien thuc noi bo:\n${settings.knowledgeSnippets.join('\n---\n')}`
                 : '';
-            const promptContent = `${aiInstructions}${knowledge}\n\nTin nhan khach hang: ${customerMessage}`;
+            const attachmentCatalog = extractChatbotAttachmentCatalog(settings.knowledgeSnippets);
+            let sendInstructions = '';
+            if (attachmentCatalog.length) {
+                const catalogLines = attachmentCatalog
+                    .map((item) => `[${item.id}] ${item.name}${item.desc ? ` — ${item.desc}` : ''} (${item.type})`)
+                    .join('\n');
+                sendInstructions =
+                    `\n\nTep co the gui cho khach:\n${catalogLines}\n` +
+                    'QUY TAC GUI TEP: Khi muon gui mot tep cho khach, chen marker dang [[SEND:F1]] (dung dung id o danh sach tren, co the nhieu marker) vao cau tra loi. ' +
+                    'TUYET DOI khong tu go ten tep, khong dan URL, khong mo ta ten file bang chu. ' +
+                    'Chi gui tep khi that su lien quan den cau hoi cua khach; neu khong can thi khong chen marker nao.';
+            }
+            const promptContent = `${aiInstructions}${knowledge}${sendInstructions}\n\nTin nhan khach hang: ${customerMessage}`;
             const quotaUnits = getChatbotModelQuotaUnits(settings.aiModel);
             const { aiResponse, usageDoc, quota } = await runCrmAiWithQuota(req, {
                 promptContent,
@@ -3178,10 +3261,15 @@ router.post(
                 forceGcliDirect: true,
                 quotaUnits
             });
+            const { reply, attachments } = resolveChatbotReplyAttachments(
+                aiResponse.text,
+                attachmentCatalog
+            );
             res.json({
                 success: true,
                 data: {
-                    reply: String(aiResponse.text || '').trim(),
+                    reply,
+                    attachments,
                     usage: {
                         id: usageDoc._id,
                         model: aiResponse.model || settings.aiModel,
