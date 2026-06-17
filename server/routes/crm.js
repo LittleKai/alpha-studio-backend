@@ -3131,25 +3131,27 @@ function guessChatbotAttachmentType(nameOrUrl) {
 }
 
 // Knowledge snippets serialize attachments as:
-//   - [File] Tên: NAME | URL: URL | Mô tả: DESC
-// Extract them into a catalog the AI can reference by short id (F1, F2, ...).
+//   - [File] Tên: NAME | ID: <content-hash> | Mô tả: DESC
+// The id references a file stored locally by the bridge knowledge store (the
+// bytes never reach the cloud). Extract them into a catalog the AI can pick from
+// by short alias (F1, F2, ...).
 function extractChatbotAttachmentCatalog(snippets) {
     const catalog = [];
-    const seenUrls = new Set();
-    const lineRe = /\[File\]\s*Tên:\s*(.+?)\s*\|\s*URL:\s*(\S+)\s*(?:\|\s*Mô tả:\s*(.*))?$/;
+    const seenIds = new Set();
+    const lineRe = /\[File\]\s*Tên:\s*(.+?)\s*\|\s*ID:\s*(\S+)\s*(?:\|\s*Mô tả:\s*(.*))?$/;
     for (const snippet of snippets || []) {
         for (const rawLine of String(snippet).split('\n')) {
             const match = rawLine.match(lineRe);
             if (!match) continue;
             const name = (match[1] || '').trim();
-            const url = (match[2] || '').trim();
-            if (!/^https?:\/\//i.test(url) || seenUrls.has(url)) continue;
-            seenUrls.add(url);
+            const refId = (match[2] || '').trim();
+            if (!refId || seenIds.has(refId)) continue;
+            seenIds.add(refId);
             catalog.push({
-                id: `F${catalog.length + 1}`,
+                alias: `F${catalog.length + 1}`,
+                refId,
                 name,
-                url,
-                type: guessChatbotAttachmentType(name || url),
+                type: guessChatbotAttachmentType(name),
                 desc: (match[3] || '').trim()
             });
         }
@@ -3160,17 +3162,17 @@ function extractChatbotAttachmentCatalog(snippets) {
 // Resolve [[SEND:Fx]] markers from the AI reply into concrete attachments and
 // strip them (plus any stray filename markers) from the customer-facing text.
 function resolveChatbotReplyAttachments(rawReply, catalog) {
-    const byId = new Map(catalog.map((item) => [item.id.toUpperCase(), item]));
+    const byAlias = new Map(catalog.map((item) => [item.alias.toUpperCase(), item]));
     const picked = [];
-    const pickedUrls = new Set();
+    const pickedIds = new Set();
     let text = String(rawReply || '').replace(
         /\[\[\s*SEND\s*:\s*([^\]]+?)\s*\]\]/gi,
         (_, ids) => {
             for (const part of String(ids).split(/[\s,]+/)) {
-                const item = byId.get(part.trim().toUpperCase());
-                if (item && !pickedUrls.has(item.url)) {
-                    pickedUrls.add(item.url);
-                    picked.push({ type: item.type, url: item.url, name: item.name });
+                const item = byAlias.get(part.trim().toUpperCase());
+                if (item && !pickedIds.has(item.refId)) {
+                    pickedIds.add(item.refId);
+                    picked.push({ type: item.type, id: item.refId, name: item.name });
                 }
             }
             return '';
@@ -3241,7 +3243,7 @@ router.post(
             let sendInstructions = '';
             if (attachmentCatalog.length) {
                 const catalogLines = attachmentCatalog
-                    .map((item) => `[${item.id}] ${item.name}${item.desc ? ` — ${item.desc}` : ''} (${item.type})`)
+                    .map((item) => `[${item.alias}] ${item.name}${item.desc ? ` — ${item.desc}` : ''} (${item.type})`)
                     .join('\n');
                 sendInstructions =
                     `\n\nTep co the gui cho khach:\n${catalogLines}\n` +
