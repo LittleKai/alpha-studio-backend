@@ -493,14 +493,24 @@ async function cleanupOldReleases(s3, currentVersionStr) {
 }
 
 async function main() {
-    console.log('=== ALPHA CRM AUTOMATED B2 RELEASE ===');
+    // Flags: --no-upload (alias --local) builds app + backend, stages and zips
+    // locally, then STOPS before uploading to B2 (no B2 credentials needed).
+    const rawArgs = process.argv.slice(2);
+    const noUpload = rawArgs.includes('--no-upload') || rawArgs.includes('--local');
+    const positionalArgs = rawArgs.filter((arg) => !arg.startsWith('--'));
 
-    if (!B2_ENDPOINT || !B2_ACCESS_KEY_ID || !B2_SECRET_ACCESS_KEY || !B2_BUCKET_NAME || !CDN_BASE_URL) {
+    console.log(
+        noUpload
+            ? '=== ALPHA CRM LOCAL BUILD (app + backend, no B2 upload) ==='
+            : '=== ALPHA CRM AUTOMATED B2 RELEASE ==='
+    );
+
+    if (!noUpload && (!B2_ENDPOINT || !B2_ACCESS_KEY_ID || !B2_SECRET_ACCESS_KEY || !B2_BUCKET_NAME || !CDN_BASE_URL)) {
         console.error('❌ Error: Missing B2 environment variables in backend .env file!');
         process.exit(1);
     }
 
-    const action = process.argv[2]; // 'patch', 'minor', 'major', '1.0.2', or undefined to skip bump
+    const action = positionalArgs[0]; // 'patch', 'minor', 'major', '1.0.2', or undefined to skip bump
     const currentFullVersion = getPubspecVersion();
     let targetFullVersion = currentFullVersion;
 
@@ -534,7 +544,7 @@ async function main() {
     }
 
     const versionStr = targetFullVersion.split('+')[0]; // major.minor.patch
-    const releaseNotes = process.argv[3] || `Bản phát hành tự động Alpha CRM v${versionStr}`;
+    const releaseNotes = positionalArgs[1] || `Bản phát hành tự động Alpha CRM v${versionStr}`;
 
     // 1. Build APK (Android)
     console.log('\n[1/5] Building Flutter APK...');
@@ -589,6 +599,17 @@ async function main() {
     } catch (err) {
         console.error('❌ Error zipping Windows release:', err.message);
         process.exit(1);
+    }
+
+    // Local-only mode: stop after building + bundling + zipping (no B2 upload).
+    if (noUpload) {
+        const localSize = (fs.statSync(zipDestPath).size / 1024 / 1024).toFixed(2);
+        console.log('\n[5/5] Skipping B2 upload (--no-upload).');
+        console.log('\n=== LOCAL BUILD FINISHED SUCCESSFULLY! ===');
+        console.log(`Version: v${versionStr}`);
+        console.log(`Windows ZIP: ${zipDestPath} (${localSize} MB)`);
+        console.log(`Unzipped app + backend: ${winReleaseDir}`);
+        return;
     }
 
     // 5. Upload to Backblaze B2
