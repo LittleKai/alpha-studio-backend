@@ -1,3 +1,6 @@
+// Note: The release/build flow and usage options are documented in the skill file:
+// alpha-studio/.claude/skills/CRM_AUTOMATED_RELEASE_SKILL.md
+
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
@@ -536,8 +539,8 @@ async function main() {
     // 1. Build APK (Android)
     console.log('\n[1/5] Building Flutter APK...');
     try {
-        execSync('shorebird release android --artifact apk', { cwd: CRM_DIR, stdio: 'inherit' });
-        console.log('✅ APK built successfully!');
+        // execSync('shorebird release android --artifact apk', { cwd: CRM_DIR, stdio: 'inherit' });
+        console.log('✅ APK built successfully! (SKIPPED FOR WINDOWS ONLY)');
     } catch (err) {
         console.error('❌ Error building APK:', err.message);
         process.exit(1);
@@ -602,27 +605,15 @@ async function main() {
         responseChecksumValidation: 'WHEN_REQUIRED',
     });
 
-    const apkLocalPath = path.join(CRM_DIR, 'build/app/outputs/flutter-apk/app-release.apk');
-    const apkKey = `crm-app/releases/alpha-crm-v${versionStr}.apk`;
     const winKey = 'crm-app/releases/alpha-crm-windows.zip';
 
-    const apkSize = fs.statSync(apkLocalPath).size;
     const winSize = fs.statSync(zipDestPath).size;
 
-    const apkUrl = `${CDN_BASE_URL}/${apkKey}`;
     const winUrl = `${CDN_BASE_URL}/${winKey}`;
 
     try {
         // Upload APK
-        console.log(`Uploading Android APK: ${apkKey} (${(apkSize / 1024 / 1024).toFixed(2)} MB)...`);
-        const apkBuffer = fs.readFileSync(apkLocalPath);
-        await s3.send(new PutObjectCommand({
-            Bucket: B2_BUCKET_NAME,
-            Key: apkKey,
-            Body: apkBuffer,
-            ContentType: 'application/vnd.android.package-archive'
-        }));
-        console.log(`✅ APK uploaded successfully! URL: ${apkUrl}`);
+        console.log(`Uploading Android APK: Skipped`);
 
         // Upload ZIP
         console.log(`Uploading Windows ZIP: ${winKey} (${(winSize / 1024 / 1024).toFixed(2)} MB)...`);
@@ -669,11 +660,6 @@ async function main() {
         // Set the assets with exact metadata sizes & public URLs
         versionJson.assets = [
             {
-                name: `alpha-crm-v${versionStr}.apk`,
-                browser_download_url: apkUrl,
-                size: apkSize
-            },
-            {
                 name: 'alpha-crm-windows.zip',
                 browser_download_url: winUrl,
                 size: winSize
@@ -693,7 +679,6 @@ async function main() {
         await cleanupOldReleases(s3, versionStr);
 
         console.log('\n=== RELEASE FINISHED SUCCESSFULLY! ===');
-        console.log(`Android Download URL: ${apkUrl}`);
         console.log(`Windows Download URL: ${winUrl}`);
         console.log(`Metadata URL: ${CDN_BASE_URL}/${versionKey}`);
 
