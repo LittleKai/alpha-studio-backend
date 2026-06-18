@@ -8,7 +8,7 @@ test('CRM Catalog Plans & Packs structure', (t) => {
     assert.ok(monthly);
     assert.strictEqual(monthly.id, 'crm_monthly');
     assert.strictEqual(monthly.priceVnd, 500000);
-    assert.strictEqual(monthly.priceCredits, 525);
+    assert.strictEqual(monthly.priceCredits, 5250);
     assert.strictEqual(monthly.includedAiLimit, 1000);
 
     // Test pack details

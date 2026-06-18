@@ -100,7 +100,7 @@ const CHATBOT_PRO_AI_MODEL = 'gemini-3.1-pro-preview';
 
 const defaultChatbotSettings = {
     enabled: true,
-    aiEnabled: true,
+    aiEnabled: false,
     aiModel: CHATBOT_DEFAULT_AI_MODEL,
     systemPrompt: 'Bạn là một người hỗ trợ tư vấn khách hàng Zalo. Hãy phản hồi tự nhiên, ngắn gọn và đời thường như một người thật, tránh viết quá dài (dưới 40 từ). Đặc biệt: CHỈ gửi lời chào (như Chào bạn, Dạ chào anh/chị) ở câu đầu tiên của cuộc hội thoại, từ các câu tiếp theo tuyệt đối không lặp lại câu chào hỏi nữa mà trả lời thẳng vào vấn đề.',
     soulPrompt: 'Bạn là nhân viên tư vấn Zalo của doanh nghiệp: chuyên nghiệp, gần gũi, hiểu sản phẩm/dịch vụ, không tiết lộ mình là AI, không nói về hệ thống nội bộ.',
@@ -108,10 +108,13 @@ const defaultChatbotSettings = {
     temperature: 0.7,
     debounceSeconds: 5,
     personalAudience: 'all',
-    groupAudience: 'none',
+    groupAudience: 'tagOnly',
     selectedGroupKeys: [],
     handoffKeywords: ['nhan vien', 'nguoi that', 'tu van vien', 'gap admin', 'human'],
-    knowledgeSnippets: []
+    knowledgeSnippets: [
+        'Báo giá dịch vụ Alpha CRM phiên bản 2026:\n- Gói Startup: 199.000đ/tháng (tối đa 3 tài khoản Zalo).\n- Gói Business: 499.000đ/tháng (không giới hạn tài khoản Zalo, tích hợp n8n).\n- Gói Enterprise: Liên hệ để nhận ưu đãi thiết kế riêng.\n[File] Tên: Bao_Gia_Alpha_CRM_2026.pdf | ID: 2b8c4d5e6f7a8b9c0d1e2f3a4b5c6d7e | Mô tả: Bảng báo giá dịch vụ Alpha CRM.',
+        'Catalogue và hướng dẫn sử dụng sản phẩm Alpha Studio:\n- Bộ giải pháp marketing Zalo tự động hóa toàn diện.\n- Hỗ trợ gửi tin nhắn hàng loạt, quản lý nhóm, phân nhóm khách hàng, tích hợp AI chatbot.\n- Hướng dẫn cài đặt nhanh cho hệ điều hành Windows và Android.\n[File] Tên: Catalogue_Alpha_Studio_2026.pdf | ID: 9a8b7c6d5e4f3a2b1c0d9e8f7a6b5c4d | Mô tả: Catalogue sản phẩm và hướng dẫn cài đặt.'
+    ]
 };
 
 function normalizeChatbotAiModel(value) {
@@ -3390,7 +3393,48 @@ router.put('/chatbot/settings', authMiddleware, requireActiveSubscription, async
 
 router.get('/chatbot/rules', authMiddleware, async (req, res) => {
     try {
-        const rules = await CrmChatbotRule.find({ userId: req.user._id }).sort({ priority: 1, createdAt: -1 });
+        let rules = await CrmChatbotRule.find({ userId: req.user._id }).sort({ priority: 1, createdAt: -1 });
+        if (rules.length === 0) {
+            const defaultRules = [
+                {
+                    userId: req.user._id,
+                    name: 'Chào hỏi khách hàng',
+                    description: 'Tự động phản hồi khi khách hàng nhắn chào hỏi',
+                    keywords: ['xin chao', 'hello', 'hi', 'chao ban', 'alo'],
+                    matchMode: 'contains',
+                    response: 'Dạ xin chào anh/chị! Em có thể hỗ trợ gì cho anh/chị về giải pháp marketing tự động Alpha CRM ạ?',
+                    isActive: true,
+                    priority: 1,
+                    channelScope: 'all',
+                    handoffKeywords: []
+                },
+                {
+                    userId: req.user._id,
+                    name: 'Yêu cầu gửi báo giá',
+                    description: 'Tự động gửi file báo giá khi khách hàng hỏi về giá hoặc chi phí',
+                    keywords: ['bao gia', 'chi phi', 'gia ca', 'bao nhieu', 'báo giá'],
+                    matchMode: 'contains',
+                    response: 'Dạ, em gửi anh/chị thông tin chi tiết bảng báo giá dịch vụ Alpha CRM mới nhất nhé ạ.\n\n[[SEND:F1]]',
+                    isActive: true,
+                    priority: 2,
+                    channelScope: 'all',
+                    handoffKeywords: []
+                },
+                {
+                    userId: req.user._id,
+                    name: 'Hỏi về Catalogue/Sản phẩm',
+                    description: 'Tự động gửi tài liệu giới thiệu sản phẩm khi khách hỏi thông tin',
+                    keywords: ['catalogue', 'san pham', 'tinh nang', 'tim hieu', 'gioi thieu'],
+                    matchMode: 'contains',
+                    response: 'Dạ, gửi anh/chị cuốn catalogue giới thiệu sản phẩm và các tính năng của Alpha CRM để anh/chị tham khảo ạ:\n\n[[SEND:F2]]',
+                    isActive: true,
+                    priority: 3,
+                    channelScope: 'all',
+                    handoffKeywords: []
+                }
+            ];
+            rules = await CrmChatbotRule.create(defaultRules);
+        }
         res.json({ success: true, data: rules });
     } catch (error) {
         console.error('Chatbot rules list error:', error);
