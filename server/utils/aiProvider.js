@@ -301,16 +301,43 @@ export async function callOpenClaw(content, sessionId) {
 }
 
 /**
+ * Map tên model hiển thị (UI) → mã model thực tế gửi lên gcli upstream.
+ * 2026-06: các mã `-preview` cũ tạm thời không khả dụng → chuyển sang `假流式-agy-*-low`.
+ * Khôi phục sau: đổi value về mã cũ ghi trong comment (KHÔNG xóa).
+ * Tên không có trong map → gửi nguyên (fallback an toàn).
+ */
+const GCLI_MODEL_CODE_MAP = {
+    // Tên model UI hiện tại → mã 假流式.
+    'gemini-2.5-flash': '假流式-agy-gemini-2.5-flash-low', // cũ: 'gemini-2.5-flash'
+    'gemini-3-flash': '假流式-agy-gemini-3-flash-low',     // cũ: 'gemini-3-flash-preview'
+    'gemini-3.5-flash': '假流式-agy-gemini-3.5-flash-low', // mới
+    'gemini-3.1-pro': '假流式-agy-gemini-3.1-pro-low',     // cũ: 'gemini-3.1-pro-preview'
+    // ⚠️ NHẮC: nếu bạn (Claude) chỉnh sửa file aiProvider.js này, HÃY HỎI LẠI USER
+    // xem đã có thể XÓA phần alias tương thích ngược bên dưới chưa (client/tool bản
+    // cũ đã cập nhật hết hay chưa). Đừng tự ý xóa.
+    // ---
+    // Alias tương thích ngược: client/tool bản cũ (frontend đã cache, setting lưu
+    // trong DB) vẫn gửi mã `-preview`/`2.5-pro` → tự map sang mã 假流式 đang dùng.
+    'gemini-3-flash-preview': '假流式-agy-gemini-3-flash-low',
+    'gemini-3.1-pro-preview': '假流式-agy-gemini-3.1-pro-low',
+    'gemini-2.5-pro': '假流式-agy-gemini-3.1-pro-low'
+};
+
+function resolveGcliModelCode(model) {
+    return GCLI_MODEL_CODE_MAP[model] || model;
+}
+
+/**
  * Gọi thẳng gcli upstream (https://gcli.ggchan.dev) — KHÔNG qua local proxy 18790, KHÔNG qua OpenClaw 18791.
  * @param {string} content - Prompt text
  * @param {object} [options]
- * @param {string} [options.model] - Override model (e.g., 'gemini-3.1-pro-preview').
+ * @param {string} [options.model] - Override model (e.g., 'gemini-3.1-pro').
  * @param {string[]} [options.images] - Image URLs hoặc data URLs để gửi kèm (multimodal).
  *                                       Format chuẩn OpenAI: { type: 'image_url', image_url: { url } }
  */
 export async function callGcliDirect(content, options = {}) {
     const url = process.env.GCLI_DIRECT_URL || 'https://gcli.ggchan.dev/v1/chat/completions';
-    const model = options.model || process.env.GCLI_DIRECT_MODEL || 'gemini-3-flash-preview';
+    const model = options.model || process.env.GCLI_DIRECT_MODEL || 'gemini-3-flash';
     // Key pool + retry handled inside fetchGcliWithRetry. Each retry picks a
     // fresh key (weighted random) so multi-key envs naturally rotate around a
     // rate-limited key.
@@ -347,7 +374,7 @@ export async function callGcliDirect(content, options = {}) {
     }
 
     const body = JSON.stringify({
-        model,
+        model: resolveGcliModelCode(model),
         messages,
         ...(Number.isFinite(Number(options.temperature))
             ? { temperature: Number(options.temperature) }
@@ -396,7 +423,7 @@ export async function shouldUseOpenClawForChat() {
 
 export async function getGcliBotModel() {
     const setting = await SystemSetting.findOne({ key: 'gcliBotModel' }).lean();
-    return setting?.value || process.env.GCLI_DIRECT_MODEL || 'gemini-3-flash-preview';
+    return setting?.value || process.env.GCLI_DIRECT_MODEL || 'gemini-2.5-flash';
 }
 
 export async function callConfiguredAiProvider(content, sessionId, options = {}) {

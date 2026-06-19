@@ -95,9 +95,11 @@ const sanitizeUpdate = (body, allowedFields) => {
 };
 
 const getChatbotSettingsKey = (userId) => `crmChatbotSettings:${userId}`;
-const CHATBOT_ALLOWED_AI_MODELS = ['gemini-3-flash-preview', 'gemini-2.5-pro', 'gemini-3.1-pro-preview'];
-const CHATBOT_DEFAULT_AI_MODEL = 'gemini-3-flash-preview';
-const CHATBOT_PRO_AI_MODEL = 'gemini-3.1-pro-preview';
+const CHATBOT_ALLOWED_AI_MODELS = ['gemini-2.5-flash', 'gemini-3-flash'];
+const CHATBOT_DEFAULT_AI_MODEL = 'gemini-2.5-flash';
+// Không còn model pro trong danh sách CRM → giữ giá trị cho getChatbotModelQuotaUnits;
+// không khớp model nào trong allowed list nên mọi model CRM tính 1 quota unit.
+const CHATBOT_PRO_AI_MODEL = 'gemini-3.1-pro';
 
 const defaultChatbotSettings = {
     enabled: true,
