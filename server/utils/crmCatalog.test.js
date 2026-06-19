@@ -12,8 +12,8 @@ test('CRM Catalog Plans & Packs structure', (t) => {
     assert.strictEqual(monthly.includedAiLimit, 1000);
 
     assert.strictEqual(CRM_TRIAL.id, 'crm_trial');
-    assert.strictEqual(CRM_TRIAL.durationDays, 7);
-    assert.strictEqual(CRM_TRIAL.includedAiLimit, 50);
+    assert.strictEqual(CRM_TRIAL.durationDays, 14);
+    assert.strictEqual(CRM_TRIAL.includedAiLimit, 100);
     assert.strictEqual(CRM_TRIAL.deviceLimit, 1);
 
     // Test pack details

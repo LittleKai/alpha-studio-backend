@@ -5,7 +5,7 @@ import {
     createInitialCrmTrialSubscription
 } from './crmTrial.js';
 
-test('buildCrmTrialSubscriptionData creates a 7-day 50-request trial', () => {
+test('buildCrmTrialSubscriptionData creates a 14-day 100-request trial', () => {
     const now = new Date('2026-06-19T00:00:00.000Z');
     const data = buildCrmTrialSubscriptionData({ userId: 'user-1', now });
 
@@ -13,12 +13,12 @@ test('buildCrmTrialSubscriptionData creates a 7-day 50-request trial', () => {
     assert.strictEqual(data.status, 'active');
     assert.strictEqual(data.plan, 'crm_trial');
     assert.strictEqual(data.entitlementType, 'trial');
-    assert.strictEqual(data.includedAiLimit, 50);
+    assert.strictEqual(data.includedAiLimit, 100);
     assert.strictEqual(data.includedAiUsed, 0);
     assert.strictEqual(data.extraAiRemaining, 0);
     assert.strictEqual(data.deviceLimit, 1);
     assert.strictEqual(data.periodStart.toISOString(), '2026-06-19T00:00:00.000Z');
-    assert.strictEqual(data.periodEnd.toISOString(), '2026-06-26T00:00:00.000Z');
+    assert.strictEqual(data.periodEnd.toISOString(), '2026-07-03T00:00:00.000Z');
     assert.strictEqual(data.trialStartedAt.toISOString(), '2026-06-19T00:00:00.000Z');
 });
 
@@ -98,8 +98,8 @@ test('createInitialCrmTrialSubscription persists a first trial and audit log', a
 
     assert.strictEqual(result.created, true);
     assert.strictEqual(saves.length, 1);
-    assert.strictEqual(result.subscription.includedAiLimit, 50);
-    assert.strictEqual(result.subscription.periodEnd.toISOString(), '2026-06-26T00:00:00.000Z');
+    assert.strictEqual(result.subscription.includedAiLimit, 100);
+    assert.strictEqual(result.subscription.periodEnd.toISOString(), '2026-07-03T00:00:00.000Z');
     assert.deepStrictEqual(audits, [
         {
             userId: 'user-1',
@@ -107,8 +107,8 @@ test('createInitialCrmTrialSubscription persists a first trial and audit log', a
             action: 'subscription_trial_started',
             details: {
                 plan: 'crm_trial',
-                durationDays: 7,
-                includedAiLimit: 50
+                durationDays: 14,
+                includedAiLimit: 100
             }
         }
     ]);
