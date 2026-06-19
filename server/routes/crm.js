@@ -31,6 +31,7 @@ import SystemSetting from '../models/SystemSetting.js';
 import { crmPairingLimiter, crmDeviceLimiter, crmAiLimiter } from '../middleware/crmRateLimit.js';
 
 import { CRM_PLANS, CRM_AI_PACKS, getCrmProduct } from '../utils/crmCatalog.js';
+import { applySubscriptionEntitlement } from '../utils/crmBilling.js';
 import {
     consumeQuota,
     consumeQuotaUnits,
@@ -977,59 +978,14 @@ router.post('/billing/checkout', authMiddleware, async (req, res) => {
                 // Fulfill the product
                 let subscription;
                 if (orderType === 'subscription') {
-                    const now = new Date();
-                    const oldActiveSub = await CrmSubscription.findOne({ userId: user._id, status: 'active' });
-
-                    if (oldActiveSub) {
-                        // Check proactively if it is expired by date
-                        if (new Date() > new Date(oldActiveSub.periodEnd)) {
-                            // Expire it
-                            oldActiveSub.status = 'expired';
-                            await oldActiveSub.save();
-
-                            // Create new subscription starting from now
-                            subscription = new CrmSubscription({
-                                userId: user._id,
-                                status: 'active',
-                                plan: productId,
-                                periodStart: now,
-                                periodEnd: new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000),
-                                includedAiLimit: product.includedAiLimit,
-                                includedAiUsed: 0,
-                                extraAiRemaining: oldActiveSub.extraAiRemaining,
-                                deviceLimit: product.deviceLimit,
-                                lastRenewedAt: now
-                            });
-                            await subscription.save();
-                        } else {
-                            // Extend the active subscription in-place
-                            subscription = oldActiveSub;
-                            subscription.periodEnd = new Date(new Date(oldActiveSub.periodEnd).getTime() + 30 * 24 * 60 * 60 * 1000);
-                            subscription.plan = productId;
-                            subscription.includedAiLimit = product.includedAiLimit;
-                            subscription.includedAiUsed = 0; // Reset included AI quota for the new period
-                            subscription.lastRenewedAt = now;
-                            await subscription.save();
-                        }
-                    } else {
-                        // No active subscription. Find latest regardless of status to preserve extraAiRemaining
-                        const latestSub = await CrmSubscription.findOne({ userId: user._id }).sort({ createdAt: -1 });
-                        const extraAiRemaining = latestSub ? latestSub.extraAiRemaining : 0;
-
-                        subscription = new CrmSubscription({
+                    subscription = await applySubscriptionEntitlement({
+                        order: {
                             userId: user._id,
-                            status: 'active',
-                            plan: productId,
-                            periodStart: now,
-                            periodEnd: new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000),
-                            includedAiLimit: product.includedAiLimit,
-                            includedAiUsed: 0,
-                            extraAiRemaining,
-                            deviceLimit: product.deviceLimit,
-                            lastRenewedAt: now
-                        });
-                        await subscription.save();
-                    }
+                            productId
+                        },
+                        product,
+                        models: { CrmSubscription }
+                    });
                 } else {
                     // AI pack purchase (subscription check already passed at checkout top)
                     subscription = await CrmSubscription.findOne({ userId: user._id, status: 'active' });

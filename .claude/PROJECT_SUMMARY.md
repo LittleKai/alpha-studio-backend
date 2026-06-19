@@ -1,5 +1,7 @@
 # Project Summary
 
+**Last Updated:** 2026-06-19 - CRM registration now grants exactly one 7-day `crm_trial` entitlement per new user account with 50 included AI requests. `CrmSubscription` distinguishes `entitlementType: trial|paid`; a partial unique index enforces one trial per user, and paid CRM billing closes active trials before creating a separate paid entitlement.
+
 ## 1. Project Overview
 - **Name:** Alpha Studio Backend
 - **Type:** REST API Backend for AI Academy Platform
@@ -472,6 +474,12 @@ alpha-studio-backend/
 | Interior AI Log Viewer | âœ… Complete | models/InteriorAiLog.js, routes/interior.js, scripts/dump-interior-log.mjs | Every `/api/interior/projects/:id/chat` call (both `proposal` and `apply` stages) records raw prompt, ref images, raw AI response, parsed reply, latency, usage, status (`ok`/`parse-failed`/`validation-failed`/`upstream-error`), errorMessage. TTL 30 days. `GET /api/interior/admin/logs?projectId=&userId=&stage=&status=&limit=` accepts EITHER (auth + adminOnly) OR header `x-reviewer-token: $INTERIOR_LOG_REVIEWER_TOKEN` (reviewer bypass for ops/debug). Direct dump: `node scripts/dump-interior-log.mjs <projectId>`. |
 
 ---
+
+### Recent CRM Subscription Note
+
+- New user registration (`POST /api/auth/register`) creates a one-time `crm_trial` subscription: 7 days, 50 included AI requests, 0 used, 0 extra, `entitlementType: trial`.
+- `CrmSubscription` has `entitlementType` and `trialStartedAt`; partial unique index `unique_trial_subscription_per_user` prevents a second trial for the same user.
+- CRM checkout/billing fulfillment preserves the historical trial record; upgrading from trial closes that trial and creates a separate `entitlementType: paid` subscription, while paid renewals extend the paid record in place.
 
 ## 5. Known Issues & TODOs
 

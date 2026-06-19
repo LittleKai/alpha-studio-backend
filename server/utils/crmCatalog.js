@@ -15,6 +15,14 @@ export const CRM_PLANS = {
     }
 };
 
+export const CRM_TRIAL = {
+    id: 'crm_trial',
+    name: 'Dùng thử Alpha CRM',
+    includedAiLimit: 50,
+    deviceLimit: 1,
+    durationDays: 7
+};
+
 export const CRM_AI_PACKS = {
     crm_ai_pack_100: {
         id: 'crm_ai_pack_100',

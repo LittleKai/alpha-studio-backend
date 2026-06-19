@@ -4,6 +4,7 @@ import rateLimit from 'express-rate-limit';
 import User from '../models/User.js';
 import { generateToken, authMiddleware } from '../middleware/auth.js';
 import { sendPasswordVerificationCode } from '../utils/email.js';
+import { createInitialCrmTrialSubscription } from '../utils/crmTrial.js';
 
 const router = express.Router();
 
@@ -52,6 +53,7 @@ router.post('/register', authLimiter, async (req, res) => {
         });
 
         await user.save();
+        await createInitialCrmTrialSubscription({ userId: user._id });
 
         // Generate token
         const token = generateToken(user._id);

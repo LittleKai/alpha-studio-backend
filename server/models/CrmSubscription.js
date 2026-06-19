@@ -17,6 +17,12 @@ const crmSubscriptionSchema = new mongoose.Schema({
         type: String,
         default: 'crm_monthly'
     },
+    entitlementType: {
+        type: String,
+        enum: ['trial', 'paid'],
+        default: 'paid',
+        index: true
+    },
     periodStart: {
         type: Date,
         default: Date.now
@@ -49,6 +55,10 @@ const crmSubscriptionSchema = new mongoose.Schema({
         type: Date,
         default: Date.now
     },
+    trialStartedAt: {
+        type: Date,
+        default: null
+    },
     cancelledAt: {
         type: Date,
         default: null
@@ -59,6 +69,14 @@ const crmSubscriptionSchema = new mongoose.Schema({
 
 // Composite index for quick status queries per user
 crmSubscriptionSchema.index({ userId: 1, status: 1 });
+crmSubscriptionSchema.index(
+    { userId: 1, entitlementType: 1 },
+    {
+        unique: true,
+        partialFilterExpression: { entitlementType: 'trial' },
+        name: 'unique_trial_subscription_per_user'
+    }
+);
 
 const CrmSubscription = mongoose.model('CrmSubscription', crmSubscriptionSchema);
 

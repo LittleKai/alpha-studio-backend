@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert';
-import { CRM_PLANS, CRM_AI_PACKS, getCrmProduct } from './crmCatalog.js';
+import { CRM_PLANS, CRM_AI_PACKS, CRM_TRIAL, getCrmProduct } from './crmCatalog.js';
 
 test('CRM Catalog Plans & Packs structure', (t) => {
     // Test crm_monthly exists and is configured correctly
@@ -10,6 +10,11 @@ test('CRM Catalog Plans & Packs structure', (t) => {
     assert.strictEqual(monthly.priceVnd, 500000);
     assert.strictEqual(monthly.priceCredits, 5250);
     assert.strictEqual(monthly.includedAiLimit, 1000);
+
+    assert.strictEqual(CRM_TRIAL.id, 'crm_trial');
+    assert.strictEqual(CRM_TRIAL.durationDays, 7);
+    assert.strictEqual(CRM_TRIAL.includedAiLimit, 50);
+    assert.strictEqual(CRM_TRIAL.deviceLimit, 1);
 
     // Test pack details
     const pack100 = CRM_AI_PACKS.crm_ai_pack_100;

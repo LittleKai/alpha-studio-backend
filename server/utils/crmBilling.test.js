@@ -149,3 +149,101 @@ test('fulfillCrmBillingOrder reports fulfilling orders as recoverable conflict i
     assert.strictEqual(result.status, 'already_fulfilling');
     assert.match(result.message, /manual recovery/i);
 });
+
+test('fulfillCrmBillingOrder preserves an active trial record when upgrading to paid', async () => {
+    const calls = [];
+    const session = { id: 'session-trial-upgrade' };
+    const mongooseClient = {
+        async startSession() {
+            return {
+                async withTransaction(fn) {
+                    return fn();
+                },
+                async endSession() {
+                    calls.push('endSession');
+                }
+            };
+        }
+    };
+
+    const order = {
+        _id: 'order-trial-upgrade',
+        userId: 'user-trial',
+        productId: 'crm_monthly',
+        orderType: 'subscription',
+        amountVnd: 500000,
+        credits: 5250,
+        transactionCode: 'CRMTRIALUP',
+        metadata: {},
+        async save(options) {
+            calls.push(['order.save', this.status, options.session]);
+        },
+        markModified(path) {
+            calls.push(['order.markModified', path]);
+        }
+    };
+
+    const trialSub = {
+        _id: 'trial-sub-1',
+        status: 'active',
+        plan: 'crm_trial',
+        entitlementType: 'trial',
+        periodEnd: new Date(Date.now() + 3 * 24 * 60 * 60 * 1000),
+        extraAiRemaining: 9,
+        async save(options) {
+            calls.push(['trial.save', this.status, this.entitlementType, options.session]);
+        }
+    };
+
+    class FakeCrmSubscription {
+        constructor(data) {
+            Object.assign(this, data);
+            this._id = 'paid-sub-1';
+            calls.push(['paid.construct', data.entitlementType, data.extraAiRemaining]);
+        }
+
+        static findOne(filter) {
+            calls.push(['subscription.findOne', filter]);
+            return createQuery(trialSub);
+        }
+
+        async save(options) {
+            calls.push(['paid.save', this.entitlementType, this.plan, options.session]);
+        }
+    }
+
+    const models = {
+        CrmBillingOrder: {
+            findOneAndUpdate() {
+                return Promise.resolve(order);
+            },
+            findOne() {
+                throw new Error('existing order lookup should not run when claim succeeds');
+            }
+        },
+        CrmSubscription: FakeCrmSubscription,
+        Transaction: {
+            findOne() {
+                return createQuery(null);
+            },
+            async create() {
+                return [{ _id: 'tx-trial-upgrade' }];
+            }
+        }
+    };
+
+    const result = await fulfillCrmBillingOrder({
+        selector: { transactionCode: 'CRMTRIALUP' },
+        models,
+        mongooseClient
+    });
+
+    assert.strictEqual(result.status, 'fulfilled');
+    assert.strictEqual(trialSub.status, 'cancelled');
+    assert.strictEqual(trialSub.entitlementType, 'trial');
+    assert.strictEqual(result.subscription.entitlementType, 'paid');
+    assert.strictEqual(result.subscription.plan, 'crm_monthly');
+    assert.strictEqual(result.subscription.extraAiRemaining, 9);
+    assert.ok(calls.some((call) => Array.isArray(call) && call[0] === 'trial.save'));
+    assert.ok(calls.some((call) => Array.isArray(call) && call[0] === 'paid.save'));
+});

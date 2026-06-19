@@ -9,6 +9,9 @@ const DEFAULT_DEVICE_LIMIT = 1;
 const MONTH_MS = 30 * 24 * 60 * 60 * 1000;
 
 const withSession = (query, session) => {
+    if (!session) {
+        return query;
+    }
     if (query && typeof query.session === 'function') {
         return query.session(session);
     }
@@ -46,7 +49,30 @@ const buildCrmTransaction = ({ order, product, source, bankTxId, webhookData, we
     description: `Mua goi CRM ${product ? product.name : order.productId} qua ${source === 'admin' ? 'duyet thu cong' : 'chuyen khoan ngan hang'}`
 });
 
-const applySubscriptionEntitlement = async ({ order, product, models, session }) => {
+const isTrialSubscription = (subscription) => (
+    subscription?.entitlementType === 'trial' ||
+    subscription?.plan === 'crm_trial'
+);
+
+const createPaidSubscription = async ({ order, product, models, session, now, carryFromSub = null }) => {
+    const subscription = new models.CrmSubscription({
+        userId: order.userId,
+        status: 'active',
+        plan: order.productId,
+        entitlementType: 'paid',
+        periodStart: now,
+        periodEnd: new Date(now.getTime() + MONTH_MS),
+        includedAiLimit: product ? product.includedAiLimit : DEFAULT_INCLUDED_AI_LIMIT,
+        includedAiUsed: 0,
+        extraAiRemaining: carryFromSub ? carryFromSub.extraAiRemaining : 0,
+        deviceLimit: product ? product.deviceLimit : DEFAULT_DEVICE_LIMIT,
+        lastRenewedAt: now
+    });
+    await subscription.save({ session });
+    return subscription;
+};
+
+export const applySubscriptionEntitlement = async ({ order, product, models, session }) => {
     const now = new Date();
     const oldActiveSub = await withSession(
         models.CrmSubscription.findOne({ userId: order.userId, status: 'active' }),
@@ -58,24 +84,34 @@ const applySubscriptionEntitlement = async ({ order, product, models, session })
             oldActiveSub.status = 'expired';
             await oldActiveSub.save({ session });
 
-            const subscription = new models.CrmSubscription({
-                userId: order.userId,
-                status: 'active',
-                plan: order.productId,
-                periodStart: now,
-                periodEnd: new Date(now.getTime() + MONTH_MS),
-                includedAiLimit: product ? product.includedAiLimit : DEFAULT_INCLUDED_AI_LIMIT,
-                includedAiUsed: 0,
-                extraAiRemaining: oldActiveSub.extraAiRemaining,
-                deviceLimit: product ? product.deviceLimit : DEFAULT_DEVICE_LIMIT,
-                lastRenewedAt: now
+            return createPaidSubscription({
+                order,
+                product,
+                models,
+                session,
+                now,
+                carryFromSub: oldActiveSub
             });
-            await subscription.save({ session });
-            return subscription;
+        }
+
+        if (isTrialSubscription(oldActiveSub)) {
+            oldActiveSub.status = 'cancelled';
+            oldActiveSub.cancelledAt = now;
+            await oldActiveSub.save({ session });
+
+            return createPaidSubscription({
+                order,
+                product,
+                models,
+                session,
+                now,
+                carryFromSub: oldActiveSub
+            });
         }
 
         oldActiveSub.periodEnd = new Date(new Date(oldActiveSub.periodEnd).getTime() + MONTH_MS);
         oldActiveSub.plan = order.productId;
+        oldActiveSub.entitlementType = 'paid';
         oldActiveSub.includedAiLimit = product ? product.includedAiLimit : DEFAULT_INCLUDED_AI_LIMIT;
         oldActiveSub.includedAiUsed = 0;
         oldActiveSub.lastRenewedAt = now;
@@ -88,20 +124,14 @@ const applySubscriptionEntitlement = async ({ order, product, models, session })
         session
     );
 
-    const subscription = new models.CrmSubscription({
-        userId: order.userId,
-        status: 'active',
-        plan: order.productId,
-        periodStart: now,
-        periodEnd: new Date(now.getTime() + MONTH_MS),
-        includedAiLimit: product ? product.includedAiLimit : DEFAULT_INCLUDED_AI_LIMIT,
-        includedAiUsed: 0,
-        extraAiRemaining: latestSub ? latestSub.extraAiRemaining : 0,
-        deviceLimit: product ? product.deviceLimit : DEFAULT_DEVICE_LIMIT,
-        lastRenewedAt: now
+    return createPaidSubscription({
+        order,
+        product,
+        models,
+        session,
+        now,
+        carryFromSub: latestSub
     });
-    await subscription.save({ session });
-    return subscription;
 };
 
 const applyAiPackEntitlement = async ({ order, product, models, session }) => {
@@ -120,6 +150,7 @@ const applyAiPackEntitlement = async ({ order, product, models, session }) => {
         userId: order.userId,
         status: 'expired',
         plan: 'crm_monthly',
+        entitlementType: 'paid',
         periodStart: new Date(),
         periodEnd: new Date(),
         includedAiLimit: DEFAULT_INCLUDED_AI_LIMIT,
