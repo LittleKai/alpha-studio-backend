@@ -487,6 +487,7 @@ alpha-studio-backend/
 - AI returns structured JSON parsed by `utils/crmGroupSummary.js` (`buildGroupSummaryPromptV2` + `parseGroupSummaryJson`, prose fallback). `CrmGroupSummary` gained `coveredFrom/coveredTo/messageCount`.
 - Opportunities/risks/questions/actionItems become `CrmGroupInsight` upserted by `dedupKey` (`dedupKeyForItem`, normalized diacritics) — already-`done`/`dismissed` items are not recreated, giving skip-done continuity. Follow-up insights → tasks via `POST /crm/tasks` (`relatedType:'insight'`, `insightId`).
 - Per-group wizard config persists on `CrmZaloGroup.summaryConfig` (Mixed) via `PUT /crm/groups/:id/manage`.
+- `GET /crm/tasks` now also `.populate('groupId', 'name accountId groupId')` so care tasks carry the linked Zalo group (name + accountId + groupId) for display and the client's "Mở Live Chat" deep-link.
 
 ## 5. Known Issues & TODOs
 

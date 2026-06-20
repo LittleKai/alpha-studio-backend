@@ -3956,7 +3956,11 @@ router.get('/tasks', authMiddleware, async (req, res) => {
         const query = { userId: req.user._id };
         if (req.query.status) query.status = req.query.status;
         if (req.query.priority) query.priority = req.query.priority;
-        const tasks = await CrmTask.find(query).populate('customerId', 'name phone lifecycleStage').sort({ status: 1, dueAt: 1, createdAt: -1 }).limit(300);
+        const tasks = await CrmTask.find(query)
+            .populate('customerId', 'name phone lifecycleStage')
+            .populate('groupId', 'name accountId groupId')
+            .sort({ status: 1, dueAt: 1, createdAt: -1 })
+            .limit(300);
         res.json({ success: true, data: tasks });
     } catch (error) {
         console.error('Tasks list error:', error);
