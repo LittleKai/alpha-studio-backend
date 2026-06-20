@@ -42,7 +42,7 @@ import {
 import { fulfillCrmBillingOrder } from '../utils/crmBilling.js';
 import { callConfiguredAiProvider } from '../utils/aiProvider.js';
 import { calculateCrmLeadScore } from '../utils/crmLeadScoring.js';
-import { buildGroupSummaryPrompt, extractSimpleInsights, redactPhoneLikeStrings } from '../utils/crmGroupSummary.js';
+import { buildGroupSummaryPrompt, buildGroupSummaryPromptV2, parseGroupSummaryJson, dedupKeyForItem, extractSimpleInsights, redactPhoneLikeStrings } from '../utils/crmGroupSummary.js';
 import {
     buildConversationMessageQuery,
     normalizeCrmMessageType,
@@ -410,24 +410,9 @@ async function upsertConversationFromInbound({ userId, deviceId, event, enforceM
     }
 
     if (managedGroup?.isManaged) {
-        const groupMessageQuery = providerMessageId
-            ? { userId, accountId, providerMessageId }
-            : null;
-        const existingGroupMessage = groupMessageQuery ? await CrmGroupMessage.findOne(groupMessageQuery) : null;
-        if (!existingGroupMessage) {
-            await CrmGroupMessage.create({
-                userId,
-                groupId: managedGroup._id,
-                accountId,
-                providerMessageId,
-                senderId: event.senderId || '',
-                senderName: event.senderName || '',
-                content,
-                messageType,
-                sentAt: receivedAt,
-                capturedAt: new Date()
-            });
-        }
+        // Privacy: backend does NOT persist group message content. Summaries read
+        // messages from the operator's local store at summarize time. Only the
+        // lightweight lastMessageAt timestamp is tracked here.
         managedGroup.lastMessageAt = receivedAt;
         await managedGroup.save();
     }
@@ -3670,7 +3655,7 @@ router.put('/groups/insights/:id', authMiddleware, requireActiveSubscription, as
 router.put('/groups/:id/manage', authMiddleware, requireActiveSubscription, async (req, res) => {
     try {
         const isManaged = req.body.isManaged !== false;
-        const updateData = sanitizeUpdate(req.body, ['summaryCadence', 'tags', 'notes']);
+        const updateData = sanitizeUpdate(req.body, ['summaryCadence', 'tags', 'notes', 'summaryConfig']);
         updateData.isManaged = isManaged;
         updateData.managedSince = isManaged ? new Date() : null;
         const group = await CrmZaloGroup.findOneAndUpdate(
@@ -3752,85 +3737,123 @@ router.post('/groups/:id/summarize', crmAiLimiter, authMiddleware, requireActive
         if (!group) return res.status(404).json({ success: false, message: 'Khong tim thay nhom.' });
         if (!group.isManaged) return res.status(403).json({ success: false, message: 'Chi tom tat nhom da bat quan ly.' });
 
-        let checkpoint = null;
-        let fromAt = req.body.fromAt ? new Date(req.body.fromAt) : new Date(Date.now() - 24 * 60 * 60 * 1000);
-        let toAt = req.body.toAt ? new Date(req.body.toAt) : new Date();
-        if (req.body.checkpointId) {
-            checkpoint = await CrmGroupCheckpoint.findOne({ _id: req.body.checkpointId, userId: req.user._id, groupId: group._id });
-            if (!checkpoint) return res.status(404).json({ success: false, message: 'Khong tim thay checkpoint.' });
-            fromAt = checkpoint.fromAt;
-            toAt = checkpoint.toAt;
+        const scope = (req.body && typeof req.body.scope === 'object' && req.body.scope) ? req.body.scope : {};
+        const mode = ['recent', 'range', 'incremental'].includes(scope.mode) ? scope.mode : 'incremental';
+        const goals = Array.isArray(req.body.goals) ? req.body.goals.map(String) : [];
+        const customPrompt = String(req.body.prompt || '').slice(0, 4000);
+
+        const priorSummary = await CrmGroupSummary
+            .findOne({ userId: req.user._id, groupId: group._id })
+            .sort({ createdAt: -1 });
+
+        // Privacy: the backend does NOT store group message content. The Flutter
+        // client reads messages from the operator's LOCAL store and sends them here
+        // transiently for AI processing only — they are never persisted.
+        const rawMessages = Array.isArray(req.body.messages) ? req.body.messages : [];
+        const messages = rawMessages
+            .map((item) => ({
+                senderName: String(item?.senderName || item?.senderId || 'Thanh vien').slice(0, 120),
+                content: redactPhoneLikeStrings(String(item?.content || '')).slice(0, 4000),
+                sentAt: item?.sentAt ? new Date(item.sentAt) : null
+            }))
+            .filter((item) => item.content.trim().length > 0)
+            .sort((a, b) => (a.sentAt ? a.sentAt.getTime() : 0) - (b.sentAt ? b.sentAt.getTime() : 0))
+            .slice(0, 400);
+
+        const fromAt = messages.length ? messages[0].sentAt : null;
+        const toAt = messages.length
+            ? (messages[messages.length - 1].sentAt || new Date())
+            : new Date();
+
+        if (req.body.saveConfig) {
+            group.summaryConfig = {
+                scope: { mode, count: scope.count || null, rangeDays: scope.rangeDays || null },
+                goals,
+                industry: String(req.body.industry || group.summaryConfig?.industry || 'generic'),
+                prompt: customPrompt,
+                autoCreateTasks: req.body.autoCreateTasks === true
+            };
+            await group.save();
         }
 
-        const messages = await CrmGroupMessage.find({ userId: req.user._id, groupId: group._id, sentAt: { $gte: fromAt, $lte: toAt } })
-            .sort({ sentAt: 1 })
-            .limit(300);
         if (messages.length === 0) {
-            return res.json({ success: true, data: { empty: true, messageCount: 0, quota: getQuotaPayload(req.crmSubscription) } });
+            return res.json({ success: true, data: { empty: true, messageCount: 0, summary: null, insights: [], quota: getQuotaPayload(req.crmSubscription) } });
         }
 
-        const promptContent = buildGroupSummaryPrompt({ group, messages });
+        // Open items (skip-done + tranh tao lai action item da theo doi)
+        const openInsights = await CrmGroupInsight
+            .find({ userId: req.user._id, groupId: group._id, status: 'open' })
+            .select('title')
+            .limit(60);
+        const openItems = openInsights.map((item) => item.title);
+
+        const promptContent = buildGroupSummaryPromptV2({
+            group,
+            messages,
+            goals,
+            customPrompt,
+            priorSummary: priorSummary?.summaryText || '',
+            openItems
+        });
         const { aiResponse, usageDoc, quota } = await runCrmAiWithQuota(req, {
             promptContent,
             sessionId: `crm-group-summary:${req.user._id}:${group._id}`,
             requestType: 'group_summary'
         });
 
-        const summaryText = redactPhoneLikeStrings(aiResponse.text);
-
-        const keyTopics = [];
-        const decisions = [];
-        const questions = [];
-        const risks = [];
-        const opportunities = [];
-        let currentSection = null;
-
-        summaryText.split('\n').forEach(line => {
-            const trimmed = line.trim();
-            if (!trimmed) return;
-            const lower = trimmed.toLowerCase();
-            if (lower.includes('chu de chinh') || lower.includes('chủ đề chính') || lower.includes('chủ đề')) currentSection = keyTopics;
-            else if (lower.includes('quyet dinh') || lower.includes('quyết định')) currentSection = decisions;
-            else if (lower.includes('cau hoi') || lower.includes('câu hỏi')) currentSection = questions;
-            else if (lower.includes('rui ro') || lower.includes('rủi ro')) currentSection = risks;
-            else if (lower.includes('co hoi') || lower.includes('cơ hội')) currentSection = opportunities;
-            else if (currentSection && trimmed.match(/^[-*\d.\s]+(.*)/)) {
-                const item = trimmed.replace(/^[-*\d.\s]+/, '').trim();
-                if (item && item.length > 2) currentSection.push(item.slice(0, 500));
-            }
-        });
-
-        let sentiment = 'neutral';
-        const lowerSummary = summaryText.toLowerCase();
-        if (lowerSummary.includes('tich cuc') || lowerSummary.includes('tích cực')) sentiment = 'positive';
-        else if (lowerSummary.includes('tieu cuc') || lowerSummary.includes('tiêu cực')) sentiment = 'negative';
+        const parsed = parseGroupSummaryJson(aiResponse.text);
+        const summaryText = redactPhoneLikeStrings(parsed?.summaryText || aiResponse.text);
+        const structured = parsed || {
+            keyTopics: [], decisions: [], questions: [], risks: [], opportunities: [], sentiment: 'neutral', actionItems: []
+        };
 
         const summary = await CrmGroupSummary.create({
             userId: req.user._id,
             groupId: group._id,
-            checkpointId: checkpoint?._id || null,
             summaryText,
+            coveredFrom: fromAt,
+            coveredTo: toAt,
+            messageCount: messages.length,
             aiUsageId: usageDoc._id,
             model: aiResponse.model,
-            keyTopics,
-            decisions,
-            questions,
-            risks,
-            opportunities,
-            sentiment
+            keyTopics: structured.keyTopics,
+            decisions: structured.decisions,
+            questions: structured.questions,
+            risks: structured.risks,
+            opportunities: structured.opportunities,
+            sentiment: structured.sentiment
         });
 
-        const insightPayloads = extractSimpleInsights(summary.summaryText).map((item) => ({
-            ...item,
-            userId: req.user._id,
-            groupId: group._id,
-            summaryId: summary._id
-        }));
-        const insights = insightPayloads.length > 0 ? await CrmGroupInsight.insertMany(insightPayloads) : [];
-        if (checkpoint) {
-            checkpoint.status = 'summarized';
-            checkpoint.messageCount = messages.length;
-            await checkpoint.save();
+        // Structured output -> insight candidates (opportunities/risks/questions/actionItems)
+        const candidates = [];
+        (structured.opportunities || []).forEach((text) => candidates.push({ type: 'opportunity', title: text, description: '', priority: 'high' }));
+        (structured.risks || []).forEach((text) => candidates.push({ type: 'risk', title: text, description: '', priority: 'high' }));
+        (structured.questions || []).forEach((text) => candidates.push({ type: 'question', title: text, description: '', priority: 'medium' }));
+        (structured.actionItems || []).forEach((item) => candidates.push({ type: 'follow_up', title: item.title, description: item.description || '', priority: item.priority || 'medium' }));
+
+        const insights = [];
+        for (const candidate of candidates) {
+            const title = redactPhoneLikeStrings(String(candidate.title || '').trim()).slice(0, 200);
+            if (!title) continue;
+            const dedupKey = dedupKeyForItem(String(group._id), title);
+            const existing = await CrmGroupInsight.findOne({ userId: req.user._id, groupId: group._id, dedupKey });
+            if (existing) {
+                // da co (open) hoac da xu ly (done/dismissed) -> khong tao lai
+                if (existing.status === 'open') insights.push(existing);
+                continue;
+            }
+            const created = await CrmGroupInsight.create({
+                userId: req.user._id,
+                groupId: group._id,
+                summaryId: summary._id,
+                dedupKey,
+                type: candidate.type,
+                title,
+                description: redactPhoneLikeStrings(String(candidate.description || '')).slice(0, 1000),
+                priority: candidate.priority,
+                status: 'open'
+            });
+            insights.push(created);
         }
 
         res.json({ success: true, data: { summary, insights, quota } });

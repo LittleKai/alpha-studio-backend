@@ -64,6 +64,10 @@ const crmZaloGroupSchema = new mongoose.Schema({
         enum: ['manual', 'daily', 'weekly'],
         default: 'manual'
     },
+    summaryConfig: {
+        type: mongoose.Schema.Types.Mixed,
+        default: null
+    },
     tags: [{
         type: String,
         trim: true

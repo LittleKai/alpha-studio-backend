@@ -19,6 +19,11 @@ const crmGroupInsightSchema = new mongoose.Schema({
         default: null,
         index: true
     },
+    dedupKey: {
+        type: String,
+        default: '',
+        index: true
+    },
     type: {
         type: String,
         enum: ['opportunity', 'risk', 'question', 'follow_up'],

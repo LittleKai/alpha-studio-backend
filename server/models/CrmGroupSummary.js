@@ -23,6 +23,18 @@ const crmGroupSummarySchema = new mongoose.Schema({
         type: String,
         required: true
     },
+    coveredFrom: {
+        type: Date,
+        default: null
+    },
+    coveredTo: {
+        type: Date,
+        default: null
+    },
+    messageCount: {
+        type: Number,
+        default: 0
+    },
     keyTopics: [{ type: String }],
     decisions: [{ type: String }],
     questions: [{ type: String }],

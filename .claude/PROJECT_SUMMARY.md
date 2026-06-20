@@ -480,6 +480,14 @@ alpha-studio-backend/
 - `CrmSubscription` has `entitlementType` and `trialStartedAt`; partial unique index `unique_trial_subscription_per_user` prevents a second trial for the same user.
 - CRM checkout/billing fulfillment preserves the historical trial record; upgrading from trial closes that trial and creates a separate `entitlementType: paid` subscription, while paid renewals extend the paid record in place.
 
+### Group AI Summary (structured + incremental, privacy-first)
+
+- **Backend does NOT store group message content.** The `events/message` ingest no longer creates `CrmGroupMessage` (only updates `CrmZaloGroup.lastMessageAt`). The Flutter client reads messages from the operator's **local** store and sends them in the request body; they are used transiently for AI only and never persisted.
+- `POST /crm/groups/:id/summarize` accepts `{ messages:[{senderName,content,sentAt}], scope, goals[], prompt, industry, autoCreateTasks, saveConfig }`. Messages come from `req.body` (sorted, phone-redacted, capped 400); incremental watermark (latest summary `coveredTo`) is applied client-side. `CrmGroupMessage` model still exists but is no longer written (legacy `/groups/:id/messages` + `/checkpoints` now return empty).
+- AI returns structured JSON parsed by `utils/crmGroupSummary.js` (`buildGroupSummaryPromptV2` + `parseGroupSummaryJson`, prose fallback). `CrmGroupSummary` gained `coveredFrom/coveredTo/messageCount`.
+- Opportunities/risks/questions/actionItems become `CrmGroupInsight` upserted by `dedupKey` (`dedupKeyForItem`, normalized diacritics) — already-`done`/`dismissed` items are not recreated, giving skip-done continuity. Follow-up insights → tasks via `POST /crm/tasks` (`relatedType:'insight'`, `insightId`).
+- Per-group wizard config persists on `CrmZaloGroup.summaryConfig` (Mixed) via `PUT /crm/groups/:id/manage`.
+
 ## 5. Known Issues & TODOs
 
 ### High Priority
