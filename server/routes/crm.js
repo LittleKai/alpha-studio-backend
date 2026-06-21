@@ -97,6 +97,12 @@ const sanitizeUpdate = (body, allowedFields) => {
 const getChatbotSettingsKey = (userId) => `crmChatbotSettings:${userId}`;
 const CHATBOT_ALLOWED_AI_MODELS = ['gemini-2.5-flash', 'gemini-3-flash'];
 const CHATBOT_DEFAULT_AI_MODEL = 'gemini-2.5-flash';
+// Group AI summary supports a richer model choice than the chatbot.
+const SUMMARY_ALLOWED_AI_MODELS = ['gemini-3.1-pro', 'gemini-2.5-pro', 'gemini-3-flash'];
+const SUMMARY_DEFAULT_AI_MODEL = 'gemini-3.1-pro';
+function normalizeSummaryAiModel(value) {
+    return SUMMARY_ALLOWED_AI_MODELS.includes(value) ? value : SUMMARY_DEFAULT_AI_MODEL;
+}
 // Không còn model pro trong danh sách CRM → giữ giá trị cho getChatbotModelQuotaUnits;
 // không khớp model nào trong allowed list nên mọi model CRM tính 1 quota unit.
 const CHATBOT_PRO_AI_MODEL = 'gemini-3.1-pro';
@@ -168,6 +174,23 @@ async function saveChatbotSettings(userId, value) {
         { upsert: true, new: true }
     );
     return safeValue;
+}
+
+const getSummaryModelKey = (userId) => `crmSummaryModel:${userId}`;
+
+async function getSummaryModel(userId) {
+    const setting = await SystemSetting.findOne({ key: getSummaryModelKey(userId) }).lean();
+    return normalizeSummaryAiModel(setting?.value?.aiModel);
+}
+
+async function saveSummaryModel(userId, aiModel) {
+    const value = { aiModel: normalizeSummaryAiModel(aiModel) };
+    await SystemSetting.findOneAndUpdate(
+        { key: getSummaryModelKey(userId) },
+        { $set: { key: getSummaryModelKey(userId), value, description: 'Per-user Alpha CRM group summary model' } },
+        { upsert: true, new: true }
+    );
+    return value;
 }
 
 function getQuotaPayload(subscription, quotaBucket = 'none', quotaUnits = 0) {
@@ -3623,6 +3646,26 @@ router.get('/groups', authMiddleware, async (req, res) => {
     }
 });
 
+router.get('/groups/summary-settings', authMiddleware, async (req, res) => {
+    try {
+        const aiModel = await getSummaryModel(req.user._id);
+        res.json({ success: true, data: { aiModel, allowedModels: SUMMARY_ALLOWED_AI_MODELS } });
+    } catch (error) {
+        console.error('Summary settings get error:', error);
+        res.status(500).json({ success: false, message: 'Loi server khi tai cau hinh tom tat.' });
+    }
+});
+
+router.put('/groups/summary-settings', authMiddleware, requireActiveSubscription, async (req, res) => {
+    try {
+        const value = await saveSummaryModel(req.user._id, req.body.aiModel);
+        res.json({ success: true, data: value });
+    } catch (error) {
+        console.error('Summary settings save error:', error);
+        res.status(500).json({ success: false, message: 'Loi server khi luu cau hinh tom tat.' });
+    }
+});
+
 router.get('/groups/insights', authMiddleware, async (req, res) => {
     try {
         const query = { userId: req.user._id };
@@ -3795,10 +3838,14 @@ router.post('/groups/:id/summarize', crmAiLimiter, authMiddleware, requireActive
             priorSummary: priorSummary?.summaryText || '',
             openItems
         });
+        // Model is a tab-level setting (not per-group); pro models cost 2 quota units.
+        const aiModel = await getSummaryModel(req.user._id);
         const { aiResponse, usageDoc, quota } = await runCrmAiWithQuota(req, {
             promptContent,
             sessionId: `crm-group-summary:${req.user._id}:${group._id}`,
-            requestType: 'group_summary'
+            requestType: 'group_summary',
+            model: aiModel,
+            quotaUnits: getChatbotModelQuotaUnits(aiModel)
         });
 
         const parsed = parseGroupSummaryJson(aiResponse.text);
@@ -3822,6 +3869,21 @@ router.post('/groups/:id/summarize', crmAiLimiter, authMiddleware, requireActive
             risks: structured.risks,
             opportunities: structured.opportunities,
             sentiment: structured.sentiment
+        });
+
+        // Record this summary in the chatbot response log (Nhật ký phản hồi) with tokens.
+        await CrmChatbotLog.create({
+            userId: req.user._id,
+            kind: 'group_summary',
+            accountId: group.accountId || '',
+            threadId: group.groupId || '',
+            mode: 'ai',
+            aiUsageId: usageDoc._id,
+            tokenIn: usageDoc.tokens?.promptTokens || 0,
+            tokenOut: usageDoc.tokens?.completionTokens || 0,
+            promptPreview: previewText(`Tóm tắt nhóm ${group.name || group.groupId} (${messages.length} tin)`),
+            responsePreview: previewText(summaryText),
+            status: 'succeeded'
         });
 
         // Structured output -> insight candidates (opportunities/risks/questions/actionItems)
@@ -4077,6 +4139,47 @@ router.get('/analytics/groups', authMiddleware, async (req, res) => {
     } catch (error) {
         console.error('Analytics groups error:', error);
         res.status(500).json({ success: false, message: 'Loi server khi tai analytics nhom.' });
+    }
+});
+
+// Daily AI token usage (in/out) for chatbot replies + group summaries, for the
+// campaign-overview chart. Range defaults to the last 30 days.
+router.get('/analytics/ai-tokens', authMiddleware, async (req, res) => {
+    try {
+        const to = req.query.to ? new Date(req.query.to) : new Date();
+        const from = req.query.from
+            ? new Date(req.query.from)
+            : new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+        const rows = await CrmAiUsage.aggregate([
+            { $match: { userId: req.user._id, createdAt: { $gte: from, $lte: to } } },
+            {
+                $group: {
+                    _id: {
+                        $dateToString: {
+                            format: '%Y-%m-%d',
+                            date: '$createdAt',
+                            timezone: 'Asia/Ho_Chi_Minh'
+                        }
+                    },
+                    tokenIn: { $sum: { $ifNull: ['$tokens.promptTokens', 0] } },
+                    tokenOut: { $sum: { $ifNull: ['$tokens.completionTokens', 0] } },
+                    requests: { $sum: 1 }
+                }
+            },
+            { $sort: { _id: 1 } }
+        ]);
+        res.json({
+            success: true,
+            data: rows.map((r) => ({
+                date: r._id,
+                tokenIn: r.tokenIn || 0,
+                tokenOut: r.tokenOut || 0,
+                requests: r.requests || 0
+            }))
+        });
+    } catch (error) {
+        console.error('Analytics ai-tokens error:', error);
+        res.status(500).json({ success: false, message: 'Loi server khi tai thong ke token AI.' });
     }
 });
 

@@ -44,6 +44,20 @@ const crmChatbotLogSchema = new mongoose.Schema({
         default: 'none',
         index: true
     },
+    kind: {
+        type: String,
+        enum: ['chatbot', 'group_summary'],
+        default: 'chatbot',
+        index: true
+    },
+    tokenIn: {
+        type: Number,
+        default: 0
+    },
+    tokenOut: {
+        type: Number,
+        default: 0
+    },
     aiUsageId: {
         type: mongoose.Schema.Types.ObjectId,
         ref: 'CrmAiUsage',

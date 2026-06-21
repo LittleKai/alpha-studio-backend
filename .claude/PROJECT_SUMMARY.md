@@ -488,6 +488,9 @@ alpha-studio-backend/
 - Opportunities/risks/questions/actionItems become `CrmGroupInsight` upserted by `dedupKey` (`dedupKeyForItem`, normalized diacritics) — already-`done`/`dismissed` items are not recreated, giving skip-done continuity. Follow-up insights → tasks via `POST /crm/tasks` (`relatedType:'insight'`, `insightId`).
 - Per-group wizard config persists on `CrmZaloGroup.summaryConfig` (Mixed) via `PUT /crm/groups/:id/manage`.
 - `GET /crm/tasks` now also `.populate('groupId', 'name accountId groupId')` so care tasks carry the linked Zalo group (name + accountId + groupId) for display and the client's "Mở Live Chat" deep-link.
+- **Summary model is a per-user tab setting** (not per-group): `GET/PUT /crm/groups/summary-settings` (`{ aiModel }`), stored in `SystemSetting key crmSummaryModel:<userId>`. Allowed: `gemini-3.1-pro` (default), `gemini-2.5-pro`, `gemini-3-flash`. Summarize reads it and passes `model` + `quotaUnits` (`getChatbotModelQuotaUnits`: pro-3.1 = 2 units, others = 1).
+- Each summarize writes a `CrmChatbotLog` (`kind:'group_summary'`, `tokenIn`/`tokenOut` from `CrmAiUsage`) so it shows in the chatbot "Nhật ký phản hồi". `CrmChatbotLog` gained `kind`/`tokenIn`/`tokenOut`.
+- `GET /crm/analytics/ai-tokens?from=&to=` aggregates `CrmAiUsage` daily token in/out (prompt/completion) for the overview chart.
 
 ## 5. Known Issues & TODOs
 
