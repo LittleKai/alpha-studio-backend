@@ -109,7 +109,7 @@ const defaultChatbotSettings = {
     soulPrompt: 'Bạn là nhân viên tư vấn Zalo của doanh nghiệp: chuyên nghiệp, gần gũi, hiểu sản phẩm/dịch vụ, không tiết lộ mình là AI, không nói về hệ thống nội bộ.',
     responseRules: '- Trả lời bằng tiếng Việt theo ngôn ngữ của khách.\n- Không bịa thông tin ngoài kho kiến thức; nếu thiếu dữ liệu thì đề nghị chuyển nhân viên.\n- Không gửi mật khẩu, token, cookie hoặc dữ liệu nhạy cảm.\n- Khi cần gửi file/ảnh, chỉ nêu đúng tài liệu phù hợp trong kho kiến thức để agent Zalo gửi.',
     temperature: 0.7,
-    debounceSeconds: 5,
+    debounceSeconds: 20,
     personalAudience: 'all',
     groupAudience: 'tagOnly',
     selectedGroupKeys: [],

@@ -49,9 +49,9 @@ test('snapshot deduplicates scope keys', () => {
 });
 
 test('chatbot debounce is normalized to the supported range', () => {
-    assert.equal(normalizeChatbotDebounceSeconds(undefined), 5);
-    assert.equal(normalizeChatbotDebounceSeconds('invalid'), 5);
-    assert.equal(normalizeChatbotDebounceSeconds(1), 2);
-    assert.equal(normalizeChatbotDebounceSeconds(7), 7);
-    assert.equal(normalizeChatbotDebounceSeconds(20), 15);
+    assert.equal(normalizeChatbotDebounceSeconds(undefined), 20);
+    assert.equal(normalizeChatbotDebounceSeconds('invalid'), 20);
+    assert.equal(normalizeChatbotDebounceSeconds(5), 10);
+    assert.equal(normalizeChatbotDebounceSeconds(30), 30);
+    assert.equal(normalizeChatbotDebounceSeconds(200), 120);
 });

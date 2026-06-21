@@ -10,8 +10,8 @@ export function normalizeVietnamese(value = '') {
 
 export function normalizeChatbotDebounceSeconds(value) {
     const parsed = Number(value);
-    if (!Number.isFinite(parsed)) return 5;
-    return Math.min(15, Math.max(2, parsed));
+    if (!Number.isFinite(parsed)) return 20;
+    return Math.min(120, Math.max(10, parsed));
 }
 
 export function hasHandoffKeyword(settingsOrRule, message) {
