@@ -59,7 +59,8 @@ import {
     buildChatbotConfigSnapshot,
     hasHandoffKeyword,
     matchChatbotRule,
-    normalizeChatbotDebounceSeconds
+    normalizeChatbotDebounceSeconds,
+    normalizeChatbotHistoryLimit
 } from '../utils/crmChatbot.js';
 import { buildTerminalCommandUpdate } from '../retention/terminalUpdates.js';
 
@@ -110,12 +111,14 @@ const CHATBOT_PRO_AI_MODEL = 'gemini-3.1-pro';
 const defaultChatbotSettings = {
     enabled: true,
     aiEnabled: false,
+    keywordRulesEnabled: true,
     aiModel: CHATBOT_DEFAULT_AI_MODEL,
     systemPrompt: 'Bạn là một người hỗ trợ tư vấn khách hàng Zalo. Hãy phản hồi tự nhiên, ngắn gọn và đời thường như một người thật, tránh viết quá dài (dưới 40 từ). Đặc biệt: CHỈ gửi lời chào (như Chào bạn, Dạ chào anh/chị) ở câu đầu tiên của cuộc hội thoại, từ các câu tiếp theo tuyệt đối không lặp lại câu chào hỏi nữa mà trả lời thẳng vào vấn đề.',
     soulPrompt: 'Bạn là nhân viên tư vấn Zalo của doanh nghiệp: chuyên nghiệp, gần gũi, hiểu sản phẩm/dịch vụ, không tiết lộ mình là AI, không nói về hệ thống nội bộ.',
     responseRules: '- Trả lời bằng tiếng Việt theo ngôn ngữ của khách.\n- Không bịa thông tin ngoài kho kiến thức; nếu thiếu dữ liệu thì đề nghị chuyển nhân viên.\n- Không gửi mật khẩu, token, cookie hoặc dữ liệu nhạy cảm.\n- Khi cần gửi file/ảnh, chỉ nêu đúng tài liệu phù hợp trong kho kiến thức để agent Zalo gửi.',
     temperature: 0.7,
     debounceSeconds: 20,
+    aiHistoryLimit: 5,
     personalAudience: 'all',
     groupAudience: 'tagOnly',
     selectedGroupKeys: [],
@@ -142,7 +145,9 @@ async function getChatbotSettings(userId) {
         aiModel: normalizeChatbotAiModel(settings.aiModel || settings.model),
         debounceSeconds: normalizeChatbotDebounceSeconds(
             settings.debounceSeconds
-        )
+        ),
+        aiHistoryLimit: normalizeChatbotHistoryLimit(settings.aiHistoryLimit),
+        keywordRulesEnabled: settings.keywordRulesEnabled !== false
     };
 }
 
@@ -156,6 +161,8 @@ async function saveChatbotSettings(userId, value) {
         responseRules: String(value.responseRules || defaultChatbotSettings.responseRules).slice(0, 8000),
         temperature: Number.isFinite(Number(value.temperature)) ? Number(value.temperature) : defaultChatbotSettings.temperature,
         debounceSeconds: normalizeChatbotDebounceSeconds(value.debounceSeconds),
+        aiHistoryLimit: normalizeChatbotHistoryLimit(value.aiHistoryLimit),
+        keywordRulesEnabled: value.keywordRulesEnabled !== false,
         personalAudience: ['all', 'crmOnly'].includes(value.personalAudience) ? value.personalAudience : defaultChatbotSettings.personalAudience,
         groupAudience: ['none', 'tagOnly', 'selected'].includes(value.groupAudience) ? value.groupAudience : defaultChatbotSettings.groupAudience,
         selectedGroupKeys: Array.isArray(value.selectedGroupKeys)
@@ -174,23 +181,6 @@ async function saveChatbotSettings(userId, value) {
         { upsert: true, new: true }
     );
     return safeValue;
-}
-
-const getSummaryModelKey = (userId) => `crmSummaryModel:${userId}`;
-
-async function getSummaryModel(userId) {
-    const setting = await SystemSetting.findOne({ key: getSummaryModelKey(userId) }).lean();
-    return normalizeSummaryAiModel(setting?.value?.aiModel);
-}
-
-async function saveSummaryModel(userId, aiModel) {
-    const value = { aiModel: normalizeSummaryAiModel(aiModel) };
-    await SystemSetting.findOneAndUpdate(
-        { key: getSummaryModelKey(userId) },
-        { $set: { key: getSummaryModelKey(userId), value, description: 'Per-user Alpha CRM group summary model' } },
-        { upsert: true, new: true }
-    );
-    return value;
 }
 
 function getQuotaPayload(subscription, quotaBucket = 'none', quotaUnits = 0) {
@@ -3066,6 +3056,7 @@ router.get('/agent/chatbot/config', agentAuthMiddleware, async (req, res) => {
                 priority: rule.priority,
                 channelScope: rule.channelScope,
                 handoffKeywords: rule.handoffKeywords || [],
+                accountIds: rule.accountIds || [],
                 businessHours: rule.businessHours || { enabled: false }
             })),
             crmThreadKeys: crmConversations.map(
@@ -3205,10 +3196,18 @@ router.post(
                 settings.soulPrompt ? `Soul / vai tro:\n${settings.soulPrompt}` : '',
                 settings.responseRules ? `Quy tac bat buoc:\n${settings.responseRules}` : ''
             ].filter(Boolean).join('\n\n');
-            const knowledge = settings.knowledgeSnippets?.length
-                ? `\n\nKien thuc noi bo:\n${settings.knowledgeSnippets.join('\n---\n')}`
+            // The bridge sends knowledge already filtered for this account
+            // (per-document [Accounts] targeting). Use it when present; otherwise
+            // fall back to the operator's full stored set.
+            const effectiveSnippets = Array.isArray(req.body.knowledgeSnippets)
+                ? req.body.knowledgeSnippets
+                    .map((snippet) => String(snippet))
+                    .filter((snippet) => snippet.trim())
+                : (settings.knowledgeSnippets || []);
+            const knowledge = effectiveSnippets.length
+                ? `\n\nKien thuc noi bo:\n${effectiveSnippets.join('\n---\n')}`
                 : '';
-            const attachmentCatalog = extractChatbotAttachmentCatalog(settings.knowledgeSnippets);
+            const attachmentCatalog = extractChatbotAttachmentCatalog(effectiveSnippets);
             let sendInstructions = '';
             if (attachmentCatalog.length) {
                 const catalogLines = attachmentCatalog
@@ -3220,7 +3219,20 @@ router.post(
                     'TUYET DOI khong tu go ten tep, khong dan URL, khong mo ta ten file bang chu. ' +
                     'Chi gui tep khi that su lien quan den cau hoi cua khach; neu khong can thi khong chen marker nao.';
             }
-            const promptContent = `${aiInstructions}${knowledge}${sendInstructions}\n\nTin nhan khach hang: ${customerMessage}`;
+            // Recent conversation context the operator configured the AI to read.
+            // The bridge already collapses consecutive same-sender messages into
+            // turns and limits the count; clamp again defensively here.
+            const historyLimit = normalizeChatbotHistoryLimit(settings.aiHistoryLimit);
+            const historyTurns = (historyLimit > 0 && Array.isArray(req.body.history))
+                ? req.body.history
+                    .filter((turn) => turn && typeof turn.content === 'string' && turn.content.trim())
+                    .slice(-historyLimit)
+                    .map((turn) => `${turn.role === 'assistant' ? 'Nhan vien' : 'Khach'}: ${String(turn.content).trim().slice(0, 2000)}`)
+                : [];
+            const historyBlock = historyTurns.length
+                ? `\n\nLich su hoi thoai gan day (cu -> moi):\n${historyTurns.join('\n')}`
+                : '';
+            const promptContent = `${aiInstructions}${knowledge}${sendInstructions}${historyBlock}\n\nTin nhan khach hang: ${customerMessage}`;
             const quotaUnits = getChatbotModelQuotaUnits(settings.aiModel);
             const { aiResponse, usageDoc, quota } = await runCrmAiWithQuota(req, {
                 promptContent,
@@ -3426,7 +3438,10 @@ router.post('/chatbot/rules', authMiddleware, requireActiveSubscription, async (
             isActive: req.body.isActive !== false,
             priority: Number(req.body.priority) || 100,
             channelScope: req.body.channelScope || 'user',
-            handoffKeywords: Array.isArray(req.body.handoffKeywords) ? req.body.handoffKeywords : []
+            handoffKeywords: Array.isArray(req.body.handoffKeywords) ? req.body.handoffKeywords : [],
+            accountIds: Array.isArray(req.body.accountIds)
+                ? req.body.accountIds.map((id) => String(id).trim()).filter(Boolean).slice(0, 200)
+                : []
         });
         res.json({ success: true, data: rule });
     } catch (error) {
@@ -3437,7 +3452,7 @@ router.post('/chatbot/rules', authMiddleware, requireActiveSubscription, async (
 
 router.put('/chatbot/rules/:id', authMiddleware, requireActiveSubscription, async (req, res) => {
     try {
-        const updateData = sanitizeUpdate(req.body, ['name', 'description', 'keywords', 'matchMode', 'response', 'isActive', 'priority', 'channelScope', 'handoffKeywords', 'businessHours']);
+        const updateData = sanitizeUpdate(req.body, ['name', 'description', 'keywords', 'matchMode', 'response', 'isActive', 'priority', 'channelScope', 'handoffKeywords', 'businessHours', 'accountIds']);
         const rule = await CrmChatbotRule.findOneAndUpdate(
             { _id: req.params.id, userId: req.user._id },
             { $set: updateData },
@@ -3646,26 +3661,6 @@ router.get('/groups', authMiddleware, async (req, res) => {
     }
 });
 
-router.get('/groups/summary-settings', authMiddleware, async (req, res) => {
-    try {
-        const aiModel = await getSummaryModel(req.user._id);
-        res.json({ success: true, data: { aiModel, allowedModels: SUMMARY_ALLOWED_AI_MODELS } });
-    } catch (error) {
-        console.error('Summary settings get error:', error);
-        res.status(500).json({ success: false, message: 'Loi server khi tai cau hinh tom tat.' });
-    }
-});
-
-router.put('/groups/summary-settings', authMiddleware, requireActiveSubscription, async (req, res) => {
-    try {
-        const value = await saveSummaryModel(req.user._id, req.body.aiModel);
-        res.json({ success: true, data: value });
-    } catch (error) {
-        console.error('Summary settings save error:', error);
-        res.status(500).json({ success: false, message: 'Loi server khi luu cau hinh tom tat.' });
-    }
-});
-
 router.get('/groups/insights', authMiddleware, async (req, res) => {
     try {
         const query = { userId: req.user._id };
@@ -3838,8 +3833,9 @@ router.post('/groups/:id/summarize', crmAiLimiter, authMiddleware, requireActive
             priorSummary: priorSummary?.summaryText || '',
             openItems
         });
-        // Model is a tab-level setting (not per-group); pro models cost 2 quota units.
-        const aiModel = await getSummaryModel(req.user._id);
+        // Model is a client-side (local) tab preference sent in the body; pro
+        // models cost 2 quota units.
+        const aiModel = normalizeSummaryAiModel(req.body.aiModel);
         const { aiResponse, usageDoc, quota } = await runCrmAiWithQuota(req, {
             promptContent,
             sessionId: `crm-group-summary:${req.user._id}:${group._id}`,

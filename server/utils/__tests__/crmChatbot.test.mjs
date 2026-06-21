@@ -4,7 +4,8 @@ import {
     buildChatbotConfigSnapshot,
     hasHandoffKeyword,
     matchChatbotRule,
-    normalizeChatbotDebounceSeconds
+    normalizeChatbotDebounceSeconds,
+    normalizeChatbotHistoryLimit
 } from '../crmChatbot.js';
 
 test('handoff and rule matching ignore Vietnamese accents and case', () => {
@@ -54,4 +55,13 @@ test('chatbot debounce is normalized to the supported range', () => {
     assert.equal(normalizeChatbotDebounceSeconds(5), 10);
     assert.equal(normalizeChatbotDebounceSeconds(30), 30);
     assert.equal(normalizeChatbotDebounceSeconds(200), 120);
+});
+
+test('chatbot history limit is normalized to 0..20 with default 5', () => {
+    assert.equal(normalizeChatbotHistoryLimit(undefined), 5);
+    assert.equal(normalizeChatbotHistoryLimit('invalid'), 5);
+    assert.equal(normalizeChatbotHistoryLimit(-3), 0);
+    assert.equal(normalizeChatbotHistoryLimit(8), 8);
+    assert.equal(normalizeChatbotHistoryLimit(50), 20);
+    assert.equal(normalizeChatbotHistoryLimit(3.7), 4);
 });

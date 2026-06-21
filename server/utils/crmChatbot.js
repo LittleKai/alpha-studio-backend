@@ -14,6 +14,14 @@ export function normalizeChatbotDebounceSeconds(value) {
     return Math.min(120, Math.max(10, parsed));
 }
 
+// Number of recent conversation "turns" (consecutive same-sender messages collapsed
+// into one) the AI reads as context before replying. 0 = no history. Default 5.
+export function normalizeChatbotHistoryLimit(value) {
+    const parsed = Number(value);
+    if (!Number.isFinite(parsed)) return 5;
+    return Math.min(20, Math.max(0, Math.round(parsed)));
+}
+
 export function hasHandoffKeyword(settingsOrRule, message) {
     const keywords = settingsOrRule?.handoffKeywords
         || ['nhan vien', 'nguoi that', 'tu van vien', 'gap admin', 'human'];

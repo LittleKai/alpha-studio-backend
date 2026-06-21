@@ -51,6 +51,11 @@ const crmChatbotRuleSchema = new mongoose.Schema({
         type: String,
         trim: true
     }],
+    // Zalo account ids this rule applies to. Empty = all accounts (default).
+    accountIds: [{
+        type: String,
+        trim: true
+    }],
     businessHours: {
         enabled: { type: Boolean, default: false },
         timezone: { type: String, default: 'Asia/Ho_Chi_Minh' },
