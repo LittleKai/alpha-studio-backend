@@ -3324,6 +3324,19 @@ router.post('/agent/chatbot/audit', agentAuthMiddleware, async (req, res) => {
         if (req.body.ruleId && /^[a-f\d]{24}$/i.test(String(req.body.ruleId))) {
             update.ruleId = req.body.ruleId;
         }
+        // Token usage from the personal/live bot reply (cloud generate returns
+        // these in usage). Without this the response log shows 0/0 for AI replies.
+        const auditTokenIn = Number(req.body.tokenIn);
+        const auditTokenOut = Number(req.body.tokenOut);
+        if (Number.isFinite(auditTokenIn) && auditTokenIn >= 0) {
+            update.tokenIn = Math.trunc(auditTokenIn);
+        }
+        if (Number.isFinite(auditTokenOut) && auditTokenOut >= 0) {
+            update.tokenOut = Math.trunc(auditTokenOut);
+        }
+        if (req.body.aiUsageId && /^[a-f\d]{24}$/i.test(String(req.body.aiUsageId))) {
+            update.aiUsageId = req.body.aiUsageId;
+        }
         const log = await CrmChatbotLog.findOneAndUpdate(
             { userId, idempotencyKey },
             { $setOnInsert: update },
