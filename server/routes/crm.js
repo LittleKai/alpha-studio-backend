@@ -3256,6 +3256,8 @@ router.post(
                     usage: {
                         id: usageDoc._id,
                         model: aiResponse.model || settings.aiModel,
+                        promptTokens: aiResponse.usage?.promptTokens || 0,
+                        completionTokens: aiResponse.usage?.completionTokens || 0,
                         quota
                     }
                 }
