@@ -22,11 +22,11 @@ export function buildGroupSummaryPrompt({ group, messages }) {
 }
 
 const GOAL_INSTRUCTIONS = {
-    leads: '- opportunities: khach co tin hieu mua hang (hoi gia, hoi mua, quan tam san pham). Moi muc ghi ten/biet danh nguoi noi neu co.',
-    questions: '- questions: cau hoi cua khach CHUA duoc ai tra loi trong doan chat.',
-    complaints: '- risks: phan nan, khieu nai, cam xuc tieu cuc can xu ly.',
-    actions: '- actionItems: viec can lam cu the de cham soc/chot khach (title ngan, gon, hanh dong duoc).',
-    trends: '- keyTopics: chu de noi bat / xu huong duoc nhac nhieu.'
+    leads: '- opportunities: Danh sach leads nong va co hoi ban hang (khach hoi gia, hoi mua, quan tam/hoi tham chi tiet ve san pham/dich vu). Ghi ro ten khach va nhu cau cu the cua ho.',
+    questions: '- questions: Cac cau hoi hoac ban khoan cua khach hang CHUA duoc tra loi thoa dang hoac can phan hoi lam ro them trong doan chat.',
+    complaints: '- risks: Phan nan, khieu nai, su thieu hai long ve chat luong san pham/dich vu, thai do, hoac van de giao nhan can duoc xu ly gap.',
+    actions: '- actionItems: Danh sach cong viec cham soc khach hang thiet thuc, da dang can thuc hien (bao gom: (1) Phan hoi gap thong tin cho khach, (2) Gui bao gia/tai lieu/anh san pham, (3) Dat lich hen cuoc goi/gap mat, (4) Theo doi lai sau mua/sau tu van (follow-up), (5) Cap nhat thong tin/giai doan len CRM, (6) Ho tro ky thuat/van hanh). Moi hanh dong phai co tieu de ngan gon mang tinh hanh dong, phan mo ta ghi ro ai phai lam gi va priority hop ly.',
+    trends: '- keyTopics: Cac chu de noi bat, moi quan tam chung, xu huong nhom hoac cac chu de duoc thao luan nhieu nhat.'
 };
 
 // Build a JSON-output summary prompt. goals filters emphasis, customPrompt is the
@@ -56,22 +56,28 @@ export function buildGroupSummaryPromptV2({
     const sections = [
         customPrompt
             ? String(customPrompt).slice(0, 4000)
-            : 'Ban la chuyen gia CRM/marketing. Tom tat cuoc tro chuyen nhom Zalo de doi ngu ban hang hanh dong.',
+            : 'Ban la mot chuyen gia CRM va marketing cao cap. Nhiem vu cua ban la phan tich chuyen sau cuoc tro chuyen nhom Zalo de cung cap cho doi ngu ban hang cac thong tin chi tiet, thuc te va de xuat cac hanh dong cham soc khach hang cu the.',
         '',
-        'Tra ve DUY NHAT mot JSON hop le (khong kem giai thich, khong code fence) theo schema:',
+        'Tra ve DUY NHAT mot JSON hop le (khong kem loi giai thich nao khac, khong bao quanh boi ```json) theo schema sau:',
         '{',
-        '  "summaryText": "tom tat ngan 2-4 cau, tieng Viet",',
-        '  "keyTopics": ["..."],',
-        '  "decisions": ["..."],',
-        '  "questions": ["cau hoi chua duoc tra loi"],',
-        '  "risks": ["phan nan / rui ro"],',
-        '  "opportunities": ["khach co tin hieu mua hang"],',
+        '  "summaryText": "Tom tat chi tiet 3-5 cau phan anh day du dien bien chinh cua nhom, tam trang/thai do chung cua cac thanh vien va ket qua thao luan.",',
+        '  "keyTopics": ["Chu de thao luan chi tiet kem nguoi khoi xuong"],',
+        '  "decisions": ["Quyet dinh hoac thoa thuan da dat duoc"],',
+        '  "questions": ["Cau hoi chua duoc phan hoi"],',
+        '  "risks": ["Rui ro hoac van de tieu cuc can chu y"],',
+        '  "opportunities": ["Khach co tin hieu quan tam/mua hang thuc te"],',
         '  "sentiment": "positive|neutral|negative|mixed",',
-        '  "actionItems": [{"title":"...","description":"...","priority":"low|medium|high"}]',
+        '  "actionItems": [',
+        '    {',
+        '      "title": "Tieu de cong viec ngan gon, truc quan va bat dau bang mot dong tu (VD: \'Gui bao gia cho anh Nam\', \'Goi dien lam ro yeu cau ky thuat\')",',
+        '      "description": "Chi tiet buoc can thuc hien, ghi ro thong tin khach hang can cham soc va noi dung can truyen tai",',
+        '      "priority": "low|medium|high"',
+        '    }',
+        '  ]',
         '}',
-        'Yeu cau noi dung (chi dien muc lien quan, de mang rong neu khong co):',
-        ...(goalLines.length ? goalLines : ['- Dien day du cac muc co du lieu.']),
-        'Tat ca bang tieng Viet. Khong bia thong tin. Khong ghi so dien thoai.',
+        'Yeu cau noi dung (chi dien muc co du lieu lien quan, de mang rong neu khong co):',
+        ...(goalLines.length ? goalLines : ['- Dien day du cac muc co du lieu de phan tich duoc chi tiet.']),
+        'Tat ca bang tieng Viet. Tuyet doi khong tu bia dat thong tin ngoai doan chat. Khong kem so dien thoai.',
         ''
     ];
 
