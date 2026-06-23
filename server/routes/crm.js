@@ -99,7 +99,7 @@ const getChatbotSettingsKey = (userId) => `crmChatbotSettings:${userId}`;
 const CHATBOT_ALLOWED_AI_MODELS = ['gemini-2.5-flash', 'gemini-3-flash'];
 const CHATBOT_DEFAULT_AI_MODEL = 'gemini-2.5-flash';
 // Group AI summary supports a richer model choice than the chatbot.
-const SUMMARY_ALLOWED_AI_MODELS = ['gemini-3.1-pro', 'gemini-2.5-pro', 'gemini-3-flash'];
+const SUMMARY_ALLOWED_AI_MODELS = ['gemini-3.1-pro', 'gemini-3.5-flash'];
 const SUMMARY_DEFAULT_AI_MODEL = 'gemini-3.1-pro';
 function normalizeSummaryAiModel(value) {
     return SUMMARY_ALLOWED_AI_MODELS.includes(value) ? value : SUMMARY_DEFAULT_AI_MODEL;
@@ -3849,14 +3849,14 @@ router.post('/groups/:id/summarize', crmAiLimiter, authMiddleware, requireActive
             openItems
         });
         // Model is a client-side (local) tab preference sent in the body; pro
-        // models cost 2 quota units.
+        // models cost 1 quota units.
         const aiModel = normalizeSummaryAiModel(req.body.aiModel);
         const { aiResponse, usageDoc, quota } = await runCrmAiWithQuota(req, {
             promptContent,
             sessionId: `crm-group-summary:${req.user._id}:${group._id}`,
             requestType: 'group_summary',
             model: aiModel,
-            quotaUnits: getChatbotModelQuotaUnits(aiModel)
+            quotaUnits: 1
         });
 
         const parsed = parseGroupSummaryJson(aiResponse.text);
@@ -3945,6 +3945,19 @@ router.get('/groups/:id/summaries', authMiddleware, async (req, res) => {
     } catch (error) {
         console.error('Group summaries list error:', error);
         res.status(500).json({ success: false, message: 'Loi server khi tai tom tat nhom.' });
+    }
+});
+
+router.delete('/groups/:id/summaries/:summaryId', authMiddleware, requireActiveSubscription, async (req, res) => {
+    try {
+        const group = await CrmZaloGroup.findOne({ _id: req.params.id, userId: req.user._id });
+        if (!group) return res.status(404).json({ success: false, message: 'Khong tim thay nhom.' });
+        const result = await CrmGroupSummary.findOneAndDelete({ _id: req.params.summaryId, groupId: group._id, userId: req.user._id });
+        if (!result) return res.status(404).json({ success: false, message: 'Khong tim thay ban tom tat.' });
+        res.json({ success: true, message: 'Da xoa ban tom tat.' });
+    } catch (error) {
+        console.error('Group summary delete error:', error);
+        res.status(500).json({ success: false, message: 'Loi server khi xoa ban tóm tat.' });
     }
 });
 
