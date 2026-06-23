@@ -3811,7 +3811,7 @@ router.post('/groups/:id/summarize', crmAiLimiter, authMiddleware, requireActive
             }))
             .filter((item) => item.content.trim().length > 0)
             .sort((a, b) => (a.sentAt ? a.sentAt.getTime() : 0) - (b.sentAt ? b.sentAt.getTime() : 0))
-            .slice(0, 400);
+            .slice(0, 200);
 
         const fromAt = messages.length ? messages[0].sentAt : null;
         const toAt = messages.length
