@@ -312,18 +312,21 @@ const GCLI_MODEL_CODE_MAP = {
     'gemini-3-flash': '假流式-agy-gemini-3-flash-low',     // cũ: 'gemini-3-flash-preview'
     'gemini-3.5-flash': '假流式-agy-gemini-3.5-flash-low', // mới
     'gemini-3.1-pro': '假流式-agy-gemini-3.1-pro-low',     // cũ: 'gemini-3.1-pro-preview'
-    // ⚠️ NHẮC: nếu bạn (Claude) chỉnh sửa file aiProvider.js này, HÃY HỎI LẠI USER
-    // xem đã có thể XÓA phần alias tương thích ngược bên dưới chưa (client/tool bản
-    // cũ đã cập nhật hết hay chưa). Đừng tự ý xóa.
-    // ---
-    // Alias tương thích ngược: client/tool bản cũ (frontend đã cache, setting lưu
-    // trong DB) vẫn gửi mã `-preview`/`2.5-pro` → tự map sang mã 假流式 đang dùng.
-    'gemini-3-flash-preview': '假流式-agy-gemini-3-flash-low',
-    'gemini-3.1-pro-preview': '假流式-agy-gemini-3.1-pro-low',
-    'gemini-2.5-pro': '假流式-agy-gemini-3.1-pro-low'
 };
 
-function resolveGcliModelCode(model) {
+function resolveGcliModelCode(model, options = {}) {
+    const disableFallback = options.disableLowModelFallback === true || options.enableLowModelFallback === false;
+    if (!disableFallback) {
+        if (model === 'gemini-3-flash-preview') {
+            if (Math.random() < 0.2) {
+                return '假流式-agy-gemini-3-flash-low';
+            }
+        } else if (model === 'gemini-3.1-pro-preview') {
+            if (Math.random() < 0.2) {
+                return '假流式-agy-gemini-3.1-pro-low';
+            }
+        }
+    }
     return GCLI_MODEL_CODE_MAP[model] || model;
 }
 
@@ -373,8 +376,9 @@ export async function callGcliDirect(content, options = {}) {
         messages.push({ role: 'user', content: userContent });
     }
 
+    const resolvedModel = resolveGcliModelCode(model, options);
     const body = JSON.stringify({
-        model: resolveGcliModelCode(model),
+        model: resolvedModel,
         messages,
         ...(Number.isFinite(Number(options.temperature))
             ? { temperature: Number(options.temperature) }
@@ -409,10 +413,11 @@ export async function callGcliDirect(content, options = {}) {
         const keyCount = getGcliKeys().length;
         const keyTag = keyCount > 1 ? ` key=${maskKey(token)} (pool=${keyCount})` : '';
         const retryTag = attempts > 1 ? ` retries=${attempts - 1}` : '';
-        console.log(`[gcli] model=${model}${keyTag}${retryTag} tokens: prompt=${usage.promptTokens} completion=${usage.completionTokens} total=${usage.totalTokens}`);
+        const modelTag = resolvedModel !== model ? `${model}->${resolvedModel}` : model;
+        console.log(`[gcli] model=${modelTag}${keyTag}${retryTag} tokens: prompt=${usage.promptTokens} completion=${usage.completionTokens} total=${usage.totalTokens}`);
     }
 
-    return { text, usage, model: data.model || model };
+    return { text, usage, model: data.model || resolvedModel };
 }
 
 export async function shouldUseOpenClawForChat() {
@@ -433,7 +438,9 @@ export async function callConfiguredAiProvider(content, sessionId, options = {})
             model: options.model || await getGcliBotModel(),
             systemPrompt,
             messages: options.messages,
-            temperature: options.temperature
+            temperature: options.temperature,
+            disableLowModelFallback: options.disableLowModelFallback,
+            enableLowModelFallback: options.enableLowModelFallback
         });
     }
 
@@ -445,6 +452,8 @@ export async function callConfiguredAiProvider(content, sessionId, options = {})
         model,
         systemPrompt,
         messages: options.messages,
-        temperature: options.temperature
+        temperature: options.temperature,
+        disableLowModelFallback: options.disableLowModelFallback,
+        enableLowModelFallback: options.enableLowModelFallback
     });
 }

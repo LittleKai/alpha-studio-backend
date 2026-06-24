@@ -497,7 +497,7 @@ alpha-studio-backend/
 ### High Priority
 - [ ] Rate limiting not implemented
 - [ ] Input sanitization could be improved
-- [ ] **gcli model codes (tạm thời):** model `-preview` của gcli hiện không khả dụng. `utils/aiProvider.js` có `GCLI_MODEL_CODE_MAP` dịch tên UI (`gemini-2.5-flash`, `gemini-3-flash`, `gemini-3.5-flash`, `gemini-3.1-pro`) → mã `假流式-agy-*-low` ngay tại `callGcliDirect` (choke point duy nhất cho mọi tool: chat/crm/interior/ai). Map cũng alias các mã cũ (`*-preview`, `gemini-2.5-pro`) để client/tool bản cũ vẫn chạy. Khôi phục: sửa value trong map về mã `-preview`.
+- [ ] **gcli model codes (tạm thời):** model `-preview` của gcli hiện không khả dụng. `utils/aiProvider.js` có `GCLI_MODEL_CODE_MAP` dịch tên UI (`gemini-2.5-flash`, `gemini-3-flash`, `gemini-3.5-flash`, `gemini-3.1-pro`) → mã `假流式-agy-*-low` ngay tại `callGcliDirect` (choke point duy nhất cho mọi tool: chat/crm/interior/ai). Khi gọi đến `gemini-3-flash-preview` và `gemini-3.1-pro-preview`, có tỷ lệ 20% sẽ dùng `假流式-agy-gemini-3-flash-low` và `假流式-agy-gemini-3.1-pro-low` (có thể tắt qua `disableLowModelFallback: true` hoặc `enableLowModelFallback: false` trong options gọi API, mặc định luôn bật). Khôi phục: sửa value trong map về mã `-preview`.
 
 ### Medium Priority
 - [ ] Forgot password / password reset not implemented
