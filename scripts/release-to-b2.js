@@ -507,14 +507,19 @@ async function main() {
     const zipDestPath = path.join(CRM_DIR, 'build/alpha-crm-windows.zip');
 
     // 1. Build APK (Android)
+    const skipApkBuild = rawArgs.includes('--skip-apk-build');
     if (buildAndroid) {
-        console.log('\n[Android] Building Flutter APK (flutter build apk --release)...');
-        try {
-            execSync(`flutter build apk --release --build-name=${versionStr} --build-number=${buildNum}`, { cwd: CRM_DIR, stdio: 'inherit' });
-            console.log('✅ APK built successfully!');
-        } catch (err) {
-            console.error('❌ Error building APK:', err.message);
-            process.exit(1);
+        if (skipApkBuild && fs.existsSync(apkLocalPath)) {
+            console.log(`\n[Android] Skipping build as --skip-apk-build is specified and APK exists at ${apkLocalPath}`);
+        } else {
+            console.log('\n[Android] Building Flutter APK (flutter build apk --release)...');
+            try {
+                execSync(`flutter build apk --release --build-name=${versionStr} --build-number=${buildNum}`, { cwd: CRM_DIR, stdio: 'inherit' });
+                console.log('✅ APK built successfully!');
+            } catch (err) {
+                console.error('❌ Error building APK:', err.message);
+                process.exit(1);
+            }
         }
     } else {
         console.log('\n[Android] Skipped (not selected).');

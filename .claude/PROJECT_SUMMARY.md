@@ -1,5 +1,6 @@
 # Project Summary
 
+*Latest Session: Released CRM version 0.1.3 to B2. Resolved a file lock issue during build staging by terminating orphaned node.exe and codegraph MCP server instances holding handles on the build directory. Enhanced the release script with a `--skip-apk-build` command-line option to optimize build retries.*
 
 ## 1. Project Overview
 - **Name:** Alpha Studio Backend
