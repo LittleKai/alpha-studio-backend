@@ -3,24 +3,29 @@
 ## Tổng Quan
 Alpha Studio (tại địa chỉ https://giaiphapsangtao.com/) là một nền tảng tiên phong kết hợp giữa hệ thống quản lý đào tạo (LMS) về Trí tuệ nhân tạo (AI Academy) và cung cấp các công cụ ứng dụng trực tiếp công nghệ AI Studio tiên tiến nhất. Nền tảng được thiết kế cho cả học viên muốn làm chủ AI và các đội ngũ/doanh nghiệp cần tối ưu hóa quy trình sáng tạo nội dung.
 
+> **LƯU Ý QUAN TRỌNG:** Toàn bộ các dự án trong hệ sinh thái Alpha Studio hiện đều đang trong giai đoạn **Beta (Thử nghiệm)**. Điều này áp dụng cho tất cả các công cụ nằm trong tuyến đường `/studio` (bao gồm cả các công cụ truy cập công khai bên ngoài và các công cụ yêu cầu đăng nhập sử dụng bên trong). Hệ thống đang được liên tục hoàn thiện, nâng cấp và có thể có những thay đổi lớn về tính năng.
+
 ## Các Công Cụ Studio Chính (Generative AI)
 
 ### 1. Studio Flow (Tạo Ảnh/Video AI)
+- **Trạng thái**: Beta (Thử nghiệm)
 - **Tạo Ảnh AI**: Cung cấp các dòng mô hình AI tiên tiến, tốc độ cao và chất lượng xuất sắc giúp bạn thoả sức sáng tạo hình ảnh.
 - **Tạo Video AI**: Hỗ trợ tạo video ngắn với đa dạng tỷ lệ khung hình. Cung cấp cả tính năng chuyển đổi từ ảnh tĩnh sang video sống động (Image-to-Video).
 - **Tính năng nổi bật**: Cung cấp lịch sử tạo chi tiết, hỗ trợ tạo hàng loạt và xem trước nhanh chóng. Tất cả tệp tin được lưu trữ an toàn, dài hạn trên nền tảng đám mây.
 - **Giới hạn sử dụng**: Mỗi tài khoản sẽ có lượt sử dụng công cụ AI hàng ngày (quota) độc lập cho Ảnh và Video để hệ thống phân bổ tài nguyên tối ưu cho tất cả người dùng.
 
 ### 2. Studio Gemini Edit (Công Cụ Chỉnh Sửa Ảnh)
+- **Trạng thái**: Beta (Thử nghiệm)
 - **Tính năng nổi bật**: Cung cấp hơn 20 bộ công cụ xử lý ảnh mạnh mẽ. Bạn có thể dễ dàng sửa ảnh trực quan, khoanh vùng chỉnh sửa tuỳ biến (Masking), tạo nháp phân cảnh đa nhân vật, thay đổi phông nền, và xử lý ảnh đa bước tinh tế.
 - **Giới hạn sử dụng**: Các tính năng chỉnh sửa mạnh mẽ đều có giới hạn lượt sử dụng hàng ngày nhất định dành riêng cho mỗi tài khoản.
 
 ### 3. VocabFlip (Ứng Dụng Học Từ Vựng)
 - **Đường dẫn**: `/studio/vocab`
+- **Trạng thái**: Beta (Thử nghiệm)
 - **Tính năng chính**:
   - Tạo bộ thẻ flashcard cá nhân đa ngôn ngữ.
-  - Ôn tập từ vựng khoa học theo phương pháp Lặp Lại Ngắt Quãng (Spaced Repetition) với lịch ôn tập SM-2.
-  - Từ điển tích hợp tra nghĩa, phát âm hỗ trợ 4 ngôn ngữ: Tiếng Anh, Tiếng Việt, Tiếng Nhật, và Tiếng Trung.
+  - Ôn tập từ vựng khoa học theo phương pháp Lặp Lại Ngắt Quãng (Spaced Repetition) với thuật toán ôn tập FSRS kết hợp SM-2.
+  - Từ điển tích hợp tra nghĩa, phát âm hỗ trợ 4 ngôn ngữ: Tiếng Anh, Tiếng Việt, Tiếng Nhật, và Tiếng Trung với cơ sở dữ liệu StarDict offline 0ms.
   - Đồng bộ đám mây tự động với tài khoản Alpha Studio (tự động đăng nhập SSO khi mở bản Web).
 - **Các phiên bản**:
   - **Bản Web**: Mở chạy trực tiếp trên trình duyệt.
@@ -32,14 +37,32 @@ Alpha Studio (tại địa chỉ https://giaiphapsangtao.com/) là một nền t
 - **Đường dẫn**:
   - Ứng dụng khách: `/studio/crm` (yêu cầu giấy phép đang hoạt động).
   - Quản lý gói cước & cài đặt: `/studio/crm/subscription`.
+- **Trạng thái**: Beta (Thử nghiệm)
 - **Tính năng chính**:
   - Tự động hoá phễu tiếp thị Zalo, gửi tin nhắn hàng loạt và chăm sóc khách hàng tự động tối ưu chi phí.
   - Ghép nối thiết bị: Người dùng tải ứng dụng Windows Client và ứng dụng di động Android APK (Pair Connector), sau đó quét mã QR từ điện thoại để liên kết bot Zalo.
   - Hạn mức AI (AI Quota) hàng tháng hỗ trợ soạn thảo, tối ưu kịch bản và phản hồi tin nhắn tự động.
+  - **Tóm tắt cuộc trò chuyện nhóm AI (Local-first & Privacy-first)**: Ứng dụng CRM cho phép quét tin nhắn từ bộ lưu trữ cục bộ, gửi dữ liệu transient lên đám mây để AI tổng hợp tóm tắt (insights, cơ hội, nhiệm vụ) và tự động đồng bộ vào quản lý tác vụ mà không lưu trữ tin nhắn thô trên backend.
 - **Gói dịch vụ & gia hạn**:
+  - Đăng ký mới tài khoản mặc định được tặng dùng thử 14 ngày (crm_trial) với 100 lượt yêu cầu AI.
   - Giấy phép chính gia hạn hàng tháng (1 tháng) giá 5250 credits (hoặc 500.000đ) bao gồm 1000 lượt yêu cầu AI.
   - Có các gói mua thêm hạn mức AI vĩnh viễn (AI Top-up): Gói +200 lượt AI (1000 credits hoặc 100.000đ), gói +1000 lượt AI (5000 credits hoặc 500.000đ), và gói +2000 lượt AI (10000 credits hoặc 1.000.000đ).
   - Hỗ trợ thanh toán nhanh bằng số dư Ví Credits hoặc quét mã VietQR tự động duyệt 24/7.
+
+### 5. AI Interior Design (Thiết Kế Nội Thất AI)
+- **Đường dẫn**: `/studio/interior-design` hoặc `/studio/interior-design/:projectId`
+- **Trạng thái**: Beta (Thử nghiệm)
+- **Tính năng chính**:
+  - Dựng tủ áo 3D chuyên nghiệp (built-in wardrobes), tùy biến kích thước, vị trí các ngăn tủ, đợt kệ, thanh treo, cánh tủ phẳng/shaker trực quan.
+  - Phân tích hình ảnh phác thảo / ảnh thực tế (Gemini Vision): Người dùng tải ảnh vẽ tay hoặc ảnh chụp phòng lên, AI tự động phân tích và chuyển đổi thành mô hình thiết kế tủ 3D chuẩn xác.
+  - Trò chuyện tư vấn thiết kế AI: Trò chuyện trực tiếp với trợ lý AI để tinh chỉnh bản thiết kế theo yêu cầu tự nhiên (như "Thêm 2 ngăn kéo", "Đổi chất liệu sang gỗ sồi").
+  - Xử lý CSG (Round corners, drawer/glass cutouts) giúp thiết kế có các góc bo tròn, tay nắm móc âm, cánh kính hiện đại.
+  - Quản lý phiên bản lịch sử (History timeline): Lưu trữ các mốc thiết kế dưới dạng snapshot kèm ảnh thu nhỏ, hỗ trợ khôi phục (rollback) nhanh chóng.
+  - Xác nhận 2 bước (Preferences): Cho phép bật chế độ Đề xuất (Proposal - 1 credit, chỉ phân tích mô tả không lưu phiên bản) và Áp dụng (Apply - 1 credit, cập nhật mô hình và tạo phiên bản mới) giúp tối ưu hóa tín dụng của người dùng.
+- **Giới hạn và tín dụng**:
+  - Mỗi lượt phản hồi thiết kế thành công của AI sẽ tiêu tốn 1 tín dụng (credit). Nếu bật chế độ xác nhận 2 bước, tiêu tốn 2 credits cho một lần áp dụng đầy đủ.
+  - Tính năng phân tích ảnh phác thảo (`/analyze-image`) có giới hạn sử dụng 5 lượt/24 giờ đối với mỗi tài khoản thường.
+  - Tài khoản Admin/Mod có quyền sử dụng không giới hạn tín dụng và bỏ qua các bước kiểm tra hạn mức.
 
 ## Học viện AI Academy & Kho tài nguyên
 
