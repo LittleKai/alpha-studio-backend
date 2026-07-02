@@ -28,7 +28,7 @@ import CrmSegment from '../models/CrmSegment.js';
 import CrmTask from '../models/CrmTask.js';
 import SystemSetting from '../models/SystemSetting.js';
 
-import { crmPairingLimiter, crmDeviceLimiter, crmAiLimiter } from '../middleware/crmRateLimit.js';
+import { crmPairingLimiter, crmDeviceLimiter, crmAiLimiter, crmMessageSendLimiter } from '../middleware/crmRateLimit.js';
 
 import { CRM_PLANS, CRM_AI_PACKS, getCrmProduct } from '../utils/crmCatalog.js';
 import { applySubscriptionEntitlement } from '../utils/crmBilling.js';
@@ -2961,7 +2961,7 @@ router.post('/conversations/:id/messages/failed/clear', authMiddleware, async (r
     }
 });
 
-router.post('/conversations/:id/send', authMiddleware, requireActiveSubscription, async (req, res) => {
+router.post('/conversations/:id/send', authMiddleware, requireActiveSubscription, crmMessageSendLimiter, async (req, res) => {
     try {
         const content = String(req.body.content || req.body.message || '').trim();
         if (!content) return res.status(400).json({ success: false, message: 'Noi dung tin nhan la bat buoc.' });
@@ -3044,7 +3044,7 @@ router.post('/conversations/:id/send', authMiddleware, requireActiveSubscription
 });
 
 // Send attachment (image/file/video) from operator
-router.post('/conversations/:id/send-attachment', authMiddleware, requireActiveSubscription, async (req, res) => {
+router.post('/conversations/:id/send-attachment', authMiddleware, requireActiveSubscription, crmMessageSendLimiter, async (req, res) => {
     try {
         const content = String(req.body.content || req.body.message || '').trim();
         const attachments = Array.isArray(req.body.attachments)

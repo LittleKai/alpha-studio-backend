@@ -17,3 +17,12 @@ export const crmAiLimiter = rateLimit({
   max: 20,
   message: { success: false, message: 'Quá nhiều yêu cầu AI, vui lòng chậm lại.' }
 });
+
+// Remote Live Chat sends (mobile/web -> cloud command queue -> Desktop Agent).
+// Caps at ~1 message/2s sustained, well above normal chat pace but low enough
+// to block a compromised/scripted client from flooding the agent's send queue.
+export const crmMessageSendLimiter = rateLimit({
+  windowMs: 1 * 60 * 1000,
+  max: 30,
+  message: { success: false, message: 'Gửi tin quá nhanh, vui lòng chậm lại.' }
+});
