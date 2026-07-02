@@ -34,6 +34,7 @@ import aiRoutes from './routes/ai.js';
 import interiorRoutes from './routes/interior.js';
 import crmRoutes from './routes/crm.js';
 import { configureBucketCors } from './utils/b2Storage.js';
+import { seedInteriorTemplateAssets } from './utils/interiorTemplateAssets.js';
 import { runSubscriptionMaintenance } from './jobs/crmSubscriptionJobs.js';
 import cron from 'node-cron';
 import HostMachine from './models/HostMachine.js';
@@ -276,6 +277,14 @@ function registerShutdownHandlers(server) {
 
 export async function startServer() {
     await connectDB();
+    if (process.env.INTERIOR_TEMPLATE_AUTO_SEED !== 'false') {
+        try {
+            await seedInteriorTemplateAssets({ logger: console });
+        } catch (error) {
+            console.warn('[interior:seed] startup seed failed:', error.message);
+            if (process.env.INTERIOR_TEMPLATE_SEED_STRICT === 'true') throw error;
+        }
+    }
     await configureBucketCors();
     startCronJobs();
 

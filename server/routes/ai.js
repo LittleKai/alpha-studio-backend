@@ -7,6 +7,52 @@ import Transaction from '../models/Transaction.js';
 
 const router = express.Router();
 
+const DAILY_FREE_LIMIT = 1;
+
+const AI_CARD_MODELS = {
+    flash: { id: 'gemini-3-flash', cost: 5, allowsDailyFree: true },
+    'gemini-3-flash': { id: 'gemini-3-flash', cost: 5, allowsDailyFree: true },
+    pro: { id: 'gemini-3.1-pro', cost: 10, allowsDailyFree: false },
+    'gemini-3.1-pro': { id: 'gemini-3.1-pro', cost: 10, allowsDailyFree: false },
+    'gemini-3.5-flash': { id: 'gemini-3.5-flash', cost: 10, allowsDailyFree: false },
+};
+
+function todayUtcKey() {
+    return new Date().toISOString().slice(0, 10);
+}
+
+function normalizeAiCardModel(model) {
+    return AI_CARD_MODELS[model || 'gemini-3-flash'] || null;
+}
+
+function dailyFreeRemaining(usage) {
+    if (!usage || usage.dailyFreeDate !== todayUtcKey()) {
+        return DAILY_FREE_LIMIT;
+    }
+    return Math.max(0, DAILY_FREE_LIMIT - (usage.dailyFreeUsed || 0));
+}
+
+async function getOrCreateAiUsage(userId) {
+    let usage = await VocabAiUsage.findOne({ userId });
+    if (!usage) {
+        usage = await VocabAiUsage.create({
+            userId,
+            freeUsesRemaining: DAILY_FREE_LIMIT,
+            dailyFreeDate: todayUtcKey(),
+            dailyFreeUsed: 0,
+        });
+    }
+
+    if (usage.dailyFreeDate !== todayUtcKey()) {
+        usage.dailyFreeDate = todayUtcKey();
+        usage.dailyFreeUsed = 0;
+        usage.freeUsesRemaining = DAILY_FREE_LIMIT;
+        await usage.save();
+    }
+
+    return usage;
+}
+
 // Helper to extract and parse JSON from LLM response
 const parseLLMResponse = (text) => {
     try {
@@ -22,7 +68,7 @@ const parseLLMResponse = (text) => {
 router.post('/mnemonic', async (req, res) => {
     try {
         const { word, meaning } = req.body;
-        
+
         if (!word) {
             return res.status(400).json({ error: 'Word is required' });
         }
@@ -35,7 +81,7 @@ router.post('/mnemonic', async (req, res) => {
 
         const llmResponse = await callGcliDirect(prompt);
         const parsedData = parseLLMResponse(llmResponse.text);
-        
+
         res.json(parsedData);
     } catch (error) {
         console.error('Error generating mnemonic:', error);
@@ -46,7 +92,7 @@ router.post('/mnemonic', async (req, res) => {
 router.post('/generate-deck', async (req, res) => {
     try {
         const { text } = req.body;
-        
+
         if (!text) {
             return res.status(400).json({ error: 'Text is required' });
         }
@@ -63,7 +109,7 @@ ${text}`;
 
         const llmResponse = await callGcliDirect(prompt);
         const parsedData = parseLLMResponse(llmResponse.text);
-        
+
         res.json(parsedData);
     } catch (error) {
         console.error('Error generating deck:', error);
@@ -74,17 +120,13 @@ ${text}`;
 router.get('/usage', authMiddleware, async (req, res) => {
     try {
         const userId = req.user._id || req.user.id;
-        let usage = await VocabAiUsage.findOne({ userId });
-        if (!usage) {
-            usage = await VocabAiUsage.create({ userId, freeUsesRemaining: 3 });
-        }
-
+        const usage = await getOrCreateAiUsage(userId);
         const user = await User.findById(userId);
 
         res.json({
             success: true,
-            freeUsesRemaining: usage.freeUsesRemaining,
-            creditBalance: user ? user.balance : 0
+            freeUsesRemaining: dailyFreeRemaining(usage),
+            creditBalance: user ? user.balance : 0,
         });
     } catch (error) {
         console.error('Error getting AI usage:', error);
@@ -93,6 +135,12 @@ router.get('/usage', authMiddleware, async (req, res) => {
 });
 
 router.post('/generate-cards', authMiddleware, async (req, res) => {
+    const userId = req.user._id || req.user.id;
+    let reservedFreeUse = false;
+    let chargedUser = null;
+    let chargeCost = 0;
+    let transactionDetails = null;
+
     try {
         const {
             prompt,
@@ -102,43 +150,69 @@ router.post('/generate-cards', authMiddleware, async (req, res) => {
             includeExamples,
             includeNotes,
             noteInstructions,
-            model
+            model,
         } = req.body;
 
         if (!prompt) {
             return res.status(400).json({ error: 'Prompt is required' });
         }
 
-        const userId = req.user._id || req.user.id;
-        let usage = await VocabAiUsage.findOne({ userId });
-        if (!usage) {
-            usage = await VocabAiUsage.create({ userId, freeUsesRemaining: 3 });
+        const modelConfig = normalizeAiCardModel(model);
+        if (!modelConfig) {
+            return res.status(400).json({ error: 'Unsupported AI model' });
         }
 
+        let usage = await getOrCreateAiUsage(userId);
         const user = await User.findById(userId);
         if (!user) {
             return res.status(404).json({ error: 'User not found' });
         }
 
-        const cost = 50; // 50 credits (coins) per generation when out of free uses
-        const usesFree = usage.freeUsesRemaining > 0;
+        if (modelConfig.allowsDailyFree && dailyFreeRemaining(usage) > 0) {
+            const reservedUsage = await VocabAiUsage.findOneAndUpdate(
+                {
+                    userId,
+                    dailyFreeDate: todayUtcKey(),
+                    dailyFreeUsed: { $lt: DAILY_FREE_LIMIT },
+                },
+                {
+                    $inc: { dailyFreeUsed: 1 },
+                    $set: { freeUsesRemaining: 0 },
+                },
+                { new: true }
+            );
 
-        if (!usesFree && user) {
-            if (user.balance < cost) {
-                return res.status(400).json({
-                    error: 'Không đủ số dư để thực hiện thao tác này. Mỗi lượt tạo thẻ cần 50 credit.'
-                });
+            if (reservedUsage) {
+                usage = reservedUsage;
+                reservedFreeUse = true;
             }
         }
 
-        // Map model type to correct GCLI models
-        let modelName = 'gemini-3-flash';
-        if (model === 'pro') {
-            modelName = 'gemini-3.1-pro';
-        } else if (model === 'flash') {
-            modelName = 'gemini-3-flash';
-        } else if (model) {
-            modelName = model;
+        if (!reservedFreeUse) {
+            chargeCost = modelConfig.cost;
+            chargedUser = await User.findOneAndUpdate(
+                { _id: userId, balance: { $gte: chargeCost } },
+                { $inc: { balance: -chargeCost } },
+                { new: true }
+            );
+
+            if (!chargedUser) {
+                return res.status(400).json({
+                    error: `Insufficient balance. This model requires ${chargeCost} credits.`,
+                });
+            }
+
+            transactionDetails = {
+                userId: chargedUser._id,
+                type: 'spend',
+                serviceType: 'other',
+                amount: chargeCost,
+                credits: chargeCost,
+                status: 'completed',
+                transactionCode: 'AI_CARD_' + Date.now() + '_' + Math.random().toString(36).substring(2, 7).toUpperCase(),
+                paymentMethod: 'system',
+                description: `VocabFlip AI Card Generator spend (${modelConfig.id})`,
+            };
         }
 
         // Generate Cards using LLM
@@ -159,38 +233,43 @@ Output ONLY a valid JSON object with the following structure (no markdown, no ex
   ]
 }`;
 
-        const llmResponse = await callGcliDirect(promptText, { model: modelName });
+        const llmResponse = await callGcliDirect(promptText, { model: modelConfig.id });
         const parsedData = parseLLMResponse(llmResponse.text);
 
-        // Deduct usage/credits only after successful generation
-        if (usesFree) {
-            usage.freeUsesRemaining -= 1;
-            await usage.save();
-        } else {
-            user.balance -= cost;
-            await user.save();
-
-            // Create Transaction record
-            await Transaction.create({
-                userId: user._id,
-                type: 'spend',
-                serviceType: 'other',
-                amount: cost,
-                credits: cost,
-                status: 'completed',
-                transactionCode: 'AI_CARD_' + Date.now() + '_' + Math.random().toString(36).substring(2, 7).toUpperCase(),
-                paymentMethod: 'system',
-                description: 'VocabFlip AI Card Generator spend'
-            });
+        if (transactionDetails) {
+            await Transaction.create(transactionDetails);
         }
+
+        usage = await getOrCreateAiUsage(userId);
 
         res.json({
             success: true,
             cards: parsedData.cards || [],
-            freeUsesRemaining: usage.freeUsesRemaining,
-            creditBalance: user.balance
+            freeUsesRemaining: dailyFreeRemaining(usage),
+            creditBalance: chargedUser ? chargedUser.balance : user.balance,
         });
     } catch (error) {
+        if (reservedFreeUse) {
+            try {
+                const usage = await VocabAiUsage.findOne({ userId });
+                if (usage && usage.dailyFreeDate === todayUtcKey() && usage.dailyFreeUsed > 0) {
+                    usage.dailyFreeUsed -= 1;
+                    usage.freeUsesRemaining = dailyFreeRemaining(usage);
+                    await usage.save();
+                }
+            } catch (rollbackError) {
+                console.error('Failed to rollback AI daily free use:', rollbackError);
+            }
+        }
+
+        if (chargedUser && chargeCost > 0) {
+            try {
+                await User.updateOne({ _id: chargedUser._id }, { $inc: { balance: chargeCost } });
+            } catch (rollbackError) {
+                console.error('Failed to refund AI card generation charge:', rollbackError);
+            }
+        }
+
         console.error('Error generating cards:', error);
         res.status(500).json({ error: error.message || 'Failed to generate cards' });
     }

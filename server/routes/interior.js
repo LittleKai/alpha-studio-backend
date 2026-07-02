@@ -14,6 +14,8 @@ import InteriorAgentLog from '../models/InteriorAgentLog.js';
 import InteriorTemplate from '../models/InteriorTemplate.js';
 import User from '../models/User.js';
 import { validateTemplateStructure, extractDsl } from '../utils/templateValidator.js';
+import { buildCatalogPromptSection } from '../utils/interiorCatalogPrompt.js';
+import { normalizeTemplateForStorage } from '../utils/interiorTemplateAssets.js';
 import { ToolRegistry } from '../agent-runner/tool-registry.js';
 import { SkillLoader } from '../agent-runner/skill-loader.js';
 import { runAgentLoop } from '../agent-runner/runner.js';
@@ -458,17 +460,24 @@ const INTERIOR_DIMENSION_ANCHOR_RULE_VI = [
 ].join('\n');
 
 const INTERIOR_CATALOG_VI = `
-DANH Má»¤C TEMPLATE (Æ¯U TIĂN dĂ¹ng cĂ¡c template nĂ y thay vĂ¬ táº¡o box thĂ´):
+DANH MUC TEMPLATE (UU TIEN dung cac template nay thay vi tao box tho):
 
 | id | category | tags | params bounds | style options | mĂ´ táº£ |
 |---|---|---|---|---|---|
-| upper-2door | upper-cabinet | shaker, bar-handle | w:40-200, h:50-130, d:30-70 | door: shaker\\|flat; handle: bar\\|knob | Tá»§ trĂªn 2 cĂ¡nh shaker, tay náº¯m dá»c |
-| upper-glass-2door | upper-cabinet | glass, frame | w:40-200, h:50-130, d:30-70 | handle: bar\\|knob | Tá»§ trĂªn 2 cĂ¡nh kĂ­nh sÆ°Æ¡ng |
-| sliding-2door | wardrobe | sliding, finger-pull | w:100-300, h:150-260, d:55-65 | door: flat; track: top-bottom | Tá»§ Ă¡o cá»­a kĂ©o 2 cĂ¡nh + ray trĂªn dÆ°á»›i + finger pull |
-| sliding-3door | wardrobe | sliding | w:150-400, h:150-260, d:55-65 | door: flat | Tá»§ Ă¡o cá»­a kĂ©o 3 cĂ¡nh |
-| ac-recess-fold | upper-cabinet | ac, fold-down | w:60-130, h:80-130, d:50-65 | (none) | Há»‘c mĂ¡y láº¡nh phĂ­a trĂªn + cĂ¡nh láº­t dÆ°á»›i |
-| open-bookshelf | shelf | open, bookshelf | w:80-200, h:40-120, d:25-40 | shelves: 1\\|2\\|3 | Ká»‡ má»Ÿ 1-3 ngÄƒn (sĂ¡ch, Ä‘á»“ trÆ°ng bĂ y) |
-| l-desk-return | desk | L-shape, working | w:80-200, d:50-65 | (none) | BĂ n lĂ m viá»‡c chá»¯ L vá»›i main + L return |
+| ac-recess-fold | upper-cabinet | ac, fold-down | w:60-130, h:80-130, d:50-65 | (none) | Hoc may lanh phia tren + canh lat duoi |
+| base-cabinet-2door | base-cabinet | kitchen, base, 2-door | w:60-140, h:80-95, d:55-70 | door: flat\\|shaker; handle: bar\\|knob | Tu bep duoi 2 canh |
+| base-drawer-stack | drawer-base | kitchen, drawer | w:40-100, h:80-95, d:55-70 | drawers: 2\\|3\\|4; handle: bar\\|knob | Chong ngan keo tu bep |
+| cab-base-rounded-end | base-cabinet | kitchen, base, rounded, end, corner | w:35-80, h:80-95, d:55-70 | hand: left\\|right | Tu bep duoi bo dau tron |
+| corner-cabinet | corner-cabinet | kitchen, corner, L-shape | w:80-120, h:80-95, d:80-120 | door: flat\\|shaker | Tu bep goc |
+| l-desk-return | desk | L-shape, working | w:80-200, d:50-65 | (none) | Ban lam viec chu L voi main + return |
+| open-bookshelf | shelf | open, bookshelf | w:80-200, h:40-120, d:25-40 | shelves: 1\\|2\\|3 | Ke mo 1-3 ngan |
+| sink-base | base-cabinet | kitchen, sink, plumbing | w:60-120, h:80-95, d:55-70 | door: flat\\|shaker | Tu chau rua co khoang ky thuat |
+| sliding-2door | wardrobe | sliding, finger-pull | w:100-300, h:150-260, d:55-65 | door: flat; track: top-bottom | Tu ao cua keo 2 canh + ray |
+| sliding-3door | wardrobe | sliding | w:150-400, h:150-260, d:55-65 | door: flat | Tu ao cua keo 3 canh |
+| tall-cabinet | tall-cabinet | kitchen, pantry, tower | w:40-100, h:180-260, d:55-70 | door: flat\\|shaker | Tu dung cao/pantry/tower |
+| upper-2door | upper-cabinet | shaker, bar-handle | w:40-200, h:50-130, d:30-70 | door: shaker\\|flat; handle: bar\\|knob | Tu tren 2 canh |
+| upper-glass-2door | upper-cabinet | glass, frame | w:40-200, h:50-130, d:30-70 | handle: bar\\|knob | Tu tren 2 canh kinh |
+| wall-cabinet-2door | wall-cabinet | kitchen, wall, 2-door | w:50-140, h:50-100, d:30-45 | door: flat\\|shaker; handle: bar\\|knob | Tu bep tren 2 canh |
 
 QUY Táº®C:
 1. Má»—i cabinet trong design: tĂ¬m template phĂ¹ há»£p NHáº¤T theo category + tags + size bounds.
@@ -478,9 +487,9 @@ QUY Táº®C:
    QUAN TRá»ŒNG: category PHáº¢I náº±m trong danh sĂ¡ch cá»‘ Ä‘á»‹nh trĂªn. Náº¿u chá»n sai (vd "kitchen-cabinet"), backend sáº½ REJECT tplNew vĂ  module rá»›t vá» raw box xáº¥u. Tá»§ báº¿p dÆ°á»›i = base-cabinet; tá»§ báº¿p trĂªn = wall-cabinet; tá»§ Ä‘á»©ng cao (pantry/tá»§ láº¡nh tower) = tall-cabinet; ngÄƒn kĂ©o nhiá»u táº§ng = drawer-base; tá»§ gĂ³c = corner-cabinet; Ä‘áº£o báº¿p = island.
    DSL grammar:
    - boxes item: { x, y, z, w, h, d, faces: { top, front, right, left, back, bottom }, opacity }.
-   - TrÆ°á»ng sá»‘ cĂ³ thá»ƒ lĂ  number HOáº¶C chuá»—i "{{ expr }}" vá»›i expr = arithmetic (+ - * / %) + so sĂ¡nh (== != < <= > >=) + min/max/round/abs + identifier (params.X, style.X, $colorToken: $cab, $woodFront, $handle...).
+   - TrÆ°á»ng sá»‘ cĂ³ thá»ƒ lĂ  number HOáº¶C chuá»—i "{{ expr }}" vá»›i expr = arithmetic (+ - * / %) + so sĂ¡nh (== != === !== < <= > >=) + min/max/round/abs + identifier (params.X, style.X, $colorToken: $cab, $woodFront, $handle...).
    - TrÆ°á»ng color: "#hex" hoáº·c "$tokenName". Cáº¤M dĂ¹ng eval/Function/new/[]/=> trong expression.
-   - Optional "if": "{{ expr }}" Ä‘á»ƒ bá» qua shape khi false.
+   - Optional "if": "{{ expr }}" de bo qua shape khi false. Dung 2 shape voi "if" thay vi ternary "? :". Vi du: shape A co "if":"{{style.hand == 'right'}}", shape B co "if":"{{style.hand != 'right'}}".
 4. Váº«n cho phĂ©p legacy box (khĂ´ng cĂ³ tpl/tplNew) khi cáº§n â€” dĂ¹ng materialRef + color nhÆ° cÅ©.
 `.trim();
 
@@ -489,13 +498,20 @@ TEMPLATE CATALOG (prefer these templates instead of raw boxes):
 
 | id | category | tags | params bounds | style options | description |
 |---|---|---|---|---|---|
-| upper-2door | upper-cabinet | shaker, bar-handle | w:40-200, h:50-130, d:30-70 | door: shaker\\|flat; handle: bar\\|knob | 2-door shaker upper cabinet |
-| upper-glass-2door | upper-cabinet | glass, frame | w:40-200, h:50-130, d:30-70 | handle: bar\\|knob | 2-door frosted glass upper cabinet |
+| ac-recess-fold | upper-cabinet | ac, fold-down | w:60-130, h:80-130, d:50-65 | (none) | AC recess with lower fold-down door |
+| base-cabinet-2door | base-cabinet | kitchen, base, 2-door | w:60-140, h:80-95, d:55-70 | door: flat\\|shaker; handle: bar\\|knob | 2-door kitchen base cabinet |
+| base-drawer-stack | drawer-base | kitchen, drawer | w:40-100, h:80-95, d:55-70 | drawers: 2\\|3\\|4; handle: bar\\|knob | Kitchen drawer stack |
+| cab-base-rounded-end | base-cabinet | kitchen, base, rounded, end, corner | w:35-80, h:80-95, d:55-70 | hand: left\\|right | Rounded end kitchen base cabinet |
+| corner-cabinet | corner-cabinet | kitchen, corner, L-shape | w:80-120, h:80-95, d:80-120 | door: flat\\|shaker | Kitchen corner cabinet |
+| l-desk-return | desk | L-shape, working | w:80-200, d:50-65 | (none) | L-shaped desk with return |
+| open-bookshelf | shelf | open, bookshelf | w:80-200, h:40-120, d:25-40 | shelves: 1\\|2\\|3 | Open shelf with books/display objects |
+| sink-base | base-cabinet | kitchen, sink, plumbing | w:60-120, h:80-95, d:55-70 | door: flat\\|shaker | Sink base with technical opening |
 | sliding-2door | wardrobe | sliding, finger-pull | w:100-300, h:150-260, d:55-65 | door: flat; track: top-bottom | 2-door sliding wardrobe with tracks and finger pulls |
 | sliding-3door | wardrobe | sliding | w:150-400, h:150-260, d:55-65 | door: flat | 3-door sliding wardrobe |
-| ac-recess-fold | upper-cabinet | ac, fold-down | w:60-130, h:80-130, d:50-65 | (none) | AC recess with lower fold-down door |
-| open-bookshelf | shelf | open, bookshelf | w:80-200, h:40-120, d:25-40 | shelves: 1\\|2\\|3 | Open shelf with books/display objects |
-| l-desk-return | desk | L-shape, working | w:80-200, d:50-65 | (none) | L-shaped desk with return |
+| tall-cabinet | tall-cabinet | kitchen, pantry, tower | w:40-100, h:180-260, d:55-70 | door: flat\\|shaker | Tall pantry / appliance tower |
+| upper-2door | upper-cabinet | shaker, bar-handle | w:40-200, h:50-130, d:30-70 | door: shaker\\|flat; handle: bar\\|knob | 2-door upper cabinet |
+| upper-glass-2door | upper-cabinet | glass, frame | w:40-200, h:50-130, d:30-70 | handle: bar\\|knob | 2-door frosted glass upper cabinet |
+| wall-cabinet-2door | wall-cabinet | kitchen, wall, 2-door | w:50-140, h:50-100, d:30-45 | door: flat\\|shaker; handle: bar\\|knob | 2-door kitchen wall cabinet |
 
 RULES:
 1. For each cabinet, choose the best matching template by category + tags + size bounds.
@@ -505,9 +521,9 @@ RULES:
    IMPORTANT: category MUST be in the fixed list above. Wrong category ("kitchen-cabinet" etc.) â†’ backend REJECTS tplNew, module falls back to ugly raw box. Kitchen base cabinet = base-cabinet; upper kitchen = wall-cabinet; tall pantry / fridge tower = tall-cabinet; drawer stack = drawer-base; corner unit = corner-cabinet; kitchen island = island.
    DSL grammar:
    - boxes item: { x, y, z, w, h, d, faces: { top, front, right, left, back, bottom }, opacity }.
-   - Numeric fields may be number OR "{{ expr }}" with arithmetic + comparison + min/max/round/abs + identifiers (params.X, style.X, $colorToken: $cab, $woodFront, $handle...).
-   - Color fields: "#hex" or "$tokenName". Forbid eval/Function/new/[]/=> in expressions.
-   - Optional "if": "{{ expr }}" to skip shape when false.
+    - Numeric fields may be number OR "{{ expr }}" with arithmetic + comparison (== != === !== < <= > >=) + min/max/round/abs + identifiers (params.X, style.X, $colorToken: $cab, $woodFront, $handle...).
+    - Color fields: "#hex" or "$tokenName". Forbid eval/Function/new/[]/=> in expressions.
+    - Optional "if": "{{ expr }}" to skip shape when false. Use two shapes with "if" instead of ternary "? :". Example: shape A has "if":"{{style.hand == 'right'}}", shape B has "if":"{{style.hand != 'right'}}".
 4. Legacy raw boxes still allowed (no tpl/tplNew) with materialRef + color when needed.
 `.trim();
 
@@ -526,7 +542,7 @@ const INTERIOR_REPLY_FORMAT_NO_IMAGE = [
     'Sau 2 dĂ²ng Ä‘Ă³ cĂ³ thá»ƒ thĂªm chĂº thĂ­ch thiáº¿t káº¿ náº¿u cáº§n. KHĂ”NG bá»‹a ná»™i dung áº£nh vĂ¬ khĂ´ng cĂ³ áº£nh.'
 ].join('\n');
 
-const INTERIOR_FEW_SHOT = [
+const INTERIOR_FEW_SHOT_LEGACY = [
     'VĂ­ dá»¥ output JSON Há»¢P Lá»† (compact):',
     '{"reply":"Quan sĂ¡t áº£nh: tá»§ Ă¡o cĂ¡nh trÆ°á»£t 2 cĂ¡nh kĂ­nh má», khung gá»— Ă³c chĂ³ tá»‘i mĂ u.\\nHiá»ƒu yĂªu cáº§u: muá»‘n tá»§ Ă¡o 2 cĂ¡nh trÆ°á»£t, 200 rá»™ng, cĂ³ ngÄƒn kĂ©o dÆ°á»›i.\\nÄĂ£ Ă¡p dá»¥ng: width 200, height 240, depth 60; thĂªm 2 cĂ¡nh trÆ°á»£t; thĂªm 2 ngÄƒn kĂ©o dÆ°á»›i cao 25.","askForInfo":false,"cabinetModel":{"title":"Tá»§ Ă¡o cĂ¡nh trÆ°á»£t","units":"cm","width":200,"height":240,"depth":60,"materials":{"board":"#8a623d"},"modules":[{"type":"panel","label":"Khoang chĂ­nh","kind":"box","materialRef":"wood-oak","x":0,"y":50,"z":0,"width":200,"height":190,"depth":60,"color":"#8a623d"},{"type":"drawer-zone","label":"NgÄƒn kĂ©o","kind":"box","materialRef":"wood-walnut","x":0,"y":0,"z":0,"width":200,"height":50,"depth":60,"color":"#5c3d22"}],"details":[{"type":"sliding-door","label":"CĂ¡nh trĂ¡i","x":0,"y":50,"z":58,"width":100,"height":190,"depth":2,"color":"#e8f0f5"},{"type":"sliding-door","label":"CĂ¡nh pháº£i","x":100,"y":50,"z":58,"width":100,"height":190,"depth":2,"color":"#e8f0f5"}],"specs":[["KĂ­ch thÆ°á»›c","200 x 240 x 60 cm","CĂ¡nh trÆ°á»£t kĂ­nh má»"]]}}',
     '{"reply":"Hiá»ƒu yĂªu cáº§u: tá»§ báº¿p chá»¯ L 500 x 100, cĂ³ tá»§ Ä‘á»©ng gĂ³c, khoang tá»§ láº¡nh, tá»§ dÆ°á»›i + tá»§ trĂªn.\\nÄĂ£ Ă¡p dá»¥ng: runs[] 2 nhĂ¡nh; main run east cĂ³ 5 module vá»›i x tuyá»‡t Ä‘á»‘i (0,60,140,140,140); module stack dĂ¹ng cĂ¹ng x, khĂ¡c y.","askForInfo":false,"cabinetModel":{"title":"Tá»§ báº¿p chá»¯ L cĂ³ tá»§ trĂªn","units":"cm","width":500,"height":260,"depth":60,"materials":{"board":"#c9986b"},"runs":[{"id":"main","origin":{"x":0,"z":0},"direction":"east","modules":[{"type":"tall-cabinet","label":"Tá»§ Ä‘á»©ng gĂ³c","kind":"box","materialRef":"wood-oak","x":0,"y":0,"z":0,"width":60,"height":260,"depth":60,"color":"#c9986b"},{"type":"fridge-slot","label":"Khoang tá»§ láº¡nh","kind":"void","x":60,"y":0,"z":0,"width":80,"height":190,"depth":60},{"type":"base-cabinet","label":"Tá»§ báº¿p dÆ°á»›i","kind":"box","materialRef":"wood-oak","x":140,"y":0,"z":0,"width":360,"height":86,"depth":60,"color":"#c9986b"},{"type":"upper-cabinet","label":"Tá»§ báº¿p trĂªn","kind":"box","materialRef":"wood-oak","x":140,"y":140,"z":25,"width":360,"height":80,"depth":35,"color":"#c9986b"},{"type":"ceiling-cabinet","label":"Tá»§ ká»‹ch tráº§n","kind":"box","materialRef":"wood-oak","x":140,"y":220,"z":25,"width":360,"height":40,"depth":35,"color":"#c9986b"}]},{"id":"return","origin":{"x":0,"z":0},"direction":"north","modules":[{"type":"base-cabinet","label":"NhĂ¡nh L","kind":"box","materialRef":"wood-oak","x":0,"y":0,"z":0,"width":100,"height":86,"depth":60,"color":"#c9986b"}]}],"details":[],"specs":[["Bá»‘ cá»¥c","Chá»¯ L 500 x 100 cm","CĂ³ tá»§ trĂªn + tá»§ dÆ°á»›i"]]}}',
@@ -534,7 +550,15 @@ const INTERIOR_FEW_SHOT = [
     '{"reply":"Hiá»ƒu yĂªu cáº§u: tá»§ Ä‘áº§u giÆ°á»ng cĂ³ khe Ä‘Ă¨n LED uá»‘n cong, khĂ´ng cĂ³ trong catalog.\\nÄĂ£ Ă¡p dá»¥ng: dĂ¹ng tplNew táº¡o template má»›i \\"led-nightstand\\" vá»›i 1 khoang chĂ­nh + line LED phĂ¡t sĂ¡ng phĂ­a trĂªn.","askForInfo":false,"cabinetModel":{"title":"Tá»§ Ä‘áº§u giÆ°á»ng LED","units":"cm","width":60,"height":50,"depth":40,"palette":"wood-walnut","modules":[{"tplNew":{"id":"led-nightstand","version":1,"category":"lower-cabinet","tags":["led","nightstand"],"description":{"vi":"Tá»§ Ä‘áº§u giÆ°á»ng cĂ³ khe LED","en":"Nightstand with LED strip"},"params":{"width":{"min":40,"max":80,"default":60},"height":{"min":40,"max":60,"default":50},"depth":{"min":30,"max":50,"default":40}},"style":{},"boxes":[{"x":0,"y":0,"z":0,"w":"{{width}}","h":"{{height}}","d":"{{depth}}","faces":{"top":"$woodTop","front":"$woodFront","right":"$woodSide","left":"$woodDark","back":"$woodBack"}},{"x":2,"y":"{{height - 4}}","z":"{{depth - 0.5}}","w":"{{width - 4}}","h":2,"d":0.5,"faces":{"front":"#fff4c4"}}]},"x":0,"y":0,"z":0,"width":60,"height":50,"depth":40}],"details":[],"specs":[["tplNew","led-nightstand","Template má»›i do AI táº¡o, chá» admin duyá»‡t"]]}}'
 ].join('\n');
 
-function buildInteriorPrompt({ message, refImageUrls, project, baseModel, proposalContext = '' }) {
+const INTERIOR_FEW_SHOT = [
+    'Vi du output JSON HOP LE (uu tien tpl truoc raw box):',
+    '{"reply":"Hieu yeu cau: tu ao canh truot 240cm, cao 260cm, sau 60cm, co khoang treo va ngan keo.\\nDa ap dung: dung tpl sliding-2door cho khoang chinh va tpl base-drawer-stack cho ngan keo duoi; width 240, height 260, depth 60.","askForInfo":false,"cabinetModel":{"title":"Tu ao canh truot co ngan keo","units":"cm","width":240,"height":260,"depth":60,"palette":"wood-walnut","modules":[{"tpl":"sliding-2door","x":0,"y":50,"z":0,"width":240,"height":210,"depth":60,"style":{"door":"flat","track":"top-bottom"}},{"tpl":"base-drawer-stack","x":0,"y":0,"z":0,"width":120,"height":50,"depth":60,"style":{"drawers":3,"handle":"bar"}},{"tpl":"base-drawer-stack","x":120,"y":0,"z":0,"width":120,"height":50,"depth":60,"style":{"drawers":3,"handle":"bar"}}],"details":[],"specs":[["Template","sliding-2door + base-drawer-stack","Dung catalog thay vi box tho"]]}}',
+    '{"reply":"Hieu yeu cau: tu bep chu L 400cm x 250cm, tu duoi go oc cho, tu tren trang, co bo goc dau tu.\\nDa ap dung: runs[] 2 nhanh dung kich thuoc 400/250; dung base-cabinet-2door, wall-cabinet-2door, sink-base va cab-base-rounded-end.","askForInfo":false,"cabinetModel":{"title":"Tu bep chu L co bo goc","units":"cm","width":400,"height":240,"depth":250,"palette":"wood-oak","runs":[{"id":"main","origin":{"x":0,"z":0},"direction":"east","modules":[{"tpl":"sink-base","x":0,"y":0,"z":0,"width":90,"height":86,"depth":60,"style":{"door":"flat"}},{"tpl":"base-cabinet-2door","x":90,"y":0,"z":0,"width":220,"height":86,"depth":60,"style":{"door":"shaker","handle":"bar"}},{"tpl":"cab-base-rounded-end","x":310,"y":0,"z":0,"width":50,"height":86,"depth":60,"style":{"hand":"right"}},{"tpl":"wall-cabinet-2door","x":90,"y":145,"z":25,"width":220,"height":80,"depth":35,"style":{"door":"flat","handle":"bar"}}]},{"id":"return","origin":{"x":0,"z":0},"direction":"north","modules":[{"tpl":"corner-cabinet","x":0,"y":0,"z":0,"width":100,"height":86,"depth":100,"style":{"door":"shaker"}},{"tpl":"base-cabinet-2door","x":100,"y":0,"z":0,"width":150,"height":86,"depth":60,"style":{"door":"shaker","handle":"bar"}}]}],"details":[],"specs":[["Bo cuc","L 400 x 250 cm","Dung runs va template bo goc"]]}}',
+    '{"reply":"Hieu yeu cau: ke sach 180cm mau xanh navy dam.\\nDa ap dung: dung open-bookshelf cho than ke va raw detail mau navy cho mat trang tri vi catalog khong co bien the mau rieng.","askForInfo":false,"cabinetModel":{"title":"Ke sach navy","units":"cm","width":180,"height":160,"depth":35,"palette":"dark-modern","modules":[{"tpl":"open-bookshelf","x":0,"y":0,"z":0,"width":180,"height":160,"depth":35,"style":{"shelves":3}}],"details":[{"type":"accent-panel","kind":"box","x":0,"y":0,"z":34,"width":180,"height":160,"depth":1,"color":"#1a1a2e"}],"specs":[["Mau","Navy #1a1a2e","Raw color dung cho accent/detail le"]]}}',
+    '{"reply":"Hieu yeu cau: tu dau giuong co khe LED khong co trong catalog.\\nDa ap dung: tao tplNew led-nightstand chi khi catalog khong co template phu hop.","askForInfo":false,"cabinetModel":{"title":"Tu dau giuong LED","units":"cm","width":60,"height":50,"depth":40,"palette":"wood-walnut","modules":[{"tplNew":{"id":"led-nightstand","version":1,"category":"lower-cabinet","tags":["led","nightstand"],"description":{"vi":"Tu dau giuong co khe LED","en":"Nightstand with LED strip"},"params":{"width":{"min":40,"max":80,"default":60},"height":{"min":40,"max":60,"default":50},"depth":{"min":30,"max":50,"default":40}},"style":{},"boxes":[{"x":0,"y":0,"z":0,"w":"{{width}}","h":"{{height}}","d":"{{depth}}","faces":{"top":"$woodTop","front":"$woodFront","right":"$woodSide","left":"$woodDark","back":"$woodBack"}},{"x":2,"y":"{{height - 4}}","z":"{{depth - 0.5}}","w":"{{width - 4}}","h":2,"d":0.5,"faces":{"front":"#fff4c4"}}]},"x":0,"y":0,"z":0,"width":60,"height":50,"depth":40}],"details":[],"specs":[["tplNew","led-nightstand","Chi dung khi catalog khong co"]]}}'
+].join('\n');
+
+async function buildInteriorPrompt({ message, refImageUrls, project, baseModel, proposalContext = '' }) {
     const hasImages = refImageUrls.length > 0;
     const recent = project.versions
         .slice(-8)
@@ -559,6 +583,7 @@ function buildInteriorPrompt({ message, refImageUrls, project, baseModel, propos
     const proposalNote = proposalContext
         ? `ÄĂ£ cĂ³ proposal user xĂ¡c nháº­n tá»« bÆ°á»›c phĂ¢n tĂ­ch trÆ°á»›c (hĂ£y bĂ¡m sĂ¡t):\n${proposalContext}`
         : '';
+    const catalogPrompt = await buildCatalogPromptSection({ message, language: 'vi' });
 
     return [
         'Báº¡n lĂ  trá»£ lĂ½ thiáº¿t káº¿ ná»™i tháº¥t cho Alpha Studio (chuyĂªn vá» tá»§ vĂ  ná»™i tháº¥t Viá»‡t Nam).',
@@ -570,7 +595,7 @@ function buildInteriorPrompt({ message, refImageUrls, project, baseModel, propos
         'cabinetModel báº¯t buá»™c: width/height/depth sá»‘ dÆ°Æ¡ng (cm), modules lĂ  máº£ng â‰¥1 pháº§n tá»­, má»—i module/detail cĂ³ x,y,z,width,height,depth lĂ  sá»‘.',
         INTERIOR_DOMAIN_HINTS,
         INTERIOR_RUNS_RULE_VI,
-        INTERIOR_CATALOG_VI,
+        catalogPrompt,
         INTERIOR_FEW_SHOT,
         refImageNote,
         recent ? `Lá»‹ch sá»­ gáº§n Ä‘Ă¢y:\n${recent}` : 'ChÆ°a cĂ³ lá»‹ch sá»­ chat.',
@@ -580,7 +605,7 @@ function buildInteriorPrompt({ message, refImageUrls, project, baseModel, propos
     ].filter(Boolean).join('\n\n');
 }
 
-function buildInteriorProposalPrompt({ message, refImageUrls, project, baseModel }) {
+async function buildInteriorProposalPrompt({ message, refImageUrls, project, baseModel }) {
     const hasImages = refImageUrls.length > 0;
     const recent = project.versions
         .slice(-6)
@@ -595,6 +620,7 @@ function buildInteriorProposalPrompt({ message, refImageUrls, project, baseModel
     const observationField = hasImages
         ? '  "observation": "string â€” mĂ´ táº£ áº£nh: style, váº­t liá»‡u, mĂ u, bá»‘ cá»¥c, kĂ­ch thÆ°á»›c Æ°á»›c tĂ­nh. Tá»‘i Ä‘a 250 tá»«.",'
         : '  "observation": "" (chuá»—i rá»—ng â€” KHĂ”NG bá»‹a ná»™i dung áº£nh vĂ¬ khĂ´ng cĂ³ áº£nh),';
+    const catalogPrompt = await buildCatalogPromptSection({ message, language: 'vi' });
 
     return [
         'Báº¡n lĂ  trá»£ lĂ½ thiáº¿t káº¿ ná»™i tháº¥t cho Alpha Studio.',
@@ -611,7 +637,7 @@ function buildInteriorProposalPrompt({ message, refImageUrls, project, baseModel
         '- KHĂ”NG sinh cabinetModel á»Ÿ bÆ°á»›c nĂ y.',
         INTERIOR_DOMAIN_HINTS,
         INTERIOR_RUNS_RULE_VI,
-        INTERIOR_CATALOG_VI,
+        catalogPrompt,
         refImageNote,
         recent ? `Lá»‹ch sá»­ gáº§n Ä‘Ă¢y:\n${recent}` : 'ChÆ°a cĂ³ lá»‹ch sá»­ chat.',
         `cabinetModel hiá»‡n táº¡i:\n${JSON.stringify(baseModel)}`,
@@ -685,35 +711,46 @@ async function deductInteriorCredit(user, cost = INTERIOR_AI_CREDIT_COST) {
     return { charged: true, balance: updated.balance };
 }
 
-function buildAgentInitialPrompt({ message, refImageUrls, baseModel }) {
+async function buildAgentInitialPrompt({ message, refImageUrls, baseModel }) {
     const modelText = JSON.stringify(baseModel || {}).slice(0, 2000);
+    const catalogPrompt = await buildCatalogPromptSection({ message, language: 'vi', maxRows: 40 });
     return [
         'You are an interior design AI. You build cabinets by calling tools step by step.',
         `USER REQUEST:\n${message}`,
         `REFERENCE IMAGES: ${refImageUrls.length} URL(s): ${refImageUrls.join(', ') || 'none'}`,
         `CURRENT MODEL STATE (snapshot):\n${modelText}`,
         '',
+        INTERIOR_DIMENSION_ANCHOR_RULE_VI,
+        INTERIOR_DOMAIN_HINTS,
+        INTERIOR_RUNS_RULE_VI,
+        catalogPrompt,
+        '',
         'RULES:',
         '1. Each turn output EXACTLY ONE JSON object on a single line: {"thought":"...","tool":"<name>","args":{...}}',
         '2. No markdown fences. No commentary outside JSON. No multiple tool calls per turn.',
         '3. Call model.preview if you need to see full state.',
         '4. Call skill.list then skill.read for unfamiliar tasks.',
-        '5. Call template.suggest when unsure which catalog template to use.',
+        '5. Before the first module.add/model.commit that adds a cabinet/furniture module, call template.suggest with the user request or module description. Prefer tpl from template.suggest/template.list over raw boxes.',
         '6. Build incrementally, one module at a time.',
         '7. End by calling model.commit with a Vietnamese reply or model.abort with a reason.',
         '8. Maximum 30 tool calls per loop.'
     ].join('\n');
 }
 
-function buildAgentSystemPrompt() {
+async function buildAgentSystemPrompt({ message = '' } = {}) {
     const tools = interiorRegistry.summary().map((tool) => `- ${tool.name}: ${tool.description}`).join('\n');
     const skills = interiorSkills.summary().map((skill) => `- ${skill.name}: ${skill.description}`).join('\n');
+    const catalogPrompt = await buildCatalogPromptSection({ message, language: 'vi', maxRows: 40 });
     return [
         'Available tools:',
         tools,
         '',
         'Available domain skills:',
         skills || '- none',
+        '',
+        catalogPrompt,
+        '',
+        'Agent policy: use template.suggest/template.list before adding the first module. Use domain dimensions exactly when the user gives sizes.',
         '',
         'Return only the JSON tool-call object.'
     ].join('\n');
@@ -925,12 +962,13 @@ router.post('/templates/import', authMiddleware, async (req, res) => {
         const rejected = [];
 
         for (const raw of incoming) {
+            const normalized = normalizeTemplateForStorage(raw);
             const candidate = {
-                id: typeof raw?.id === 'string' ? raw.id.trim() : '',
-                category: raw?.category || 'other',
-                tags: Array.isArray(raw?.tags) ? raw.tags.slice(0, 20) : [],
-                params: raw?.params || {},
-                dsl: extractDsl(raw)
+                id: normalized.id,
+                category: normalized.category,
+                tags: normalized.tags,
+                params: normalized.params,
+                dsl: normalized.dsl
             };
             const validation = validateTemplateStructure(candidate);
             if (!validation.valid) {
@@ -952,7 +990,7 @@ router.post('/templates/import', authMiddleware, async (req, res) => {
                 category: candidate.category,
                 tags: candidate.tags,
                 params: candidate.params,
-                style: raw.style && typeof raw.style === 'object' && !Array.isArray(raw.style) ? raw.style : {},
+                style: normalized.styleOptions,
                 dsl: candidate.dsl
             };
             if (normalizedLatest && stableJson(normalizedLatest) === stableJson(normalizedIncoming)) {
@@ -963,21 +1001,17 @@ router.post('/templates/import', authMiddleware, async (req, res) => {
             const created = await InteriorTemplate.create({
                 templateId: candidate.id,
                 version,
-                name: raw.name && typeof raw.name === 'object' && !Array.isArray(raw.name)
-                    ? raw.name
-                    : { vi: raw.title || candidate.id, en: raw.title || candidate.id },
-                description: raw.description && typeof raw.description === 'object' && !Array.isArray(raw.description)
-                    ? raw.description
-                    : { vi: '', en: '' },
+                name: normalized.name,
+                description: normalized.description,
                 category: candidate.category,
                 tags: candidate.tags,
                 params: candidate.params,
-                styleOptions: raw.style && typeof raw.style === 'object' && !Array.isArray(raw.style) ? raw.style : {},
+                styleOptions: normalized.styleOptions,
                 dsl: candidate.dsl,
                 status: targetStatus,
                 authorId: req.user._id,
                 sourceInlineId: raw.source || 'interior-component-workshop',
-                previewDims: raw.previewDims || null
+                previewDims: normalized.previewDims
             });
             imported.push({ id: created.templateId, version: created.version, status: created.status });
         }
@@ -1230,11 +1264,12 @@ async function runInteriorAgentSession({
     writeEvent(res, 'run-started', { runId: String(log._id), stepsCount: steps.length, resuming: initialStepIndex > 0 });
 
     try {
+        const systemPrompt = await buildAgentSystemPrompt({ message: ctx.userPrompt });
         const result = await runAgentLoop({
             initialPrompt,
             initialMessages,
             initialStepIndex,
-            systemPrompt: buildAgentSystemPrompt(),
+            systemPrompt,
             registry: interiorRegistry,
             ctx,
             maxSteps,
@@ -1402,7 +1437,7 @@ router.post('/projects/:id/agent', authMiddleware, async (req, res) => {
         // module.update / module.remove. Without this the initial prompt
         // snapshot shows id-less modules and AI loops trying to address them.
         ensureInteriorDraft(baseModel);
-        const initialPrompt = buildAgentInitialPrompt({ message, refImageUrls, baseModel });
+        const initialPrompt = await buildAgentInitialPrompt({ message, refImageUrls, baseModel });
         const maxSteps = Math.min(Math.max(Number(req.body?.maxSteps) || 30, 1), 60);
 
         log = await InteriorAgentLog.create({
@@ -1629,7 +1664,7 @@ router.post('/projects/:id/chat', authMiddleware, async (req, res) => {
         // Trá»« 1 credit (user Ä‘Ă£ báº­t 2-step vĂ  biáº¿t sáº½ tá»‘n 2 credit tá»•ng).
         if (stage === 'proposal') {
             const aiImageUrls = await presignImageUrls(refImageUrls);
-            const proposalPrompt = buildInteriorProposalPrompt({ message, refImageUrls, project, baseModel });
+            const proposalPrompt = await buildInteriorProposalPrompt({ message, refImageUrls, project, baseModel });
             const startedAt = Date.now();
             let aiText;
             let proposalUsage = null;
@@ -1719,7 +1754,7 @@ router.post('/projects/:id/chat', authMiddleware, async (req, res) => {
 
         // â”€â”€â”€ STAGE: APPLY (default) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
         const aiImageUrls = await presignImageUrls(refImageUrls);
-        const applyPrompt = buildInteriorPrompt({ message, refImageUrls, project, baseModel, proposalContext });
+        const applyPrompt = await buildInteriorPrompt({ message, refImageUrls, project, baseModel, proposalContext });
         const applyStartedAt = Date.now();
         let aiText;
         let aiUsage = null;

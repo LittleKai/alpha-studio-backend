@@ -158,7 +158,11 @@ export const VocabChineseDictionary = mongoose.model('VocabChineseDictionary', v
 
 const vocabAiUsageSchema = new mongoose.Schema({
     userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true, unique: true, index: true },
-    freeUsesRemaining: { type: Number, default: 3 },
+    // Legacy response field kept for older clients; current quota is computed
+    // from dailyFreeDate + dailyFreeUsed.
+    freeUsesRemaining: { type: Number, default: 1 },
+    dailyFreeDate: { type: String, default: '' }, // UTC YYYY-MM-DD
+    dailyFreeUsed: { type: Number, default: 0 },
 }, { timestamps: true });
 
 export const VocabAiUsage = mongoose.model('VocabAiUsage', vocabAiUsageSchema);
