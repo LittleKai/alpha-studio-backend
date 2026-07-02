@@ -368,6 +368,12 @@ async function upsertConversationFromInbound({ userId, deviceId, event, enforceM
         }
     }
 
+    // BE-6: this event may be inbound (from the customer/group member) or
+    // outbound (the operator/chatbot's own message reported by AG-3) — the
+    // agent always sets event.senderId to the Zalo account's own ID for its
+    // own sends, same rule already used locally (local-chat-store.ts).
+    const direction = event.senderId && event.senderId === accountId ? 'outbound' : 'inbound';
+
     const conversation = await CrmConversation.findOneAndUpdate(
         { userId, accountId, threadId, threadType },
         {
@@ -384,7 +390,8 @@ async function upsertConversationFromInbound({ userId, deviceId, event, enforceM
                 lastMessageAt: receivedAt,
                 lastInboundAt: receivedAt
             },
-            $inc: { unreadCount: 1 },
+            // The operator/chatbot's own outbound message is never "unread".
+            $inc: { unreadCount: direction === 'inbound' ? 1 : 0 },
             $setOnInsert: { tags: [], notes: '', assignedStatus: 'open' }
         },
         { upsert: true, new: true, setDefaultsOnInsert: true }
@@ -393,7 +400,11 @@ async function upsertConversationFromInbound({ userId, deviceId, event, enforceM
     const IS_LOCAL_FIRST_LIVE_CHAT = isLocalFirstLiveChatEnabled();
     let message = null;
 
-    if (!IS_LOCAL_FIRST_LIVE_CHAT) {
+    // Local-first mode intentionally keeps full INBOUND history off the cloud
+    // (see isMetadataOnly above) — but the operator/chatbot's own outbound
+    // message is content the recipient already has, so it's still stored here
+    // so mobile/web clients have something to show for their own sends.
+    if (!IS_LOCAL_FIRST_LIVE_CHAT || direction === 'outbound') {
         if (providerMessageId) {
             message = await CrmMessage.findOne({ userId, accountId, providerMessageId });
         }
@@ -405,15 +416,16 @@ async function upsertConversationFromInbound({ userId, deviceId, event, enforceM
                 accountId,
                 threadId,
                 threadType,
-                direction: 'inbound',
+                direction,
                 senderId: event.senderId || '',
                 senderName: event.senderName || '',
                 content,
                 messageType,
                 attachments: event.attachments || null,
                 providerMessageId,
-                status: 'received',
-                receivedAt
+                status: direction === 'outbound' ? 'sent' : 'received',
+                receivedAt,
+                sentAt: direction === 'outbound' ? receivedAt : null
             });
         }
     }
@@ -2893,15 +2905,6 @@ router.get('/conversations', authMiddleware, async (req, res) => {
 
 router.get('/conversations/:id/messages', authMiddleware, async (req, res) => {
     try {
-        if (isLocalFirstLiveChatEnabled()) {
-            return res.json({
-                success: true,
-                code: 'LOCAL_BRIDGE_REQUIRED',
-                message: 'Local-first mode enabled. Full history is not available from cloud.',
-                data: []
-            });
-        }
-
         const conversation = await CrmConversation.findOne({ _id: req.params.id, userId: req.user._id });
         if (!conversation) return res.status(404).json({ success: false, message: 'Khong tim thay hoi thoai.' });
 
@@ -2918,7 +2921,16 @@ router.get('/conversations/:id/messages', authMiddleware, async (req, res) => {
             .sort({ createdAt: isAfterQuery ? 1 : -1 })
             .limit(limit);
 
-        res.json({ success: true, data: isAfterQuery ? messages : messages.reverse() });
+        // BE-6: cloud message history is partial by design in local-first mode
+        // — outbound (operator/chatbot) messages are stored, but full inbound
+        // customer history stays on the Desktop Agent only (see BE-6 notes).
+        res.json({
+            success: true,
+            data: isAfterQuery ? messages : messages.reverse(),
+            meta: {
+                syncScope: isLocalFirstLiveChatEnabled() ? 'outbound-and-synced-only' : 'full'
+            }
+        });
     } catch (error) {
         console.error('Conversation messages error:', error);
         res.status(500).json({ success: false, message: 'Loi server khi tai tin nhan.' });

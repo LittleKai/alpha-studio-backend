@@ -4,6 +4,7 @@ import mongoose from 'mongoose';
 import path from 'node:path';
 import fs from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
+import { GoogleGenAI, Modality } from '@google/genai';
 import { authMiddleware, adminOnly } from '../middleware/auth.js';
 import { interiorQuotaCheck, commitInteriorQuota } from '../middleware/interiorQuota.js';
 import InteriorProject from '../models/InteriorProject.js';
@@ -12,6 +13,7 @@ import InteriorRender from '../models/InteriorRender.js';
 import InteriorAiLog from '../models/InteriorAiLog.js';
 import InteriorAgentLog from '../models/InteriorAgentLog.js';
 import InteriorTemplate from '../models/InteriorTemplate.js';
+import SystemSetting from '../models/SystemSetting.js';
 import User from '../models/User.js';
 import { validateTemplateStructure, extractDsl } from '../utils/templateValidator.js';
 import { buildCatalogPromptSection } from '../utils/interiorCatalogPrompt.js';
@@ -30,6 +32,7 @@ import { closeSse, setSseHeaders, writeEvent } from '../agent-runner/sse.js';
 import { registerInteriorTools } from '../tools/interior/index.js';
 import { ensureDraft as ensureInteriorDraft } from '../tools/interior/common.js';
 import { buildTerminalAgentUpdate } from '../retention/terminalUpdates.js';
+import { decrypt } from '../utils/encryption.js';
 import {
     archiveInteriorVersions,
     deleteStorageObjects,
@@ -615,6 +618,15 @@ const INTERIOR_COLOR_RULES = [
     '- Use legacy raw item.color only for one-off simple details, not for cabinet modules that match a template.'
 ].join('\n');
 
+const INTERIOR_DETAIL_DENSITY_RULES = [
+    'DETAIL DENSITY RULES:',
+    '- Prefer tpl catalog templates because seed templates already include plinth/feet, doors or drawer faces, handles, shelves, tracks, rollers, and countertops where appropriate.',
+    '- Every cabinet module must show visible door/drawer faces plus a handle, finger-pull, or pull groove unless the user explicitly asks for an open void.',
+    '- Kitchen base, sink, drawer, corner, and rounded-end modules must include a countertop; kitchen compositions should add a backsplash detail when the model is not already showing one.',
+    '- Open wardrobes and closets must show a hanging rod and shelves; sliding wardrobes must show top/bottom tracks and rollers.',
+    '- Glass-front cabinets must show internal shelves visible behind the glass.'
+].join('\n');
+
 const INTERIOR_FEW_SHOT = [
     'Vi du output JSON HOP LE (uu tien tpl truoc raw box):',
     '{"reply":"Hieu yeu cau: tu ao canh truot 240cm, cao 260cm, sau 60cm, co khoang treo va ngan keo.\\nDa ap dung: dung tpl sliding-2door cho khoang chinh va tpl base-drawer-stack cho ngan keo duoi; width 240, height 260, depth 60.","askForInfo":false,"cabinetModel":{"title":"Tu ao canh truot co ngan keo","units":"cm","width":240,"height":260,"depth":60,"palette":"wood-walnut","modules":[{"tpl":"sliding-2door","x":0,"y":50,"z":0,"width":240,"height":210,"depth":60,"style":{"door":"flat","track":"top-bottom"}},{"tpl":"base-drawer-stack","x":0,"y":0,"z":0,"width":120,"height":50,"depth":60,"style":{"drawers":3,"handle":"bar"}},{"tpl":"base-drawer-stack","x":120,"y":0,"z":0,"width":120,"height":50,"depth":60,"style":{"drawers":3,"handle":"bar"}}],"details":[],"specs":[["Template","sliding-2door + base-drawer-stack","Dung catalog thay vi box tho"]]}}',
@@ -660,6 +672,7 @@ async function buildInteriorPrompt({ message, refImageUrls, project, baseModel, 
         'cabinetModel báº¯t buá»™c: width/height/depth sá»‘ dÆ°Æ¡ng (cm), modules lĂ  máº£ng â‰¥1 pháº§n tá»­, má»—i module/detail cĂ³ x,y,z,width,height,depth lĂ  sá»‘.',
         INTERIOR_DOMAIN_HINTS,
         INTERIOR_COLOR_RULES,
+        INTERIOR_DETAIL_DENSITY_RULES,
         INTERIOR_RUNS_RULE_VI,
         catalogPrompt,
         INTERIOR_FEW_SHOT,
@@ -703,6 +716,7 @@ async function buildInteriorProposalPrompt({ message, refImageUrls, project, bas
         '- KHĂ”NG sinh cabinetModel á»Ÿ bÆ°á»›c nĂ y.',
         INTERIOR_DOMAIN_HINTS,
         INTERIOR_COLOR_RULES,
+        INTERIOR_DETAIL_DENSITY_RULES,
         INTERIOR_RUNS_RULE_VI,
         catalogPrompt,
         refImageNote,
@@ -790,6 +804,7 @@ async function buildAgentInitialPrompt({ message, refImageUrls, baseModel }) {
         INTERIOR_DIMENSION_ANCHOR_RULE_VI,
         INTERIOR_DOMAIN_HINTS,
         INTERIOR_COLOR_RULES,
+        INTERIOR_DETAIL_DENSITY_RULES,
         INTERIOR_RUNS_RULE_VI,
         catalogPrompt,
         '',
@@ -817,6 +832,7 @@ async function buildAgentSystemPrompt({ message = '' } = {}) {
         skills || '- none',
         '',
         INTERIOR_COLOR_RULES,
+        INTERIOR_DETAIL_DENSITY_RULES,
         '',
         catalogPrompt,
         '',
@@ -2020,6 +2036,7 @@ function buildAnalyzePrompt(hints) {
         'Required shape: { title, subtitle, units:"cm", width, height, depth, materials:{board}, modules:[], details:[], specs:[] } OR use top-level runs[] for L/U/island/galley layouts.',
         'IMPORTANT: If the user request cannot be represented by the current schema (complex curves or cabinet cavities not in the catalog), keep the original/main modules as much as possible and list unsupported parts in optional field meta.unsupportedRequests (string[]). Do not redraw from scratch or drop existing modules just because one detail is unsupported.',
         'MATERIAL RULES: materialRef "glass-smoked" is only for transparent glass doors or glass panels; never use it for cabinet bodies, shelves, bottoms, sides, or backs. kind "void" is only for empty openings, such as an appliance cavity or open unfinished gap; never use it for wood panels, cabinet doors, or fixed shelves. Default solid cabinet bodies and panels should use wood-oak, wood-walnut, laminate-white, or laminate-black-matte.',
+        INTERIOR_DETAIL_DENSITY_RULES,
         INTERIOR_CATALOG_EN,
         'RUNS: If the user describes L/U/island/galley layout, output runs:[{id, origin:{x,z}, direction:"east|north|west|south", modules:[...]}]. Example run module: {"x":0,"y":0,"z":0,"width":250,"height":90,"depth":60}. For a single straight layout, you may use old top-level modules. Do not use both modules and runs at the same time.',
         'Coordinate system: x leftâ†’right, y bottomâ†’top, z frontâ†’back. Units = cm.',
@@ -2050,6 +2067,88 @@ function buildGeometryRepairPrompt(prevText, warnings) {
         'Previous response:',
         prevText
     ].join('\n\n');
+}
+
+function mimeToImageExtension(mime) {
+    if (mime === 'image/png') return 'png';
+    if (mime === 'image/webp') return 'webp';
+    return 'jpg';
+}
+
+async function resolveInteriorImageApiKey() {
+    let apiKey = process.env.INTERIOR_IMAGE_API_KEY || process.env.GEMINI_API_KEY || '';
+    try {
+        const settingsRaw = await SystemSetting.find({ key: { $in: ['geminiApiKey', 'videoApiKey', 'useApiForStudio'] } });
+        const settings = {};
+        settingsRaw.forEach((setting) => {
+            settings[setting.key] = setting.value;
+        });
+        if (settings.useApiForStudio && settings.geminiApiKey) {
+            apiKey = decrypt(settings.geminiApiKey);
+        } else if (!apiKey && settings.videoApiKey) {
+            apiKey = decrypt(settings.videoApiKey);
+        }
+    } catch (error) {
+        console.warn('[interior:render] failed to load Gemini API key from settings:', error.message);
+    }
+    return apiKey;
+}
+
+function buildInteriorRenderPrompt({ modelJson, stylePrompt }) {
+    const modelSummary = JSON.stringify({
+        title: modelJson.title,
+        units: modelJson.units || 'cm',
+        width: modelJson.width,
+        height: modelJson.height,
+        depth: modelJson.depth,
+        palette: modelJson.palette,
+        materials: modelJson.materials,
+        specs: modelJson.specs,
+        moduleCount: Array.isArray(modelJson.modules) ? modelJson.modules.length : undefined,
+        runCount: Array.isArray(modelJson.runs) ? modelJson.runs.length : undefined
+    }).slice(0, 2400);
+
+    return [
+        'Create a realistic interior/cabinet product render from the provided isometric PNG reference.',
+        'Preserve the exact cabinet layout, proportions, openings, visible doors, drawers, handles, tracks, shelves, countertop, and color/material intent from the reference image.',
+        'Use the reference as a geometry conditioning image, not as a loose mood board. Keep the object centered with clean studio lighting and no people.',
+        'If the model is kitchen furniture, show countertop and backsplash details when visible in the reference. If it is wardrobe/closet furniture, show shelves, rods, sliding tracks, and handles where visible.',
+        stylePrompt ? `User style prompt: ${stylePrompt}` : 'Style: modern Vietnamese residential interior, photorealistic, practical materials.',
+        `Model summary: ${modelSummary}`
+    ].join('\n');
+}
+
+async function generateInteriorRenderImage({ cacheKey, modelJson, stylePrompt, mime, b64 }) {
+    const apiKey = await resolveInteriorImageApiKey();
+    const imageModel = process.env.INTERIOR_IMAGE_MODEL || process.env.GEMINI_IMAGE_MODEL || 'gemini-2.5-flash-image';
+    if (!apiKey) {
+        return { generated: false, imageModel, reason: 'missing-api-key' };
+    }
+
+    const ai = new GoogleGenAI({ apiKey });
+    const prompt = buildInteriorRenderPrompt({ modelJson, stylePrompt });
+    const response = await ai.models.generateContent({
+        model: imageModel,
+        contents: {
+            parts: [
+                { inlineData: { data: b64, mimeType: mime } },
+                { text: prompt }
+            ]
+        },
+        config: { responseModalities: [Modality.IMAGE] }
+    });
+
+    const parts = response.candidates?.[0]?.content?.parts || [];
+    const imagePart = parts.find((part) => part.inlineData?.data);
+    if (!imagePart) {
+        return { generated: false, imageModel, reason: response.candidates?.[0]?.finishReason || 'no-image-output' };
+    }
+
+    const outputMime = imagePart.inlineData.mimeType || 'image/jpeg';
+    const outputBuffer = Buffer.from(imagePart.inlineData.data, 'base64');
+    const renderKey = `interior-design/renders/${cacheKey.slice(0, 16)}-${Date.now()}.${mimeToImageExtension(outputMime)}`;
+    const { publicUrl: renderUrl } = await uploadFile(renderKey, outputBuffer, outputMime);
+    return { generated: true, imageModel, renderUrl, outputMime };
 }
 
 router.post('/analyze-image', authMiddleware, interiorQuotaCheck('analyze'), async (req, res) => {
@@ -2187,20 +2286,28 @@ router.post('/generate-render', authMiddleware, interiorQuotaCheck('render'), as
         }
 
         const cacheKey = sha256Hex(`${req.user._id}|${stylePrompt}|${sha256Hex(b64).slice(0, 16)}|${sha256Hex(JSON.stringify(modelJson)).slice(0, 16)}`);
-        const ext = mime === 'image/png' ? 'png' : mime === 'image/webp' ? 'webp' : 'jpg';
+        const ext = mimeToImageExtension(mime);
         const viewKey = `interior-design/conditioning/${cacheKey.slice(0, 16)}-${Date.now()}.${ext}`;
         const { publicUrl: viewUrl } = await uploadFile(viewKey, buffer, mime);
 
-        // TODO: wire actual image-generation upstream (e.g. Imagen/Gemini image API)
-        // when available. For now we persist the conditioning view + style prompt
-        // and return the conditioning URL as `renderUrl` placeholder so the
-        // frontend compare-slider has a working contract.
+        let renderResult;
+        try {
+            renderResult = await generateInteriorRenderImage({ cacheKey, modelJson, stylePrompt, mime, b64 });
+        } catch (error) {
+            console.error('[interior:render] image generation failed:', error.message);
+            renderResult = {
+                generated: false,
+                imageModel: process.env.INTERIOR_IMAGE_MODEL || process.env.GEMINI_IMAGE_MODEL || 'gemini-2.5-flash-image',
+                reason: error.message || 'generation-error'
+            };
+        }
+
         const record = await InteriorRender.create({
             cacheKey,
             userId: req.user._id,
             stylePrompt,
             viewUrl,
-            renderUrl: viewUrl,
+            renderUrl: renderResult?.renderUrl || viewUrl,
             modelSnapshot: modelJson
         });
         await commitInteriorQuota(req);
@@ -2211,7 +2318,16 @@ router.post('/generate-render', authMiddleware, interiorQuotaCheck('render'), as
                 renderUrl: record.renderUrl,
                 viewUrl: record.viewUrl,
                 cacheKey,
-                meta: { pending: true, note: 'Image generation upstream chÆ°a kĂ­ch hoáº¡t; renderUrl tráº£ vá» view 3D gá»‘c.' }
+                meta: {
+                    pending: !renderResult?.generated,
+                    generated: Boolean(renderResult?.generated),
+                    imageModel: renderResult?.imageModel || null,
+                    outputMime: renderResult?.outputMime || null,
+                    fallbackReason: renderResult?.generated ? null : renderResult?.reason || 'unknown',
+                    note: renderResult?.generated
+                        ? 'Render AI Ä‘Ă£ Ä‘Æ°á»£c táº¡o tá»« áº£nh conditioning 3D.'
+                        : 'Render AI chÆ°a kháº£ dá»¥ng; renderUrl tráº£ vá» view 3D gá»‘c.'
+                }
             }
         });
     } catch (error) {
