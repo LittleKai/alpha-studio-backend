@@ -77,6 +77,28 @@ const crmDeviceSchema = new mongoose.Schema({
         type: String,
         default: ''
     },
+    agentStatus: {
+        type: String,
+        enum: ['online', 'offline'],
+        default: 'offline'
+    },
+    zaloAccounts: [{
+        accountId: { type: String, trim: true },
+        displayName: { type: String, default: '', trim: true },
+        status: {
+            type: String,
+            enum: ['online', 'expired', 'logged_out'],
+            default: 'online'
+        }
+    }],
+    queueDepth: {
+        type: Number,
+        default: 0
+    },
+    lastHeartbeatAt: {
+        type: Date,
+        default: null
+    },
     registeredAt: {
         type: Date,
         default: Date.now

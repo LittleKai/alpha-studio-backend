@@ -1,6 +1,15 @@
 import crypto from 'node:crypto';
 
-export const PALETTES = new Set(['wood-oak', 'wood-walnut', 'laminate-white', 'dark-modern']);
+export const PALETTES = new Set([
+    'wood-oak',
+    'wood-walnut',
+    'laminate-white',
+    'dark-modern',
+    'white-oak',
+    'navy-brass',
+    'green-sage',
+    'grey-minimal'
+]);
 export const DIRECTIONS = new Set(['east', 'north', 'west', 'south']);
 const TEMPLATE_DIMENSION_DEFAULTS = {
     'ac-recess-fold': { width: 86, height: 90, depth: 60 },

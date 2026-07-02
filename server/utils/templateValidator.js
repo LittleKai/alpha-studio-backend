@@ -21,6 +21,19 @@ const ALLOWED_VIEWS = ['boxes', 'isoBoxes'];
 const SVG_VIEWS = ['frontSvg', 'sideSvg', 'planSvg'];
 const ALLOWED_PRIMITIVE_TYPES = new Set(['box', 'roundedBox', 'cylinder']);
 const ALLOWED_CYLINDER_AXES = new Set(['x', 'y', 'z']);
+const TEMPLATE_COLOR_TOKENS = new Set([
+    'accent', 'accent2', 'bg',
+    'cab', 'cabDark', 'cabEdge', 'cabLight', 'ceramic',
+    'deskEdge', 'deskSide', 'deskTop', 'dim', 'dimLine',
+    'fabric', 'fabricDark',
+    'glass', 'glassBorder',
+    'handle', 'handleEdge',
+    'ledWarm',
+    'metal', 'metalDark',
+    'plantGreen',
+    'stone', 'stoneDark',
+    'wood', 'woodBack', 'woodDark', 'woodFront', 'woodFrontL', 'woodLight', 'woodSide', 'woodTop'
+]);
 
 function validateExpression(value) {
     if (typeof value !== 'string') return true;
@@ -40,6 +53,15 @@ function walkShapeValues(shape, visitor) {
         else if (Array.isArray(value)) value.forEach((item) => walkShapeValues(item, visitor));
         else if (typeof value === 'object') walkShapeValues(value, visitor);
     }
+}
+
+function collectColorTokens(value) {
+    if (typeof value !== 'string') return [];
+    const tokens = [];
+    const regex = /\$([a-zA-Z_][a-zA-Z0-9_]*)/g;
+    let match;
+    while ((match = regex.exec(value)) !== null) tokens.push(match[1]);
+    return tokens;
 }
 
 function validateDsl(dsl) {
@@ -73,12 +95,19 @@ function validateDsl(dsl) {
                 return { valid: false, message: `Unsupported cylinder axis in ${view}[${i}]: ${shape.axis}` };
             }
             let badExpr = null;
+            let badToken = null;
             walkShapeValues(shape, (value) => {
                 if (badExpr) return;
                 if (value.includes('{{') && !validateExpression(value)) badExpr = value;
+                if (!badToken) {
+                    badToken = collectColorTokens(value).find((token) => !TEMPLATE_COLOR_TOKENS.has(token)) || null;
+                }
             });
             if (badExpr) {
                 return { valid: false, message: `Invalid expression in ${view}[${i}]: ${badExpr.slice(0, 80)}` };
+            }
+            if (badToken) {
+                return { valid: false, message: `Unknown color token in ${view}[${i}]: $${badToken}` };
             }
         }
     }
@@ -133,4 +162,4 @@ export function extractDsl(tpl) {
     };
 }
 
-export { validateDsl, validateExpression, TEMPLATE_CATEGORIES };
+export { validateDsl, validateExpression, TEMPLATE_CATEGORIES, TEMPLATE_COLOR_TOKENS };

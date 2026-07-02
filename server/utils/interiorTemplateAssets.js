@@ -12,8 +12,7 @@ export const WORKSHOP_COMPONENT_DIR = path.resolve(__dirname, '../../../tools/in
 
 const TOKEN_ALIASES = new Map([
     ['$wood', '$woodFront'],
-    ['$woodLight', '$woodFrontL'],
-    ['$metal', '$handle']
+    ['$woodLight', '$woodFrontL']
 ]);
 
 async function pathExists(target) {

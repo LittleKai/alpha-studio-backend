@@ -95,18 +95,20 @@ function rules(language) {
             'RULES:',
             '1. For each cabinet/furniture module, choose the best matching template by category + tags + size bounds before using raw boxes.',
             '2. Output module: { tpl: "<id>", x, y, z, width, height, depth, style: {...} }.',
-            '3. No match -> tplNew is allowed only when truly different from the catalog. tplNew category must be one of the fixed backend categories.',
-            '4. DSL boxes may use arithmetic/comparison expressions (== != === !== < <= > >=) and optional "if". Use two shapes with "if" instead of ternary "? :".',
-            '5. Legacy raw boxes are still allowed for one-off details, but catalog templates should be the default.'
+            '3. For per-module colors, use style.colors, e.g. { front:"#1a2b44", body:"#ffffff", handle:"#c9a354" }. Supported token/semantic keys include front, body, top, side, back, handle, metal, fabric, stone, ceramic, plant, led, accent, accent2.',
+            '4. No match -> tplNew is allowed only when truly different from the catalog. tplNew category must be one of the fixed backend categories.',
+            '5. DSL boxes may use arithmetic/comparison expressions (== != === !== < <= > >=) and optional "if". Use two shapes with "if" instead of ternary "? :".',
+            '6. Legacy raw boxes are still allowed for one-off details, but catalog templates should be the default.'
         ].join('\n');
     }
     return [
         'QUY TAC:',
         '1. Moi module tu/noi that: chon template phu hop nhat theo category + tags + size bounds truoc khi dung raw box.',
         '2. Output module: { tpl: "<id>", x, y, z, width, height, depth, style: {...} }.',
-        '3. Khong match -> chi dung tplNew khi that su khac catalog. Category tplNew phai nam trong danh sach backend co dinh.',
-        '4. DSL boxes co the dung arithmetic/comparison (== != === !== < <= > >=) va optional "if". Dung 2 shape voi "if" thay vi ternary "? :".',
-        '5. Raw box legacy van duoc phep cho chi tiet le, nhung catalog template la mac dinh uu tien.'
+        '3. Mau rieng tung module: dung style.colors, vi du { front:"#1a2b44", body:"#ffffff", handle:"#c9a354" }. Key ho tro: front, body, top, side, back, handle, metal, fabric, stone, ceramic, plant, led, accent, accent2.',
+        '4. Khong match -> chi dung tplNew khi that su khac catalog. Category tplNew phai nam trong danh sach backend co dinh.',
+        '5. DSL boxes co the dung arithmetic/comparison (== != === !== < <= > >=) va optional "if". Dung 2 shape voi "if" thay vi ternary "? :".',
+        '6. Raw box legacy van duoc phep cho chi tiet le, nhung catalog template la mac dinh uu tien.'
     ].join('\n');
 }
 

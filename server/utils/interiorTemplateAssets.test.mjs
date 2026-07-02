@@ -10,8 +10,8 @@ test('workshop template normalization maps side faces and legacy tokens', () => 
             { x: 0, y: 0, z: 0, w: 10, h: 10, d: 10, faces: { side: '$metal', top: '$woodLight', front: '$wood' } }
         ]
     });
-    assert.equal(normalized.dsl.boxes[0].faces.left, '$handle');
-    assert.equal(normalized.dsl.boxes[0].faces.right, '$handle');
+    assert.equal(normalized.dsl.boxes[0].faces.left, '$metal');
+    assert.equal(normalized.dsl.boxes[0].faces.right, '$metal');
     assert.equal(normalized.dsl.boxes[0].faces.top, '$woodFrontL');
     assert.equal(normalized.dsl.boxes[0].faces.front, '$woodFront');
     assert.equal(Object.hasOwn(normalized.dsl.boxes[0].faces, 'side'), false);

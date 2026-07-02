@@ -32,11 +32,14 @@ import chatRoutes from './routes/chat.js';
 import vocabRoutes from './routes/vocab.js';
 import aiRoutes from './routes/ai.js';
 import interiorRoutes from './routes/interior.js';
+import skillRoutes from './routes/skills.js';
 import crmRoutes from './routes/crm.js';
 import { configureBucketCors } from './utils/b2Storage.js';
 import { seedInteriorTemplateAssets } from './utils/interiorTemplateAssets.js';
 import { runSubscriptionMaintenance } from './jobs/crmSubscriptionJobs.js';
 import cron from 'node-cron';
+import CrmDevice from './models/CrmDevice.js';
+import crmEventHub from './utils/crmEventHub.js';
 import HostMachine from './models/HostMachine.js';
 import CloudSession from './models/CloudSession.js';
 import FlowServer from './models/FlowServer.js';
@@ -104,6 +107,7 @@ app.use('/api/ai', aiRoutes);
 app.use('/api/vocab', vocabRoutes);
 app.use('/api/interior', interiorRoutes);
 app.use('/api/crm', crmRoutes);
+app.use('/api/skills', skillRoutes);
 
 // Sitemap (no /api prefix — served at root)
 app.use('/sitemap.xml', sitemapRoutes);
@@ -253,6 +257,34 @@ cron.schedule('0 * * * *', async () => {
     if (!isDatabaseReady()) return;
     await runSubscriptionMaintenance();
 });
+
+// Interval: mark CRM Desktop Agent devices offline if their heartbeat has
+// gone stale for >60s (checked every 30s — finer-grained than node-cron's
+// 1-minute floor). Publishes device.status so mobile/web clients see it.
+setInterval(async () => {
+    if (!isDatabaseReady()) return;
+    try {
+        const staleThreshold = new Date(Date.now() - 60 * 1000);
+        const staleDevices = await CrmDevice.find({
+            status: 'active',
+            agentStatus: 'online',
+            lastHeartbeatAt: { $lt: staleThreshold }
+        });
+        for (const device of staleDevices) {
+            device.agentStatus = 'offline';
+            await device.save();
+            crmEventHub.publish(device.userId, 'device.status', {
+                deviceId: device._id,
+                agentStatus: 'offline',
+                zaloAccounts: device.zaloAccounts,
+                queueDepth: device.queueDepth,
+                lastHeartbeatAt: device.lastHeartbeatAt
+            });
+        }
+    } catch (error) {
+        console.error('[Interval] CRM device offline check error:', error);
+    }
+}, 30 * 1000);
 }
 
 let shuttingDown = false;

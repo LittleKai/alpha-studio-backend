@@ -16,6 +16,13 @@ import User from '../models/User.js';
 import { validateTemplateStructure, extractDsl } from '../utils/templateValidator.js';
 import { buildCatalogPromptSection } from '../utils/interiorCatalogPrompt.js';
 import { normalizeTemplateForStorage } from '../utils/interiorTemplateAssets.js';
+import {
+    appendModelWarnings,
+    applyTemplateDimensionDefaults,
+    collectTemplateDimensionDefaults,
+    collectTemplateIds,
+    validateInteriorGeometry
+} from '../utils/interiorModelGeometry.js';
 import { ToolRegistry } from '../agent-runner/tool-registry.js';
 import { SkillLoader } from '../agent-runner/skill-loader.js';
 import { runAgentLoop } from '../agent-runner/runner.js';
@@ -222,11 +229,18 @@ function extractInlineTemplates(cabinetModel) {
         if (!module || typeof module !== 'object') return;
         if (!module.tplNew) return;
         const tplDsl = module.tplNew;
-        const candidate = {
+        const normalized = normalizeTemplateForStorage({
+            ...tplDsl,
             id: assignId(tplDsl?.id),
             category: tplDsl?.category || 'other',
-            params: tplDsl?.params || {},
-            dsl: extractDsl(tplDsl)
+            params: tplDsl?.params || {}
+        });
+        const candidate = {
+            id: normalized.id,
+            category: normalized.category,
+            tags: normalized.tags,
+            params: normalized.params,
+            dsl: normalized.dsl
         };
         const validation = validateTemplateStructure(candidate);
         if (!validation.valid) {
@@ -243,11 +257,11 @@ function extractInlineTemplates(cabinetModel) {
             id: candidate.id,
             version: typeof tplDsl.version === 'number' ? tplDsl.version : 1,
             category: candidate.category,
-            tags: Array.isArray(tplDsl.tags) ? tplDsl.tags.slice(0, 20) : [],
-            description: tplDsl.description || { vi: '', en: '' },
-            name: tplDsl.name || tplDsl.description || { vi: candidate.id, en: candidate.id },
+            tags: normalized.tags,
+            description: normalized.description,
+            name: normalized.name,
             params: candidate.params,
-            style: tplDsl.style && typeof tplDsl.style === 'object' && !Array.isArray(tplDsl.style) ? tplDsl.style : {},
+            style: normalized.styleOptions,
             ...candidate.dsl
         };
         delete module.tplNew;
@@ -311,6 +325,48 @@ function validateCabinetModel(model) {
         return { valid: false, message: 'specs pháº£i lĂ  máº£ng.' };
     }
     return { valid: true };
+}
+
+async function loadTemplateDefaultsForModel(model) {
+    const templateIds = collectTemplateIds(model);
+    const dbTemplates = templateIds.length > 0
+        ? await InteriorTemplate.find({
+            templateId: { $in: templateIds },
+            status: { $in: ['seed', 'approved', 'pending'] }
+        }).sort({ templateId: 1, version: -1 }).lean()
+        : [];
+    return collectTemplateDimensionDefaults([
+        ...dbTemplates,
+        ...Object.values(model?.inlineTemplates || {})
+    ]);
+}
+
+async function prepareAiCabinetModel(cabinetModel) {
+    const inlineResult = extractInlineTemplates(cabinetModel);
+    const model = inlineResult.cabinetModel;
+    const templateDefaults = await loadTemplateDefaultsForModel(model);
+    const defaultResult = applyTemplateDimensionDefaults(model, templateDefaults);
+    const validation = validateCabinetModel(model);
+    if (!validation.valid) {
+        appendModelWarnings(model, defaultResult.warnings);
+        return {
+            valid: false,
+            message: validation.message,
+            cabinetModel: model,
+            inlineResult,
+            dimensionWarnings: defaultResult.warnings,
+            geometryWarnings: []
+        };
+    }
+    const geometryWarnings = validateInteriorGeometry(model);
+    appendModelWarnings(model, [...defaultResult.warnings, ...geometryWarnings]);
+    return {
+        valid: true,
+        cabinetModel: model,
+        inlineResult,
+        dimensionWarnings: defaultResult.warnings,
+        geometryWarnings
+    };
 }
 
 function stripJsonComments(input) {
@@ -434,6 +490,7 @@ const INTERIOR_DOMAIN_HINTS = [
     '- NgÄƒn treo Ă¡o dĂ i: cao 110-130. NgÄƒn treo Ă¡o ngáº¯n: 90-100. NgÄƒn xáº¿p: cao 30-40. NgÄƒn giĂ y: cao 20-25.',
     '- CĂ¡nh tá»§ chuáº©n rá»™ng 40-50 cho cĂ¡nh Ä‘Ă´i, 50-60 cho cĂ¡nh Ä‘Æ¡n. Báº£n lá» Ă¢m 35mm.',
     '- Váº­t liá»‡u phá»• biáº¿n: MFC vĂ¢n gá»— #c9986b (sá»“i), #8a623d (Ă³c chĂ³), #d4b896 (sá»“i sĂ¡ng), #4a3326 (Ä‘en gá»—); Acrylic bĂ³ng #ffffff, #1a1a1a, #c41e3a; KĂ­nh tráº¯ng trong #e8f0f5.',
+    '- Nang luc mau render duoc: palette wood-oak, wood-walnut, laminate-white, dark-modern, white-oak, navy-brass, green-sage, grey-minimal; token $woodFront/$woodTop/$woodSide, $cab, $handle, $metal/$metalDark, $fabric, $stone, $ceramic, $plantGreen, $ledWarm, $accent/$accent2.',
     '- Tay náº¯m: dáº¡ng Ă¢m hoáº·c thanh ngang. BĂ¡nh xe dÆ°á»›i Ä‘Ă¡y tá»§ kĂ©o: cao 8-10.',
     'Toáº¡ Ä‘á»™ Z (trá»¥c depth): máº·t sau tá»§ á»Ÿ z=0, máº·t trÆ°á»›c á»Ÿ z=depth. Tá»§ Ă¡p tÆ°á»ng: máº·t sau (z=0) lĂ  tÆ°á»ng, máº·t trÆ°á»›c nhĂ¬n ra phĂ²ng.',
     'Tá»§ báº¿p ÄĂ”I (tá»§ trĂªn + tá»§ dÆ°á»›i) cĂ¹ng Ă¡p 1 tÆ°á»ng: tá»§ dÆ°á»›i depth 55-60 Ä‘áº·t z=0; tá»§ trĂªn depth 30-35 PHáº¢I Ä‘áº·t z = (depth_tá»§_dÆ°á»›i - depth_tá»§_trĂªn) Ä‘á»ƒ máº·t sau cĂ¹ng Ä‘Æ°á»ng tÆ°á»ng. VD: tá»§ dÆ°á»›i depth 60, tá»§ trĂªn depth 35 -> tá»§ trĂªn z=25. KHĂ”NG Ä‘áº·t z=0 cho cáº£ 2 vĂ¬ máº·t trÆ°á»›c sáº½ chá»“ng vĂ o nhau.',
@@ -550,6 +607,14 @@ const INTERIOR_FEW_SHOT_LEGACY = [
     '{"reply":"Hiá»ƒu yĂªu cáº§u: tá»§ Ä‘áº§u giÆ°á»ng cĂ³ khe Ä‘Ă¨n LED uá»‘n cong, khĂ´ng cĂ³ trong catalog.\\nÄĂ£ Ă¡p dá»¥ng: dĂ¹ng tplNew táº¡o template má»›i \\"led-nightstand\\" vá»›i 1 khoang chĂ­nh + line LED phĂ¡t sĂ¡ng phĂ­a trĂªn.","askForInfo":false,"cabinetModel":{"title":"Tá»§ Ä‘áº§u giÆ°á»ng LED","units":"cm","width":60,"height":50,"depth":40,"palette":"wood-walnut","modules":[{"tplNew":{"id":"led-nightstand","version":1,"category":"lower-cabinet","tags":["led","nightstand"],"description":{"vi":"Tá»§ Ä‘áº§u giÆ°á»ng cĂ³ khe LED","en":"Nightstand with LED strip"},"params":{"width":{"min":40,"max":80,"default":60},"height":{"min":40,"max":60,"default":50},"depth":{"min":30,"max":50,"default":40}},"style":{},"boxes":[{"x":0,"y":0,"z":0,"w":"{{width}}","h":"{{height}}","d":"{{depth}}","faces":{"top":"$woodTop","front":"$woodFront","right":"$woodSide","left":"$woodDark","back":"$woodBack"}},{"x":2,"y":"{{height - 4}}","z":"{{depth - 0.5}}","w":"{{width - 4}}","h":2,"d":0.5,"faces":{"front":"#fff4c4"}}]},"x":0,"y":0,"z":0,"width":60,"height":50,"depth":40}],"details":[],"specs":[["tplNew","led-nightstand","Template má»›i do AI táº¡o, chá» admin duyá»‡t"]]}}'
 ].join('\n');
 
+const INTERIOR_COLOR_RULES = [
+    'COLOR / MATERIAL RULES:',
+    '- Model-level palette controls the default material tone. Supported palettes: wood-oak, wood-walnut, laminate-white, dark-modern, white-oak, navy-brass, green-sage, grey-minimal.',
+    '- For different colors per module, keep tpl and set module.style.colors. Example: style:{colors:{front:"#1a2b44", body:"#ffffff", handle:"#c9a354"}}.',
+    '- Supported style.colors semantic keys: front, body, top, side, back, handle, metal, fabric, stone, ceramic, plant, led, accent, accent2. Direct token keys like woodFront, cab, metalDark, plantGreen, ledWarm are also allowed.',
+    '- Use legacy raw item.color only for one-off simple details, not for cabinet modules that match a template.'
+].join('\n');
+
 const INTERIOR_FEW_SHOT = [
     'Vi du output JSON HOP LE (uu tien tpl truoc raw box):',
     '{"reply":"Hieu yeu cau: tu ao canh truot 240cm, cao 260cm, sau 60cm, co khoang treo va ngan keo.\\nDa ap dung: dung tpl sliding-2door cho khoang chinh va tpl base-drawer-stack cho ngan keo duoi; width 240, height 260, depth 60.","askForInfo":false,"cabinetModel":{"title":"Tu ao canh truot co ngan keo","units":"cm","width":240,"height":260,"depth":60,"palette":"wood-walnut","modules":[{"tpl":"sliding-2door","x":0,"y":50,"z":0,"width":240,"height":210,"depth":60,"style":{"door":"flat","track":"top-bottom"}},{"tpl":"base-drawer-stack","x":0,"y":0,"z":0,"width":120,"height":50,"depth":60,"style":{"drawers":3,"handle":"bar"}},{"tpl":"base-drawer-stack","x":120,"y":0,"z":0,"width":120,"height":50,"depth":60,"style":{"drawers":3,"handle":"bar"}}],"details":[],"specs":[["Template","sliding-2door + base-drawer-stack","Dung catalog thay vi box tho"]]}}',
@@ -594,6 +659,7 @@ async function buildInteriorPrompt({ message, refImageUrls, project, baseModel, 
         askForInfoRule,
         'cabinetModel báº¯t buá»™c: width/height/depth sá»‘ dÆ°Æ¡ng (cm), modules lĂ  máº£ng â‰¥1 pháº§n tá»­, má»—i module/detail cĂ³ x,y,z,width,height,depth lĂ  sá»‘.',
         INTERIOR_DOMAIN_HINTS,
+        INTERIOR_COLOR_RULES,
         INTERIOR_RUNS_RULE_VI,
         catalogPrompt,
         INTERIOR_FEW_SHOT,
@@ -636,6 +702,7 @@ async function buildInteriorProposalPrompt({ message, refImageUrls, project, bas
         '- Táº¥t cáº£ text pháº£i báº±ng tiáº¿ng Viá»‡t.',
         '- KHĂ”NG sinh cabinetModel á»Ÿ bÆ°á»›c nĂ y.',
         INTERIOR_DOMAIN_HINTS,
+        INTERIOR_COLOR_RULES,
         INTERIOR_RUNS_RULE_VI,
         catalogPrompt,
         refImageNote,
@@ -722,6 +789,7 @@ async function buildAgentInitialPrompt({ message, refImageUrls, baseModel }) {
         '',
         INTERIOR_DIMENSION_ANCHOR_RULE_VI,
         INTERIOR_DOMAIN_HINTS,
+        INTERIOR_COLOR_RULES,
         INTERIOR_RUNS_RULE_VI,
         catalogPrompt,
         '',
@@ -747,6 +815,8 @@ async function buildAgentSystemPrompt({ message = '' } = {}) {
         '',
         'Available domain skills:',
         skills || '- none',
+        '',
+        INTERIOR_COLOR_RULES,
         '',
         catalogPrompt,
         '',
@@ -1795,27 +1865,61 @@ router.post('/projects/:id/chat', authMiddleware, async (req, res) => {
             return res.status(502).json({ success: false, message: 'AI khĂ´ng tráº£ vá» JSON há»£p lá»‡.' });
         }
 
-        // Phase 12: pull AI-generated inline templates into modelJson.inlineTemplates
-        // so the engine resolves them on render, and surface their ids in meta so
-        // the frontend can prompt the user to commit them to the shared library.
-        // Phase 12 QW3: droppedTemplates carries the rejected tplNews with reasons
-        // so the frontend can show a warning banner (instead of silent fallback).
-        const inlineResult = extractInlineTemplates(payload.cabinetModel);
-        payload.cabinetModel = inlineResult.cabinetModel;
-        const newInlineTemplateIds = inlineResult.newInlineIds;
-        const droppedTemplates = inlineResult.droppedTemplates;
-
-        const validation = validateCabinetModel(payload.cabinetModel);
-        if (!validation.valid) {
+        // Phase 12 + D: extract inline templates, fill tpl params.default dims,
+        // then run blocking schema validation plus non-blocking geometry review.
+        let preparedModel = await prepareAiCabinetModel(payload.cabinetModel);
+        payload.cabinetModel = preparedModel.cabinetModel;
+        if (!preparedModel.valid) {
             recordInteriorAiLog({
                 userId: req.user._id, projectId: project._id, stage: 'apply',
                 model: actualModel, prompt: applyPrompt, refImageUrls,
                 rawResponse: aiText || '', parsedReply: payload.reply || '',
                 latencyMs: Date.now() - applyStartedAt, usage: aiUsage,
-                status: 'validation-failed', errorMessage: validation.message || ''
+                status: 'validation-failed', errorMessage: preparedModel.message || ''
             });
-            return res.status(502).json({ success: false, message: `AI tráº£ vá» model khĂ´ng há»£p lá»‡: ${validation.message}` });
+            return res.status(502).json({ success: false, message: `AI tráº£ vá» model khĂ´ng há»£p lá»‡: ${preparedModel.message}` });
         }
+
+        let geometryRepair = null;
+        if (preparedModel.geometryWarnings.length > 0 && payload.askForInfo !== true) {
+            geometryRepair = {
+                attempted: true,
+                applied: false,
+                warningsBefore: preparedModel.geometryWarnings
+            };
+            console.debug('[interior:chat] geometry repair iteration', {
+                warnings: preparedModel.geometryWarnings.length
+            });
+            try {
+                const repairStartedAt = Date.now();
+                const repair = await callGcliDirect(
+                    buildGeometryRepairPrompt(aiText, preparedModel.geometryWarnings),
+                    { model: actualModel, images: aiImageUrls }
+                );
+                const repairText = repair.text || '';
+                const repairPayload = normalizeAiPayload(extractJsonObject(repairText));
+                const repairedModel = await prepareAiCabinetModel(repairPayload.cabinetModel);
+                geometryRepair.warningsAfter = repairedModel.geometryWarnings;
+                geometryRepair.usedModel = repair.model || actualModel;
+                geometryRepair.latencyMs = Date.now() - repairStartedAt;
+                if (repairedModel.valid) {
+                    payload = repairPayload;
+                    payload.cabinetModel = repairedModel.cabinetModel;
+                    preparedModel = repairedModel;
+                    aiText = repairText || aiText;
+                    actualModel = repair.model || actualModel;
+                    geometryRepair.applied = true;
+                } else {
+                    geometryRepair.error = repairedModel.message || 'Repair model failed schema validation.';
+                }
+            } catch (error) {
+                console.warn('[interior:chat] geometry repair failed, keeping original model:', error.message);
+                geometryRepair.error = error.message || 'Geometry repair failed.';
+            }
+        }
+
+        const newInlineTemplateIds = preparedModel.inlineResult.newInlineIds;
+        const droppedTemplates = preparedModel.inlineResult.droppedTemplates;
 
         const credit = await deductInteriorCredit(req.user);
         if (credit.rejected) {
@@ -1871,7 +1975,11 @@ router.post('/projects/:id/chat', authMiddleware, async (req, res) => {
                 balance: credit.balance,
                 meta: {
                     newInlineTemplates: newInlineTemplateIds,
-                    droppedTemplates
+                    droppedTemplates,
+                    dimensionWarnings: preparedModel.dimensionWarnings,
+                    geometryWarnings: preparedModel.geometryWarnings,
+                    validationWarnings: payload.cabinetModel._validationWarnings || [],
+                    geometryRepair
                 }
             }
         });
@@ -1926,6 +2034,19 @@ function buildRepairPrompt(prevText, validationMessage) {
         'Your previous JSON failed validation:',
         validationMessage,
         'Return the SAME design but with the validation error fixed. Only valid JSON, no commentary.',
+        'Previous response:',
+        prevText
+    ].join('\n\n');
+}
+
+function buildGeometryRepairPrompt(prevText, warnings) {
+    return [
+        'Your previous JSON passed schema validation but has geometric warnings:',
+        (warnings || []).map((warning, index) => `${index + 1}. ${warning}`).join('\n'),
+        'Return the SAME design intent as valid JSON only, with numeric x/y/z/width/height/depth corrected.',
+        'Keep the response schema exactly: {"reply": string, "askForInfo": boolean, "cabinetModel": object}.',
+        'Do not remove important cabinets, doors, shelves, or user-requested features. Do not ask a question unless the design is impossible.',
+        'For upper/wall kitchen cabinets above lower/base cabinets on the same run, set z = lowerDepth - upperDepth.',
         'Previous response:',
         prevText
     ].join('\n\n');

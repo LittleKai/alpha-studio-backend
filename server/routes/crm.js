@@ -1,6 +1,6 @@
 import express from 'express';
 import crypto from 'crypto';
-import { authMiddleware, adminOnly } from '../middleware/auth.js';
+import { authMiddleware, adminOnly, verifyToken } from '../middleware/auth.js';
 import User from '../models/User.js';
 import Transaction from '../models/Transaction.js';
 import CrmSubscription from '../models/CrmSubscription.js';
@@ -55,6 +55,8 @@ import {
     createAgentSecret,
     replaceActiveDevice
 } from '../utils/crmDeviceSessions.js';
+import crmEventHub from '../utils/crmEventHub.js';
+import { setSseHeaders, writeEvent } from '../agent-runner/sse.js';
 import {
     buildChatbotConfigSnapshot,
     hasHandoffKeyword,
@@ -589,6 +591,66 @@ const userOrAgentAuth = async (req, res, next) => {
     }
     return authMiddleware(req, res, next);
 };
+
+// SSE auth: EventSource / fetch-stream on web cannot set a custom
+// Authorization header, so this route also accepts the JWT via ?token=.
+// Falls through to the normal header/cookie flow otherwise.
+const sseAuthMiddleware = async (req, res, next) => {
+    const queryToken = typeof req.query?.token === 'string' ? req.query.token : '';
+    if (queryToken && !req.headers.authorization && !req.cookies?.token) {
+        try {
+            const decoded = verifyToken(queryToken);
+            const user = await User.findById(decoded.userId).select('-password');
+            if (user && user.isActive) {
+                req.user = user;
+                return next();
+            }
+        } catch {
+            // invalid/expired -> fall through to authMiddleware (will 401)
+        }
+    }
+    return authMiddleware(req, res, next);
+};
+
+// ------------------------------------------------------------------
+// Long-poll waiters for /agent/commands/next: lets a POST create a
+// command and immediately wake up a device that's blocked waiting for
+// its next command, instead of it having to poll again.
+// ------------------------------------------------------------------
+const commandWaitersByDevice = new Map(); // deviceId(string) -> Set<resolverFn>
+
+function registerCommandWaiter(deviceId, resolve) {
+    const key = String(deviceId);
+    let waiters = commandWaitersByDevice.get(key);
+    if (!waiters) {
+        waiters = new Set();
+        commandWaitersByDevice.set(key, waiters);
+    }
+    waiters.add(resolve);
+    return () => {
+        waiters.delete(resolve);
+        if (waiters.size === 0) commandWaitersByDevice.delete(key);
+    };
+}
+
+function notifyCommandWaiter(deviceId) {
+    const key = String(deviceId);
+    const waiters = commandWaitersByDevice.get(key);
+    if (!waiters || waiters.size === 0) return;
+    for (const resolve of Array.from(waiters)) {
+        resolve();
+    }
+    commandWaitersByDevice.delete(key);
+}
+
+// Central place to create an CrmAgentCommand so a device long-polling
+// /agent/commands/next is woken up immediately instead of waiting out
+// the rest of its waitMs window.
+async function createAgentCommand(payload) {
+    const command = await CrmAgentCommand.create(payload);
+    notifyCommandWaiter(command.deviceId);
+    return command;
+}
 
 // ==========================================
 // 1. CATALOG, SUBSCRIPTION, & QUOTA ROUTES
@@ -1385,6 +1447,12 @@ router.post('/pairing/confirm', crmPairingLimiter, authMiddleware, requireActive
             details: { deviceId: session.deviceId, sessionId: session._id }
         });
 
+        crmEventHub.publish(req.user._id, 'pairing.completed', {
+            deviceId: session.deviceId,
+            sessionId: session._id,
+            confirmedAt: session.confirmedAt
+        });
+
         res.json({
             success: true,
             message: 'ÄĂ£ xĂ¡c nháº­n ghĂ©p Ä‘Ă´i thiáº¿t bá»‹ thĂ nh cĂ´ng.',
@@ -1464,6 +1532,41 @@ router.get('/pairing/:id', authMiddleware, async (req, res) => {
 });
 
 // ==========================================
+// 3.4b. REALTIME EVENTS (SSE)
+// ==========================================
+//
+// Standard event names published via crmEventHub.publish(userId, name, payload):
+//   - message.new          New message (payload: { message: CrmMessage, conversation: CrmConversation })
+//   - message.status       Outbound message status transition
+//                           (payload: { messageId, conversationId, status, providerMessageId, errorMessage, sentAt })
+//   - conversation.updated Conversation preview/unread changed (payload: CrmConversation)
+//   - device.status        Desktop Agent online/offline or Zalo account status changed
+//                           (payload: { deviceId, agentStatus, zaloAccounts, queueDepth, lastHeartbeatAt })
+//   - pairing.completed    Mobile device successfully paired (payload: { deviceId, sessionId, confirmedAt })
+
+// GET /api/crm/events/subscribe
+router.get('/events/subscribe', sseAuthMiddleware, requireActiveSubscription, async (req, res) => {
+    try {
+        const devices = await CrmDevice.find({ userId: req.user._id, status: 'active' })
+            .select('displayName agentStatus zaloAccounts queueDepth lastHeartbeatAt lastSeenAt')
+            .lean();
+
+        setSseHeaders(res);
+        writeEvent(res, 'hello', {
+            serverTime: new Date().toISOString(),
+            devices
+        });
+
+        crmEventHub.subscribe(req.user._id, res);
+    } catch (error) {
+        console.error('SSE subscribe error:', error);
+        if (!res.headersSent) {
+            res.status(500).json({ success: false, message: 'Loi server khi mo ket noi realtime.' });
+        }
+    }
+});
+
+// ==========================================
 // 3.5. OUTBOUND AGENT ENDPOINTS (AGENT AUTHENTICATED)
 // ==========================================
 
@@ -1472,15 +1575,46 @@ router.get('/pairing/:id', authMiddleware, async (req, res) => {
 router.post('/agent/heartbeat', agentAuthMiddleware, async (req, res) => {
     try {
         const device = req.crmDevice;
-        const { status, appVersion, agentVersion, lastError } = req.body;
+        const { status, appVersion, agentVersion, lastError, zaloAccounts, queueDepth } = req.body;
 
-        device.lastSeenAt = new Date();
+        const now = new Date();
+        const previousAgentStatus = device.agentStatus;
+        const previousZaloAccounts = JSON.stringify(
+            (device.zaloAccounts || []).map((account) => ({ accountId: account.accountId, status: account.status }))
+        );
+
+        device.lastSeenAt = now;
+        device.lastHeartbeatAt = now;
         device.lastIp = req.ip;
-        
+        device.agentStatus = status === 'offline' ? 'offline' : 'online';
+
         if (appVersion) device.appVersion = appVersion;
         if (agentVersion) device.agentVersion = agentVersion;
-        
+        if (Array.isArray(zaloAccounts)) {
+            device.zaloAccounts = zaloAccounts
+                .map((account) => ({
+                    accountId: String(account?.accountId || '').trim(),
+                    displayName: String(account?.displayName || '').trim(),
+                    status: ['online', 'expired', 'logged_out'].includes(account?.status) ? account.status : 'online'
+                }))
+                .filter((account) => account.accountId);
+        }
+        if (Number.isFinite(Number(queueDepth))) device.queueDepth = Number(queueDepth);
+
         await device.save();
+
+        const newZaloAccounts = JSON.stringify(
+            (device.zaloAccounts || []).map((account) => ({ accountId: account.accountId, status: account.status }))
+        );
+        if (previousAgentStatus !== device.agentStatus || previousZaloAccounts !== newZaloAccounts) {
+            crmEventHub.publish(device.userId, 'device.status', {
+                deviceId: device._id,
+                agentStatus: device.agentStatus,
+                zaloAccounts: device.zaloAccounts,
+                queueDepth: device.queueDepth,
+                lastHeartbeatAt: device.lastHeartbeatAt
+            });
+        }
 
         res.json({
             success: true,
@@ -1496,27 +1630,62 @@ router.post('/agent/heartbeat', agentAuthMiddleware, async (req, res) => {
 router.post('/agent/commands/next', agentAuthMiddleware, async (req, res) => {
     try {
         const device = req.crmDevice;
-        const now = new Date();
 
-        await CrmAgentCommand.updateMany(
-            { deviceId: device._id, status: 'queued', expiresAt: { $exists: true, $lte: now } },
-            {
-                $set: buildTerminalCommandUpdate('expired', now, {
-                    errorMessage: 'Command TTL expired before agent claim.'
-                })
+        const claimNext = async () => {
+            const now = new Date();
+            await CrmAgentCommand.updateMany(
+                { deviceId: device._id, status: 'queued', expiresAt: { $exists: true, $lte: now } },
+                {
+                    $set: buildTerminalCommandUpdate('expired', now, {
+                        errorMessage: 'Command TTL expired before agent claim.'
+                    })
+                }
+            );
+
+            // Find the oldest queued command for this device
+            return CrmAgentCommand.findOneAndUpdate(
+                {
+                    deviceId: device._id,
+                    status: 'queued',
+                    $or: [{ expiresAt: { $gt: now } }, { expiresAt: { $exists: false } }]
+                },
+                { $set: { status: 'sent', sentAt: now } },
+                { sort: { createdAt: 1 }, new: true }
+            );
+        };
+
+        let command = await claimNext();
+
+        // Long-poll: if the agent asked to wait (waitMs) and nothing was queued,
+        // hold the request open until a command is created for this device or
+        // waitMs elapses. Cap at 25s to stay under the ~30s proxy timeout.
+        // Agents that don't send waitMs keep the old immediate-return behavior.
+        if (!command) {
+            const waitMs = Math.min(Math.max(parseInt(req.body.waitMs, 10) || 0, 0), 25000);
+            if (waitMs > 0) {
+                command = await new Promise((resolve) => {
+                    let settled = false;
+                    let unregister = () => {};
+
+                    const finish = async () => {
+                        if (settled) return;
+                        settled = true;
+                        clearTimeout(timer);
+                        unregister();
+                        resolve(await claimNext());
+                    };
+
+                    const timer = setTimeout(() => {
+                        if (settled) return;
+                        settled = true;
+                        unregister();
+                        resolve(null);
+                    }, waitMs);
+
+                    unregister = registerCommandWaiter(device._id, finish);
+                });
             }
-        );
-
-        // Find the oldest queued command for this device
-        const command = await CrmAgentCommand.findOneAndUpdate(
-            {
-                deviceId: device._id,
-                status: 'queued',
-                $or: [{ expiresAt: { $gt: now } }, { expiresAt: { $exists: false } }]
-            },
-            { $set: { status: 'sent', sentAt: now } },
-            { sort: { createdAt: 1 }, new: true }
-        );
+        }
 
         res.json({
             success: true,
@@ -1633,6 +1802,14 @@ router.post('/agent/commands/:id/result', agentAuthMiddleware, async (req, res) 
                         }
                     }
                 );
+                crmEventHub.publish(command.userId, 'message.status', {
+                    messageId: message._id,
+                    conversationId: message.conversationId,
+                    status: message.status,
+                    providerMessageId: message.providerMessageId,
+                    errorMessage: message.errorMessage,
+                    sentAt: message.sentAt
+                });
             }
         }
 
@@ -2473,7 +2650,7 @@ router.post('/campaigns/:id/cancel', authMiddleware, requireActiveSubscription, 
             cancelDevice = await CrmDevice.findOne({ userId: req.user._id, status: 'active' });
         }
         if (cancelDevice) {
-            await CrmAgentCommand.create({
+            await createAgentCommand({
                 userId: req.user._id,
                 subscriptionId: req.crmSubscription._id,
                 deviceId: cancelDevice._id,
@@ -2811,7 +2988,13 @@ router.post('/conversations/:id/send', authMiddleware, requireActiveSubscription
             sentAt: null
         });
 
-        const command = await CrmAgentCommand.create({
+        crmEventHub.publish(req.user._id, 'message.status', {
+            messageId: message._id,
+            conversationId: message.conversationId,
+            status: message.status
+        });
+
+        const command = await createAgentCommand({
             userId: req.user._id,
             subscriptionId: req.crmSubscription._id,
             deviceId: activeDevice._id,
@@ -2887,7 +3070,13 @@ router.post('/conversations/:id/send-attachment', authMiddleware, requireActiveS
             sentAt: null
         });
 
-        const command = await CrmAgentCommand.create({
+        crmEventHub.publish(req.user._id, 'message.status', {
+            messageId: message._id,
+            conversationId: message.conversationId,
+            status: message.status
+        });
+
+        const command = await createAgentCommand({
             userId: req.user._id,
             subscriptionId: req.crmSubscription._id,
             deviceId: activeDevice._id,
@@ -2935,7 +3124,7 @@ router.post('/conversations/:id/messages/:messageId/recall', authMiddleware, req
         if (!activeDevice) activeDevice = await CrmDevice.findOne({ userId: req.user._id, status: 'active' });
         if (!activeDevice) return res.status(400).json({ success: false, message: 'Khong co thiet bi Windows dang hoat dong de thu hoi tin.' });
 
-        const command = await CrmAgentCommand.create({
+        const command = await createAgentCommand({
             userId: req.user._id,
             subscriptionId: req.crmSubscription._id,
             deviceId: activeDevice._id,
@@ -3003,6 +3192,17 @@ router.post('/agent/events/message', agentAuthMiddleware, async (req, res) => {
             event: req.body,
             enforceManagedGroup: normalizeThreadType(req.body.threadType) === 'group'
         });
+
+        if (!result.ignored) {
+            if (result.message) {
+                crmEventHub.publish(req.crmDevice.userId, 'message.new', {
+                    message: result.message,
+                    conversation: result.conversation
+                });
+            }
+            crmEventHub.publish(req.crmDevice.userId, 'conversation.updated', result.conversation);
+        }
+
         res.json({ success: true, data: result });
     } catch (error) {
         console.error('Agent message event error:', error);
@@ -3646,7 +3846,7 @@ router.post('/groups/sync', authMiddleware, requireActiveSubscription, async (re
         }
         if (!device) return res.status(400).json({ success: false, message: 'Khong co thiet bi agent dang hoat dong de dong bo nhom.' });
 
-        const command = await CrmAgentCommand.create({
+        const command = await createAgentCommand({
             userId: req.user._id,
             subscriptionId: req.crmSubscription._id,
             deviceId: device._id,

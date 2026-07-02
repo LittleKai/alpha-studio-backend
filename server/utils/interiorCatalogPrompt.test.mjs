@@ -21,4 +21,5 @@ test('catalog prompt prioritizes relevant rows and caps output', () => {
     assert.equal(tableRows.length, 10);
     assert.match(tableRows[0], /tpl-69/);
     assert.match(prompt, /Use two shapes with "if" instead of ternary|Dung 2 shape voi "if"/);
+    assert.match(prompt, /style\.colors/);
 });

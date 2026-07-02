@@ -17,7 +17,8 @@
     "db:m0:migrate": "node scripts/migrate-mongodb-m0.mjs",
     "db:m0:rollback": "node scripts/rollback-mongodb-m0.mjs",
     "db:m0:audit": "node scripts/audit-mongodb-m0.mjs",
-    "seed:interior-templates": "node scripts/seed-interior-templates.mjs"
+    "seed:interior-templates": "node scripts/seed-interior-templates.mjs",
+    "import:skills": "node scripts/import-skills.js"
   },
   "keywords": [
     "express",
