@@ -287,7 +287,10 @@ async function upsertConversationFromInbound({ userId, deviceId, event, enforceM
         : new Date();
     const messageType = normalizeCrmMessageType(event.messageType);
 
-    if (!accountId || !threadId || (!isMetadataOnly && !content)) {
+    // Non-text messages (image/sticker/file...) can legitimately arrive with an
+    // empty extracted content string — the messageType/attachments still carry
+    // enough for remote clients to render a bubble, so only text requires content.
+    if (!accountId || !threadId || (!isMetadataOnly && !content && messageType === 'text')) {
         const error = new Error('accountId, threadId va content la bat buoc.');
         error.statusCode = 400;
         throw error;
@@ -330,7 +333,13 @@ async function upsertConversationFromInbound({ userId, deviceId, event, enforceM
                     lastMessageAt: receivedAt,
                     lastInboundAt: receivedAt
                 },
-                $inc: { unreadCount: Number(event.unreadCountDelta) || 1 },
+                // Respect an explicit 0 delta (self-sent message reported by the
+                // agent) — `|| 1` would silently turn it back into an increment.
+                $inc: {
+                    unreadCount: Number.isFinite(Number(event.unreadCountDelta))
+                        ? Number(event.unreadCountDelta)
+                        : 1
+                },
                 $setOnInsert: { tags: [], notes: '', assignedStatus: 'open' }
             },
             { upsert: true, new: true, setDefaultsOnInsert: true }
@@ -397,14 +406,14 @@ async function upsertConversationFromInbound({ userId, deviceId, event, enforceM
         { upsert: true, new: true, setDefaultsOnInsert: true }
     );
 
-    const IS_LOCAL_FIRST_LIVE_CHAT = isLocalFirstLiveChatEnabled();
     let message = null;
 
-    // Local-first mode intentionally keeps full INBOUND history off the cloud
-    // (see isMetadataOnly above) — but the operator/chatbot's own outbound
-    // message is content the recipient already has, so it's still stored here
-    // so mobile/web clients have something to show for their own sends.
-    if (!IS_LOCAL_FIRST_LIVE_CHAT || direction === 'outbound') {
+    // Any event reaching this point carries FULL content — metadata-only
+    // local-first events already returned early above (isMetadataOnly). 1:1
+    // content is synced to the cloud even in local-first mode so remote
+    // (mobile/web) clients render real message bubbles; group privacy is
+    // preserved because managed groups only ever report metadata events.
+    {
         if (providerMessageId) {
             message = await CrmMessage.findOne({ userId, accountId, providerMessageId });
         }
@@ -1679,21 +1688,40 @@ router.post('/agent/commands/next', agentAuthMiddleware, async (req, res) => {
                     let settled = false;
                     let unregister = () => {};
 
-                    const finish = async () => {
+                    const onClose = () => {
                         if (settled) return;
                         settled = true;
                         clearTimeout(timer);
                         unregister();
+                        resolve(null);
+                    };
+
+                    const finish = async () => {
+                        if (settled) return;
+                        settled = true;
+                        clearTimeout(timer);
+                        req.off('close', onClose);
+                        unregister();
+                        // The agent may have dropped the connection while parked.
+                        // Claiming now would flip the command to 'sent' into a dead
+                        // socket and strand it until TTL expiry — leave it queued
+                        // for the agent's next poll instead.
+                        if (req.destroyed || res.writableEnded) {
+                            resolve(null);
+                            return;
+                        }
                         resolve(await claimNext());
                     };
 
                     const timer = setTimeout(() => {
                         if (settled) return;
                         settled = true;
+                        req.off('close', onClose);
                         unregister();
                         resolve(null);
                     }, waitMs);
 
+                    req.on('close', onClose);
                     unregister = registerCommandWaiter(device._id, finish);
                 });
             }
@@ -2921,14 +2949,14 @@ router.get('/conversations/:id/messages', authMiddleware, async (req, res) => {
             .sort({ createdAt: isAfterQuery ? 1 : -1 })
             .limit(limit);
 
-        // BE-6: cloud message history is partial by design in local-first mode
-        // — outbound (operator/chatbot) messages are stored, but full inbound
-        // customer history stays on the Desktop Agent only (see BE-6 notes).
+        // In local-first mode 1:1 threads sync full content (from the moment the
+        // agent started reporting), while group messages stay metadata-only on
+        // the Desktop Agent — so cloud group history is previews only.
         res.json({
             success: true,
             data: isAfterQuery ? messages : messages.reverse(),
             meta: {
-                syncScope: isLocalFirstLiveChatEnabled() ? 'outbound-and-synced-only' : 'full'
+                syncScope: isLocalFirstLiveChatEnabled() ? 'user-full-group-metadata' : 'full'
             }
         });
     } catch (error) {
