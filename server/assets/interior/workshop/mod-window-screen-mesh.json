@@ -1,0 +1,49 @@
+{
+  "id": "mod-window-screen-mesh",
+  "version": 1,
+  "name": {
+    "vi": "Lưới chống muỗi cửa sổ (Module)",
+    "en": "Window Anti-mosquito Mesh (Module)"
+  },
+  "description": {
+    "vi": "Phiến lưới mật độ cao cản côn trùng lọt vào phòng ngủ qua cửa sổ.",
+    "en": "High density grey mesh pane blocking insects flowing through the windows."
+  },
+  "category": "other",
+  "tags": [
+    "accessory",
+    "window",
+    "screen",
+    "mesh",
+    "module",
+    "bedroom"
+  ],
+  "params": {
+    "width": {
+      "type": "number",
+      "min": 50,
+      "max": 240,
+      "default": 130
+    },
+    "height": {
+      "type": "number",
+      "min": 50,
+      "max": 240,
+      "default": 110
+    }
+  },
+  "boxes": [
+    {
+      "x": 0,
+      "y": 0,
+      "z": 0,
+      "w": "{{width}}",
+      "h": "{{height}}",
+      "d": 0.2,
+      "faces": {
+        "front": "#4d4d4d",
+        "back": "#4d4d4d"
+      }
+    }
+  ]
+}

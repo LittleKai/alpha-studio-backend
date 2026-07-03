@@ -1,0 +1,57 @@
+{
+  "id": "mod-equip-smoke-detector",
+  "version": 1,
+  "name": {
+    "vi": "Đầu báo khói báo cháy (Module)",
+    "en": "Ceiling Smoke Detector (Module)"
+  },
+  "description": {
+    "vi": "Cục cảm biến báo động đĩa nhỏ tròn màu trắng ốp giữa trần phòng ngủ.",
+    "en": "Small white domed safety sensor protruding from the bedroom ceiling."
+  },
+  "category": "other",
+  "tags": [
+    "equipment",
+    "smoke",
+    "detector",
+    "safety",
+    "sensor",
+    "ceiling",
+    "module"
+  ],
+  "params": {
+    "radius": {
+      "type": "number",
+      "min": 3,
+      "max": 10,
+      "default": 6
+    }
+  },
+  "boxes": [
+    {
+      "type": "cylinder",
+      "x": 0,
+      "y": 0,
+      "z": 0,
+      "radius": "{{radius}}",
+      "length": 4,
+      "axis": "y",
+      "faces": {
+        "bottom": "#f2f2f2",
+        "side": "#cccccc"
+      }
+    },
+    {
+      "type": "cylinder",
+      "x": 0,
+      "y": 0,
+      "z": 0,
+      "radius": 1,
+      "length": 5,
+      "axis": "y",
+      "faces": {
+        "bottom": "#ff0000"
+      }
+    }
+  ]
+}

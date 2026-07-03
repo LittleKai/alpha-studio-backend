@@ -1,0 +1,48 @@
+{
+  "id": "mod-floor-parquet-panel",
+  "version": 1,
+  "name": {
+    "vi": "Ván lót sàn xương cá (Module)",
+    "en": "Herringbone Parquet Floor (Module)"
+  },
+  "description": {
+    "vi": "Tấm ốp họa tiết dán sàn bằng vân gỗ lợp chéo mũi tên chevron sang trọng.",
+    "en": "Thin flooring sheet styled with crossing herringbone wood patterns spanning the room base."
+  },
+  "category": "other",
+  "tags": [
+    "accessory",
+    "floor",
+    "parquet",
+    "wood",
+    "herringbone",
+    "module"
+  ],
+  "params": {
+    "width": {
+      "type": "number",
+      "min": 100,
+      "max": 500,
+      "default": 300
+    },
+    "depth": {
+      "type": "number",
+      "min": 100,
+      "max": 500,
+      "default": 300
+    }
+  },
+  "boxes": [
+    {
+      "x": 0,
+      "y": 0,
+      "z": 0,
+      "w": "{{width}}",
+      "h": 0.2,
+      "d": "{{depth}}",
+      "faces": {
+        "top": "#cc9a52"
+      }
+    }
+  ]
+}

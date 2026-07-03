@@ -1,0 +1,77 @@
+{
+  "id": "mod-decor-book-stack",
+  "version": 1,
+  "name": {
+    "vi": "Chồng sách để tab (Module)",
+    "en": "Bedside Book Stack (Module)"
+  },
+  "description": {
+    "vi": "Một mỡ khối hộp bẹt xếp lên nhau lệch góc thành hình đống sách đọc dở.",
+    "en": "Several thin block objects stacked untidily on top of each other simulating unread night books."
+  },
+  "category": "other",
+  "tags": [
+    "accessory",
+    "book",
+    "stack",
+    "reading",
+    "decor",
+    "nightstand",
+    "module"
+  ],
+  "params": {
+    "width": {
+      "type": "number",
+      "min": 15,
+      "max": 30,
+      "default": 22
+    },
+    "depth": {
+      "type": "number",
+      "min": 15,
+      "max": 30,
+      "default": 18
+    }
+  },
+  "boxes": [
+    {
+      "x": 0,
+      "y": 0,
+      "z": 0,
+      "w": "{{width}}",
+      "h": 2,
+      "d": "{{depth}}",
+      "faces": {
+        "top": "#c7302c",
+        "side": "#f2edd0",
+        "front": "#c7302c"
+      }
+    },
+    {
+      "x": 2,
+      "y": 2,
+      "z": 1,
+      "w": "{{width * 0.9}}",
+      "h": 1.5,
+      "d": "{{depth * 0.9}}",
+      "faces": {
+        "top": "#2a4d7a",
+        "side": "#f2edd0",
+        "front": "#2a4d7a"
+      }
+    },
+    {
+      "x": 1,
+      "y": 3.5,
+      "z": 1.5,
+      "w": "{{width * 0.8}}",
+      "h": 2.5,
+      "d": "{{depth * 0.85}}",
+      "faces": {
+        "top": "#3a5937",
+        "side": "#f2edd0",
+        "front": "#3a5937"
+      }
+    }
+  ]
+}

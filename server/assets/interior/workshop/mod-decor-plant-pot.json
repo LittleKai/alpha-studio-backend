@@ -1,0 +1,51 @@
+{
+  "id": "mod-decor-plant-pot",
+  "version": 1,
+  "name": {
+    "vi": "Chậu cây gốm (Module)",
+    "en": "Ceramic Plant Pot (Module)"
+  },
+  "description": {
+    "vi": "Module hình trụ tượng trưng cho chậu cây gốm để góc phòng lọc khí xanh xẻo.",
+    "en": "Cylindrical pot module representing a ceramic planter for adding greenery in corners."
+  },
+  "category": "other",
+  "tags": [
+    "accessory",
+    "plant",
+    "pot",
+    "decor",
+    "greenery",
+    "ceramic",
+    "module"
+  ],
+  "params": {
+    "radius": {
+      "type": "number",
+      "min": 10,
+      "max": 30,
+      "default": 20
+    },
+    "height": {
+      "type": "number",
+      "min": 20,
+      "max": 60,
+      "default": 40
+    }
+  },
+  "boxes": [
+    {
+      "type": "cylinder",
+      "x": 0,
+      "y": 0,
+      "z": 0,
+      "radius": "{{radius}}",
+      "length": "{{height}}",
+      "axis": "y",
+      "faces": {
+        "side": "#e8e5df",
+        "top": "#3a4a2b"
+      }
+    }
+  ]
+}

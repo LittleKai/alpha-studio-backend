@@ -1,0 +1,62 @@
+{
+  "id": "mod-equip-projector-screen",
+  "version": 1,
+  "name": {
+    "vi": "Cuộn màn chiếu rạp phim (Module)",
+    "en": "Projector Rolling Screen (Module)"
+  },
+  "description": {
+    "vi": "Ống kéo kim loại trên trần rút xuống một tấm bạt khổ rộng trắng chói lói.",
+    "en": "Ceiling-mounted enclosure canister rolling down an expansive white screen."
+  },
+  "category": "other",
+  "tags": [
+    "equipment",
+    "screen",
+    "projector",
+    "theater",
+    "white",
+    "module"
+  ],
+  "params": {
+    "width": {
+      "type": "number",
+      "min": 150,
+      "max": 300,
+      "default": 200
+    },
+    "height": {
+      "type": "number",
+      "min": 100,
+      "max": 200,
+      "default": 120
+    }
+  },
+  "boxes": [
+    {
+      "x": 0,
+      "y": "{{height}}",
+      "z": 0,
+      "w": "{{width}}",
+      "h": 5,
+      "d": 5,
+      "faces": {
+        "front": "#d6d6d6",
+        "bottom": "#d6d6d6",
+        "top": "#d6d6d6"
+      }
+    },
+    {
+      "x": 5,
+      "y": 0,
+      "z": 2.5,
+      "w": "{{width - 10}}",
+      "h": "{{height}}",
+      "d": 0.5,
+      "faces": {
+        "front": "#ffffff",
+        "back": "#f2f2f2"
+      }
+    }
+  ]
+}

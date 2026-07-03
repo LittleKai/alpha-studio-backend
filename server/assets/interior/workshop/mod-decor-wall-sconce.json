@@ -1,0 +1,58 @@
+{
+  "id": "mod-decor-wall-sconce",
+  "version": 1,
+  "name": {
+    "vi": "Đèn hắt gắn tường (Module)",
+    "en": "Wall Sconce Wash Light (Module)"
+  },
+  "description": {
+    "vi": "Điểm đèn nhỏ đính vách tường rọi sáng ánh ấm vàng sang 2 bên.",
+    "en": "Small wall-mounted light fixture throwing warm decorative illumination upwards/downwards."
+  },
+  "category": "other",
+  "tags": [
+    "accessory",
+    "light",
+    "wall",
+    "sconce",
+    "lamp",
+    "bedroom",
+    "module"
+  ],
+  "params": {
+    "width": {
+      "type": "number",
+      "min": 5,
+      "max": 15,
+      "default": 10
+    },
+    "height": {
+      "type": "number",
+      "min": 10,
+      "max": 30,
+      "default": 18
+    },
+    "depth": {
+      "type": "number",
+      "min": 5,
+      "max": 15,
+      "default": 8
+    }
+  },
+  "boxes": [
+    {
+      "x": 0,
+      "y": 0,
+      "z": 0,
+      "w": "{{width}}",
+      "h": "{{height}}",
+      "d": "{{depth}}",
+      "faces": {
+        "front": "$metal",
+        "side": "$metal",
+        "top": "#ffffcc",
+        "bottom": "#ffffcc"
+      }
+    }
+  ]
+}

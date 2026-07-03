@@ -1,0 +1,51 @@
+{
+  "id": "mod-equip-robot-vacuum",
+  "version": 1,
+  "name": {
+    "vi": "Robot hút bụi tròn (Module)",
+    "en": "Robot Vacuum Circular (Module)"
+  },
+  "description": {
+    "vi": "Cục máy hút bụi thông minh hình đĩa nhựa đang nằm neo chờ dọn gầm giường.",
+    "en": "Flat circular robotic vacuum cleaner disc module taking a break before diving under beds."
+  },
+  "category": "other",
+  "tags": [
+    "equipment",
+    "robot",
+    "vacuum",
+    "floor",
+    "appliance",
+    "cleaning",
+    "module"
+  ],
+  "params": {
+    "radius": {
+      "type": "number",
+      "min": 12,
+      "max": 20,
+      "default": 17
+    },
+    "height": {
+      "type": "number",
+      "min": 6,
+      "max": 15,
+      "default": 9
+    }
+  },
+  "boxes": [
+    {
+      "type": "cylinder",
+      "x": 0,
+      "y": 0,
+      "z": 0,
+      "radius": "{{radius}}",
+      "length": "{{height}}",
+      "axis": "y",
+      "faces": {
+        "side": "#1a1a1a",
+        "top": "#333333"
+      }
+    }
+  ]
+}

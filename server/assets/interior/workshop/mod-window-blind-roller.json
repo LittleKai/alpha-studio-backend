@@ -1,0 +1,67 @@
+{
+  "id": "mod-window-blind-roller",
+  "version": 1,
+  "name": {
+    "vi": "Rèm cuốn (Module)",
+    "en": "Roller Blind Block (Module)"
+  },
+  "description": {
+    "vi": "Khung rèm cuốn trục kim loại kéo phẳng thả dọc trước lớp kính cửa sổ.",
+    "en": "Smooth pull-down roller blind sheet descending from a hidden tube above window."
+  },
+  "category": "other",
+  "tags": [
+    "accessory",
+    "blind",
+    "curtain",
+    "roller",
+    "window",
+    "module"
+  ],
+  "params": {
+    "width": {
+      "type": "number",
+      "min": 60,
+      "max": 200,
+      "default": 120
+    },
+    "height": {
+      "type": "number",
+      "min": 100,
+      "max": 250,
+      "default": 160
+    },
+    "thick": {
+      "type": "number",
+      "min": 1,
+      "max": 4,
+      "default": 1
+    }
+  },
+  "boxes": [
+    {
+      "x": 0,
+      "y": 0,
+      "z": 0,
+      "w": "{{width}}",
+      "h": "{{height}}",
+      "d": "{{thick}}",
+      "faces": {
+        "front": "#d6d3cc",
+        "back": "#d6d3cc"
+      }
+    },
+    {
+      "type": "cylinder",
+      "x": 0,
+      "y": "{{height}}",
+      "z": "{{thick/2}}",
+      "radius": 3,
+      "length": "{{width}}",
+      "axis": "x",
+      "faces": {
+        "side": "#f0f0f0"
+      }
+    }
+  ]
+}

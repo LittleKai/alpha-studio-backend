@@ -1,0 +1,68 @@
+{
+  "id": "mod-equip-projector-mini",
+  "version": 1,
+  "name": {
+    "vi": "Máy chiếu phim mini (Module)",
+    "en": "Mini Movie Projector (Module)"
+  },
+  "description": {
+    "vi": "Hộp khối lập phương vuông xám có thấu kính tròn chuyên nằm góc tủ chiếu phim.",
+    "en": "Small grey cubic tech box revealing a prominent lens dial module meant for film screening."
+  },
+  "category": "other",
+  "tags": [
+    "equipment",
+    "projector",
+    "movie",
+    "mini",
+    "tech",
+    "module"
+  ],
+  "params": {
+    "width": {
+      "type": "number",
+      "min": 10,
+      "max": 25,
+      "default": 16
+    },
+    "height": {
+      "type": "number",
+      "min": 10,
+      "max": 25,
+      "default": 14
+    },
+    "depth": {
+      "type": "number",
+      "min": 10,
+      "max": 25,
+      "default": 15
+    }
+  },
+  "boxes": [
+    {
+      "x": 0,
+      "y": 0,
+      "z": 0,
+      "w": "{{width}}",
+      "h": "{{height}}",
+      "d": "{{depth}}",
+      "faces": {
+        "front": "#8a8a8a",
+        "top": "#6b6b6b",
+        "side": "#6b6b6b"
+      }
+    },
+    {
+      "type": "cylinder",
+      "x": 0,
+      "y": "{{height / 2}}",
+      "z": "-1",
+      "radius": "{{width * 0.3}}",
+      "length": 1,
+      "axis": "z",
+      "faces": {
+        "front": "#1a1a1a"
+      }
+    }
+  ]
+}

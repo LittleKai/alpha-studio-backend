@@ -1,0 +1,57 @@
+{
+  "id": "mod-storage-basket-woven",
+  "version": 1,
+  "name": {
+    "vi": "Giỏ mây tre đan (Module)",
+    "en": "Woven Rattan Basket (Module)"
+  },
+  "description": {
+    "vi": "Hộp rổ bằng vật liệu cói mây tre đan vuông vắn, thích hợp đẩy vào hầm ngăn kéo, tủ áo mở.",
+    "en": "Square woven rattan textured open basket box module, fitting neatly onto open shelves."
+  },
+  "category": "other",
+  "tags": [
+    "accessory",
+    "basket",
+    "rattan",
+    "storage",
+    "woven",
+    "module"
+  ],
+  "params": {
+    "width": {
+      "type": "number",
+      "min": 20,
+      "max": 50,
+      "default": 35
+    },
+    "height": {
+      "type": "number",
+      "min": 15,
+      "max": 35,
+      "default": 25
+    },
+    "depth": {
+      "type": "number",
+      "min": 20,
+      "max": 50,
+      "default": 40
+    }
+  },
+  "boxes": [
+    {
+      "x": 0,
+      "y": 0,
+      "z": 0,
+      "w": "{{width}}",
+      "h": "{{height}}",
+      "d": "{{depth}}",
+      "faces": {
+        "front": "#c2a37e",
+        "top": "#997e5d",
+        "side": "#c2a37e",
+        "back": "#c2a37e"
+      }
+    }
+  ]
+}

@@ -1,0 +1,47 @@
+{
+  "id": "mod-equip-smart-speaker",
+  "version": 1,
+  "name": {
+    "vi": "Loa thông minh khối cầu (Module)",
+    "en": "Smart Speaker Sphere (Module)"
+  },
+  "description": {
+    "vi": "Loa Bluetooth điều khiển giọng nói thiết kế khối cầu tròn bọc lưới vải.",
+    "en": "Voice-controlled smart Bluetooth speaker featuring a fabric-wrapped spherical design."
+  },
+  "category": "other",
+  "tags": [
+    "equipment",
+    "speaker",
+    "smart",
+    "audio",
+    "appliance",
+    "bedroom",
+    "module"
+  ],
+  "params": {
+    "radius": {
+      "type": "number",
+      "min": 5,
+      "max": 15,
+      "default": 8
+    }
+  },
+  "boxes": [
+    {
+      "x": 0,
+      "y": 0,
+      "z": 0,
+      "w": "{{radius * 2}}",
+      "h": "{{radius * 2}}",
+      "d": "{{radius * 2}}",
+      "faces": {
+        "front": "#4d4d4d",
+        "back": "#4d4d4d",
+        "side": "#4d4d4d",
+        "top": "#4d4d4d",
+        "bottom": "#222222"
+      }
+    }
+  ]
+}

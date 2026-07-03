@@ -2,6 +2,7 @@
 import crypto from 'crypto';
 import mongoose from 'mongoose';
 import path from 'node:path';
+import { existsSync } from 'node:fs';
 import fs from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { GoogleGenAI, Modality } from '@google/genai';
@@ -89,7 +90,14 @@ const INTERIOR_AGENT_CREDIT_COST = 20;
 const MAX_USER_PROMPT_CHARS = 8000;
 const MAX_VERSIONS_PER_PROJECT = 300;
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const INTERIOR_SKILLS_DIR = path.resolve(__dirname, '../../../tools/interior-design-engine/skills');
+// Prefer the monorepo tools/ skills (local dev); fall back to the copy bundled
+// into the image by scripts/sync-interior-assets.mjs (tools/ absent on Fly).
+const INTERIOR_SKILLS_DIR_CANDIDATES = [
+    path.resolve(__dirname, '../../../tools/interior-design-engine/skills'),
+    path.resolve(__dirname, '../assets/interior/skills')
+];
+const INTERIOR_SKILLS_DIR = INTERIOR_SKILLS_DIR_CANDIDATES.find((dir) => existsSync(dir))
+    || INTERIOR_SKILLS_DIR_CANDIDATES[0];
 const INTERIOR_WORKSHOP_DIR = path.resolve(__dirname, '../../../tools/interior-component-workshop');
 const INTERIOR_WORKSHOP_COMPONENTS_DIR = path.join(INTERIOR_WORKSHOP_DIR, 'components');
 const INTERIOR_WORKSHOP_BUNDLE_PATH = path.join(INTERIOR_WORKSHOP_DIR, 'data', 'template-bundle.js');
@@ -508,7 +516,10 @@ const INTERIOR_RUNS_RULE_VI = [
     '- `y` lĂ  cao máº·t Ä‘Ă¡y module so vá»›i máº·t ná»n (cm). `z` lĂ  offset depth tá»« tÆ°á»ng (tá»§ trĂªn depth khĂ¡c tá»§ dÆ°á»›i â†’ z khĂ¡c 0 Ä‘á»ƒ cĂ¹ng máº·t sau, xem hint Z).',
     '- `width` lĂ  chiá»u dĂ i module Dá»ŒC trá»¥c run (Ä‘Ă´ng/tĂ¢y dĂ¹ng width lĂ  theo trá»¥c X tá»•ng; báº¯c/nam dĂ¹ng width lĂ  theo trá»¥c Z tá»•ng). `depth` lĂ  Ä‘á»™ sĂ¢u (vuĂ´ng gĂ³c tÆ°á»ng).',
     '- KHĂ”NG dĂ¹ng Ä‘á»“ng thá»i `modules` á»Ÿ root VĂ€ `runs` - chá»n 1. Bá»‘ cá»¥c tháº³ng: dĂ¹ng `modules`. Bá»‘ cá»¥c cĂ³ khĂºc: PHáº¢I dĂ¹ng `runs`.',
-    '- VĂ­ dá»¥ tá»§ chá»¯ L 500cm Ă— 100cm, main run (east): 3 module liĂªn tiáº¿p vá»›i x=0/w=60, x=60/w=80, x=140/w=360 (tá»•ng = 500). Module stack (vd tá»§ trĂªn Ä‘áº·t trĂªn fridge) dĂ¹ng cĂ¹ng x=60 nhÆ°ng y khĂ¡c (y=190 thay vĂ¬ y=0).'
+    '- VĂ­ dá»¥ tá»§ chá»¯ L 500cm Ă— 100cm, main run (east): 3 module liĂªn tiáº¿p vá»›i x=0/w=60, x=60/w=80, x=140/w=360 (tá»•ng = 500). Module stack (vd tá»§ trĂªn Ä‘áº·t trĂªn fridge) dĂ¹ng cĂ¹ng x=60 nhÆ°ng y khĂ¡c (y=190 thay vĂ¬ y=0).',
+    '- HUONG RUN & ORIGIN (QUAN TRONG): moi toa do phai nam trong khoi model 0..width (x), 0..depth (z). Nhanh L di tu tuong sau (z=0) vao trong phong -> dung direction "south" voi origin.z=0 (south = +z). CHI dung "north" khi origin.z dat o dau xa (origin.z = model.depth) vi north di ve -z. Run "south"/"north" ap tuong trai dung origin.x=0; ap tuong phai dung origin.x = model.width - depth_cua_module.',
+    '- KHOI GOC (corner) chi thuoc MOT run duy nhat. Run vuong goc con lai phai dat origin lech qua khoi goc de khong chong lan: vd corner sau 100cm nam trong run "return" -> main run (east) dat origin {x:100, z:0} va cac module trong main run bat dau tu x=0 (tuc la world x=100).',
+    '- Tong width cac module doc theo moi run + phan goc cua run kia nen phu kin chieu tuong tuong ung; module cuoi cua main run ket thuc dung tai model.width.'
 ].join('\n');
 
 const INTERIOR_DIMENSION_ANCHOR_RULE_VI = [
@@ -630,7 +641,7 @@ const INTERIOR_DETAIL_DENSITY_RULES = [
 const INTERIOR_FEW_SHOT = [
     'Vi du output JSON HOP LE (uu tien tpl truoc raw box):',
     '{"reply":"Hieu yeu cau: tu ao canh truot 240cm, cao 260cm, sau 60cm, co khoang treo va ngan keo.\\nDa ap dung: dung tpl sliding-2door cho khoang chinh va tpl base-drawer-stack cho ngan keo duoi; width 240, height 260, depth 60.","askForInfo":false,"cabinetModel":{"title":"Tu ao canh truot co ngan keo","units":"cm","width":240,"height":260,"depth":60,"palette":"wood-walnut","modules":[{"tpl":"sliding-2door","x":0,"y":50,"z":0,"width":240,"height":210,"depth":60,"style":{"door":"flat","track":"top-bottom"}},{"tpl":"base-drawer-stack","x":0,"y":0,"z":0,"width":120,"height":50,"depth":60,"style":{"drawers":3,"handle":"bar"}},{"tpl":"base-drawer-stack","x":120,"y":0,"z":0,"width":120,"height":50,"depth":60,"style":{"drawers":3,"handle":"bar"}}],"details":[],"specs":[["Template","sliding-2door + base-drawer-stack","Dung catalog thay vi box tho"]]}}',
-    '{"reply":"Hieu yeu cau: tu bep chu L 400cm x 250cm, tu duoi go oc cho, tu tren trang, co bo goc dau tu.\\nDa ap dung: runs[] 2 nhanh dung kich thuoc 400/250; dung base-cabinet-2door, wall-cabinet-2door, sink-base va cab-base-rounded-end.","askForInfo":false,"cabinetModel":{"title":"Tu bep chu L co bo goc","units":"cm","width":400,"height":240,"depth":250,"palette":"wood-oak","runs":[{"id":"main","origin":{"x":0,"z":0},"direction":"east","modules":[{"tpl":"sink-base","x":0,"y":0,"z":0,"width":90,"height":86,"depth":60,"style":{"door":"flat"}},{"tpl":"base-cabinet-2door","x":90,"y":0,"z":0,"width":220,"height":86,"depth":60,"style":{"door":"shaker","handle":"bar"}},{"tpl":"cab-base-rounded-end","x":310,"y":0,"z":0,"width":50,"height":86,"depth":60,"style":{"hand":"right"}},{"tpl":"wall-cabinet-2door","x":90,"y":145,"z":25,"width":220,"height":80,"depth":35,"style":{"door":"flat","handle":"bar"}}]},{"id":"return","origin":{"x":0,"z":0},"direction":"north","modules":[{"tpl":"corner-cabinet","x":0,"y":0,"z":0,"width":100,"height":86,"depth":100,"style":{"door":"shaker"}},{"tpl":"base-cabinet-2door","x":100,"y":0,"z":0,"width":150,"height":86,"depth":60,"style":{"door":"shaker","handle":"bar"}}]}],"details":[],"specs":[["Bo cuc","L 400 x 250 cm","Dung runs va template bo goc"]]}}',
+    '{"reply":"Hieu yeu cau: tu bep chu L 400cm x 250cm, tu duoi go oc cho, tu tren trang, co bo goc dau tu.\\nDa ap dung: runs[] 2 nhanh; nhanh return direction south (di tu tuong sau z=0 vao phong) chua khoi goc; main run east dat origin x=100 de tranh chong len khoi goc; dung base-cabinet-2door, wall-cabinet-2door, sink-base va cab-base-rounded-end.","askForInfo":false,"cabinetModel":{"title":"Tu bep chu L co bo goc","units":"cm","width":400,"height":240,"depth":250,"palette":"wood-oak","runs":[{"id":"return","origin":{"x":0,"z":0},"direction":"south","modules":[{"tpl":"corner-cabinet","x":0,"y":0,"z":0,"width":100,"height":86,"depth":100,"style":{"door":"shaker"}},{"tpl":"base-cabinet-2door","x":100,"y":0,"z":0,"width":150,"height":86,"depth":60,"style":{"door":"shaker","handle":"bar"}}]},{"id":"main","origin":{"x":100,"z":0},"direction":"east","modules":[{"tpl":"sink-base","x":0,"y":0,"z":0,"width":90,"height":86,"depth":60,"style":{"door":"flat"}},{"tpl":"base-cabinet-2door","x":90,"y":0,"z":0,"width":160,"height":86,"depth":60,"style":{"door":"shaker","handle":"bar"}},{"tpl":"cab-base-rounded-end","x":250,"y":0,"z":0,"width":50,"height":86,"depth":60,"style":{"hand":"right"}},{"tpl":"wall-cabinet-2door","x":90,"y":145,"z":25,"width":160,"height":80,"depth":35,"style":{"door":"flat","handle":"bar"}}]}],"details":[],"specs":[["Bo cuc","L 400 x 250 cm","Return run south chua khoi goc, main run origin x=100"]]}}',
     '{"reply":"Hieu yeu cau: ke sach 180cm mau xanh navy dam.\\nDa ap dung: dung open-bookshelf cho than ke va raw detail mau navy cho mat trang tri vi catalog khong co bien the mau rieng.","askForInfo":false,"cabinetModel":{"title":"Ke sach navy","units":"cm","width":180,"height":160,"depth":35,"palette":"dark-modern","modules":[{"tpl":"open-bookshelf","x":0,"y":0,"z":0,"width":180,"height":160,"depth":35,"style":{"shelves":3}}],"details":[{"type":"accent-panel","kind":"box","x":0,"y":0,"z":34,"width":180,"height":160,"depth":1,"color":"#1a1a2e"}],"specs":[["Mau","Navy #1a1a2e","Raw color dung cho accent/detail le"]]}}',
     '{"reply":"Hieu yeu cau: tu dau giuong co khe LED khong co trong catalog.\\nDa ap dung: tao tplNew led-nightstand chi khi catalog khong co template phu hop.","askForInfo":false,"cabinetModel":{"title":"Tu dau giuong LED","units":"cm","width":60,"height":50,"depth":40,"palette":"wood-walnut","modules":[{"tplNew":{"id":"led-nightstand","version":1,"category":"lower-cabinet","tags":["led","nightstand"],"description":{"vi":"Tu dau giuong co khe LED","en":"Nightstand with LED strip"},"params":{"width":{"min":40,"max":80,"default":60},"height":{"min":40,"max":60,"default":50},"depth":{"min":30,"max":50,"default":40}},"style":{},"boxes":[{"x":0,"y":0,"z":0,"w":"{{width}}","h":"{{height}}","d":"{{depth}}","faces":{"top":"$woodTop","front":"$woodFront","right":"$woodSide","left":"$woodDark","back":"$woodBack"}},{"x":2,"y":"{{height - 4}}","z":"{{depth - 0.5}}","w":"{{width - 4}}","h":2,"d":0.5,"faces":{"front":"#fff4c4"}}]},"x":0,"y":0,"z":0,"width":60,"height":50,"depth":40}],"details":[],"specs":[["tplNew","led-nightstand","Chi dung khi catalog khong co"]]}}'
 ].join('\n');

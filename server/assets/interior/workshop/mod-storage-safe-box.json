@@ -1,0 +1,70 @@
+{
+  "id": "mod-storage-safe-box",
+  "version": 1,
+  "name": {
+    "vi": "Két sắt phòng ngủ (Module)",
+    "en": "Bedroom Safe Box (Module)"
+  },
+  "description": {
+    "vi": "Cục két sắt bảo mật xám đậm bo cong các góc an vị trong gầm tủ áo.",
+    "en": "Thick grey metal heavy security block stationed inside shelves representing a residential safe box."
+  },
+  "category": "other",
+  "tags": [
+    "equipment",
+    "safe",
+    "security",
+    "box",
+    "metal",
+    "module",
+    "bedroom"
+  ],
+  "params": {
+    "width": {
+      "type": "number",
+      "min": 30,
+      "max": 50,
+      "default": 40
+    },
+    "height": {
+      "type": "number",
+      "min": 25,
+      "max": 60,
+      "default": 35
+    },
+    "depth": {
+      "type": "number",
+      "min": 30,
+      "max": 50,
+      "default": 35
+    }
+  },
+  "boxes": [
+    {
+      "x": 0,
+      "y": 0,
+      "z": 0,
+      "w": "{{width}}",
+      "h": "{{height}}",
+      "d": "{{depth}}",
+      "faces": {
+        "front": "#525252",
+        "top": "#525252",
+        "side": "#525252",
+        "back": "#525252"
+      }
+    },
+    {
+      "type": "cylinder",
+      "x": "{{width - 8}}",
+      "y": "{{height / 2}}",
+      "z": "-0.5",
+      "radius": 3,
+      "length": 1,
+      "axis": "z",
+      "faces": {
+        "front": "$metal"
+      }
+    }
+  ]
+}

@@ -1,0 +1,56 @@
+{
+  "id": "mod-equip-dehumidifier",
+  "version": 1,
+  "name": {
+    "vi": "Máy hút ẩm khối hộp (Module)",
+    "en": "Dehumidifier Appliance Box (Module)"
+  },
+  "description": {
+    "vi": "Cục máy hút ẩm nhựa trắng dẹt đặt góc nhà cho các ngày nồm ẩm.",
+    "en": "White plastic box representing a dehumidifier unit useful in humid climates."
+  },
+  "category": "other",
+  "tags": [
+    "equipment",
+    "appliance",
+    "dehumidifier",
+    "box",
+    "module"
+  ],
+  "params": {
+    "width": {
+      "type": "number",
+      "min": 25,
+      "max": 40,
+      "default": 34
+    },
+    "height": {
+      "type": "number",
+      "min": 40,
+      "max": 70,
+      "default": 55
+    },
+    "depth": {
+      "type": "number",
+      "min": 15,
+      "max": 30,
+      "default": 24
+    }
+  },
+  "boxes": [
+    {
+      "x": 0,
+      "y": 0,
+      "z": 0,
+      "w": "{{width}}",
+      "h": "{{height}}",
+      "d": "{{depth}}",
+      "faces": {
+        "front": "#f2f2f2",
+        "top": "#4a4a4a",
+        "side": "#f2f2f2",
+        "back": "#e0e0e0"
+      }
+    }
+  ]
+}

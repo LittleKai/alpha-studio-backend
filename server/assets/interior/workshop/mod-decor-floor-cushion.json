@@ -1,0 +1,57 @@
+{
+  "id": "mod-decor-floor-cushion",
+  "version": 1,
+  "name": {
+    "vi": "Nệm ngồi bệt (Module)",
+    "en": "Floor Cushion Seating (Module)"
+  },
+  "description": {
+    "vi": "Chiếc gối nệm to, vuông hoặc tròn, ném trên thảm sàn để ngồi chơi game, đọc sách góc phòng.",
+    "en": "Oversized floor cushion dropped on the carpet for very casual grounding reading periods."
+  },
+  "category": "other",
+  "tags": [
+    "accessory",
+    "cushion",
+    "floor",
+    "seat",
+    "pouffe",
+    "bedroom",
+    "module"
+  ],
+  "params": {
+    "width": {
+      "type": "number",
+      "min": 40,
+      "max": 80,
+      "default": 60
+    },
+    "depth": {
+      "type": "number",
+      "min": 40,
+      "max": 80,
+      "default": 60
+    },
+    "thick": {
+      "type": "number",
+      "min": 10,
+      "max": 25,
+      "default": 15
+    }
+  },
+  "boxes": [
+    {
+      "x": 0,
+      "y": 0,
+      "z": 0,
+      "w": "{{width}}",
+      "h": "{{thick}}",
+      "d": "{{depth}}",
+      "faces": {
+        "front": "#ab8a60",
+        "top": "#ab8a60",
+        "side": "#ab8a60"
+      }
+    }
+  ]
+}

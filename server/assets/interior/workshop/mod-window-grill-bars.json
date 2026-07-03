@@ -1,0 +1,60 @@
+{
+  "id": "mod-window-grill-bars",
+  "version": 1,
+  "name": {
+    "vi": "Chấn song sắt cửa sổ (Module)",
+    "en": "Window Grill Bars (Module)"
+  },
+  "description": {
+    "vi": "Khung an toàn có các thanh sắt dọc ngang hàn chéo nhau chống trộm đột nhập.",
+    "en": "Safety grill barrier formed by crossing metal rebars to prevent intrusions."
+  },
+  "category": "other",
+  "tags": [
+    "accessory",
+    "window",
+    "grill",
+    "bars",
+    "metal",
+    "security",
+    "module"
+  ],
+  "params": {
+    "width": {
+      "type": "number",
+      "min": 60,
+      "max": 250,
+      "default": 135
+    },
+    "height": {
+      "type": "number",
+      "min": 60,
+      "max": 250,
+      "default": 115
+    }
+  },
+  "boxes": [
+    {
+      "x": 0,
+      "y": 0,
+      "z": 0,
+      "w": "{{width}}",
+      "h": "{{height}}",
+      "d": 2,
+      "faces": {
+        "front": "$metal"
+      }
+    },
+    {
+      "x": 2,
+      "y": 2,
+      "z": -0.5,
+      "w": "{{width - 4}}",
+      "h": "{{height - 4}}",
+      "d": 3,
+      "faces": {
+        "front": "$glass"
+      }
+    }
+  ]
+}

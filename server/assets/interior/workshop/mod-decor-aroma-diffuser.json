@@ -1,0 +1,62 @@
+{
+  "id": "mod-decor-aroma-diffuser",
+  "version": 1,
+  "name": {
+    "vi": "Máy khuếch tán tinh dầu (Module)",
+    "en": "Aroma Oil Diffuser (Module)"
+  },
+  "description": {
+    "vi": "Cụm phun sương hương liệu bằng vân gỗ chụm lên trên xịt thơm góc phòng.",
+    "en": "Wood-grain finished conical mound that shoots up mist visually to diffuse oils."
+  },
+  "category": "other",
+  "tags": [
+    "accessory",
+    "diffuser",
+    "aroma",
+    "fragrance",
+    "mist",
+    "module"
+  ],
+  "params": {
+    "radius": {
+      "type": "number",
+      "min": 5,
+      "max": 12,
+      "default": 8
+    },
+    "height": {
+      "type": "number",
+      "min": 10,
+      "max": 25,
+      "default": 15
+    }
+  },
+  "boxes": [
+    {
+      "type": "cylinder",
+      "x": 0,
+      "y": 0,
+      "z": 0,
+      "radius": "{{radius}}",
+      "length": "{{height / 2}}",
+      "axis": "y",
+      "faces": {
+        "side": "$woodLight"
+      }
+    },
+    {
+      "type": "cylinder",
+      "x": 0,
+      "y": "{{height / 2}}",
+      "z": 0,
+      "radius": "{{radius - 2}}",
+      "length": "{{height / 2.5}}",
+      "axis": "y",
+      "faces": {
+        "side": "#f5f5f5",
+        "top": "#f5f5f5"
+      }
+    }
+  ]
+}

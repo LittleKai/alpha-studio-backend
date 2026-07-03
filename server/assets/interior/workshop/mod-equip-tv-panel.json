@@ -1,0 +1,59 @@
+{
+  "id": "mod-equip-tv-panel",
+  "version": 1,
+  "name": {
+    "vi": "Màn hình TV phản phẳng (Module)",
+    "en": "Flat TV Screen Panel (Module)"
+  },
+  "description": {
+    "vi": "Màn hình hiển thị TV cực mỏng dùng chuẩn bị để bắn ốp dính vào tường vách nền.",
+    "en": "Ultra-thin TV display screen module ready to be wall-mounted on flat surfaces."
+  },
+  "category": "other",
+  "tags": [
+    "equipment",
+    "tv",
+    "television",
+    "display",
+    "screen",
+    "flat",
+    "module",
+    "bedroom"
+  ],
+  "params": {
+    "width": {
+      "type": "number",
+      "min": 70,
+      "max": 180,
+      "default": 120
+    },
+    "height": {
+      "type": "number",
+      "min": 40,
+      "max": 110,
+      "default": 68
+    },
+    "thick": {
+      "type": "number",
+      "min": 2,
+      "max": 8,
+      "default": 4
+    }
+  },
+  "boxes": [
+    {
+      "x": 0,
+      "y": 0,
+      "z": 0,
+      "w": "{{width}}",
+      "h": "{{height}}",
+      "d": "{{thick}}",
+      "faces": {
+        "front": "#0d0d0d",
+        "side": "#1a1a1a",
+        "top": "#1a1a1a",
+        "bottom": "#1a1a1a"
+      }
+    }
+  ]
+}

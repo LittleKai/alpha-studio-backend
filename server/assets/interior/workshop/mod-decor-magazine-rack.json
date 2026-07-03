@@ -1,0 +1,80 @@
+{
+  "id": "mod-decor-magazine-rack",
+  "version": 1,
+  "name": {
+    "vi": "Kệ treo tạp chí vải (Module)",
+    "en": "Magazine Rack Sling (Module)"
+  },
+  "description": {
+    "vi": "Một giá chữ X chân gỗ căng bạt vải đùng đục chứa các cuốn tạp chí cạnh sofa.",
+    "en": "An X-frame wooden structure stretching a canvas sling pocket catching casual magazines."
+  },
+  "category": "other",
+  "tags": [
+    "accessory",
+    "rack",
+    "magazine",
+    "storage",
+    "reading",
+    "decor",
+    "module"
+  ],
+  "params": {
+    "width": {
+      "type": "number",
+      "min": 25,
+      "max": 50,
+      "default": 35
+    },
+    "height": {
+      "type": "number",
+      "min": 30,
+      "max": 50,
+      "default": 40
+    },
+    "depth": {
+      "type": "number",
+      "min": 20,
+      "max": 45,
+      "default": 30
+    }
+  },
+  "boxes": [
+    {
+      "x": 0,
+      "y": 0,
+      "z": 0,
+      "w": 3,
+      "h": "{{height}}",
+      "d": 3,
+      "faces": {
+        "front": "$woodDark",
+        "side": "$woodDark"
+      }
+    },
+    {
+      "x": "{{width}}",
+      "y": 0,
+      "z": 0,
+      "w": 3,
+      "h": "{{height}}",
+      "d": 3,
+      "faces": {
+        "front": "$woodDark",
+        "side": "$woodDark"
+      }
+    },
+    {
+      "x": 0,
+      "y": "{{height/2}}",
+      "z": 0,
+      "w": "{{width}}",
+      "h": "{{height/2}}",
+      "d": "{{depth}}",
+      "faces": {
+        "front": "#d4ccbd",
+        "back": "#d4ccbd"
+      }
+    }
+  ]
+}

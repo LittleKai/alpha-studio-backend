@@ -1,0 +1,61 @@
+{
+  "id": "mod-decor-macrame-wall",
+  "version": 1,
+  "name": {
+    "vi": "Dây len đan Macrame (Module)",
+    "en": "Woven Macrame Wall Hanging (Module)"
+  },
+  "description": {
+    "vi": "Tấm rèm nhỏ treo đầu giường đan thủ công bằng dây thừng bông xù màu be phong cách Boho.",
+    "en": "Boho style beige cotton rope manually knotted hanging art piece draped over the bed."
+  },
+  "category": "other",
+  "tags": [
+    "accessory",
+    "macrame",
+    "wall",
+    "art",
+    "hanging",
+    "boho",
+    "module"
+  ],
+  "params": {
+    "width": {
+      "type": "number",
+      "min": 30,
+      "max": 100,
+      "default": 60
+    },
+    "height": {
+      "type": "number",
+      "min": 50,
+      "max": 150,
+      "default": 90
+    }
+  },
+  "boxes": [
+    {
+      "type": "cylinder",
+      "x": 0,
+      "y": "{{height}}",
+      "z": 0,
+      "radius": 1,
+      "length": "{{width}}",
+      "axis": "x",
+      "faces": {
+        "side": "$woodLight"
+      }
+    },
+    {
+      "x": 5,
+      "y": 0,
+      "z": -0.5,
+      "w": "{{width - 10}}",
+      "h": "{{height}}",
+      "d": 1,
+      "faces": {
+        "front": "#f5eedc"
+      }
+    }
+  ]
+}

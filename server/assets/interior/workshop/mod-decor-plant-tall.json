@@ -1,0 +1,69 @@
+{
+  "id": "mod-decor-plant-tall",
+  "version": 1,
+  "name": {
+    "vi": "Cây Lưỡi hổ dáng cao chậu xi măng (Module)",
+    "en": "Tall Snake Plant Concrete Pot (Module)"
+  },
+  "description": {
+    "vi": "Mảng lá xếp vươn thẳng nhọn màu xanh sọc vàng vươn lên từ chậu tối màu tròn đứng.",
+    "en": "Pointy green geometric leaves representing a tall structural indoor plant in a cement pot."
+  },
+  "category": "other",
+  "tags": [
+    "accessory",
+    "plant",
+    "indoor",
+    "greenery",
+    "tall",
+    "pot",
+    "module"
+  ],
+  "params": {
+    "radius": {
+      "type": "number",
+      "min": 15,
+      "max": 25,
+      "default": 18
+    },
+    "pot_height": {
+      "type": "number",
+      "min": 30,
+      "max": 50,
+      "default": 40
+    },
+    "total_height": {
+      "type": "number",
+      "min": 100,
+      "max": 180,
+      "default": 120
+    }
+  },
+  "boxes": [
+    {
+      "type": "cylinder",
+      "x": 0,
+      "y": 0,
+      "z": 0,
+      "radius": "{{radius}}",
+      "length": "{{pot_height}}",
+      "axis": "y",
+      "faces": {
+        "side": "#828282"
+      }
+    },
+    {
+      "x": "{{0 - (radius/2)}}",
+      "y": "{{pot_height}}",
+      "z": "{{0 - (radius/2)}}",
+      "w": "{{radius}}",
+      "h": "{{total_height - pot_height}}",
+      "d": "{{radius}}",
+      "faces": {
+        "front": "#4d6b3c",
+        "side": "#4d6b3c",
+        "back": "#4d6b3c"
+      }
+    }
+  ]
+}

@@ -1,0 +1,78 @@
+{
+  "id": "mod-decor-dreamcatcher",
+  "version": 1,
+  "name": {
+    "vi": "Vòng cung Dreamcatcher (Module)",
+    "en": "Dreamcatcher Hanging Decor (Module)"
+  },
+  "description": {
+    "vi": "Vòng tròn kẽ cước giăng lưới lông thú gắn rũ hờ hững trên mảng tường đầu giường ngủ.",
+    "en": "Round hoop wrapped in netting streaming feathers cascading downwards beside bedrooms walls."
+  },
+  "category": "other",
+  "tags": [
+    "accessory",
+    "dreamcatcher",
+    "feathers",
+    "wall",
+    "hanging",
+    "boho",
+    "decor",
+    "module"
+  ],
+  "params": {
+    "radius": {
+      "type": "number",
+      "min": 10,
+      "max": 30,
+      "default": 15
+    },
+    "tail_h": {
+      "type": "number",
+      "min": 20,
+      "max": 60,
+      "default": 40
+    }
+  },
+  "boxes": [
+    {
+      "type": "cylinder",
+      "x": 0,
+      "y": "{{tail_h}}",
+      "z": 0,
+      "radius": "{{radius}}",
+      "length": 1,
+      "axis": "z",
+      "faces": {
+        "front": "#c2aa82",
+        "side": "#c2aa82"
+      }
+    },
+    {
+      "type": "cylinder",
+      "x": "{{radius * 0.5}}",
+      "y": 0,
+      "z": 0,
+      "radius": 2,
+      "length": "{{tail_h}}",
+      "axis": "y",
+      "faces": {
+        "front": "#ffffff",
+        "side": "#ffffff"
+      }
+    },
+    {
+      "type": "cylinder",
+      "x": "{{0 - (radius * 0.5)}}",
+      "y": 0,
+      "z": 0,
+      "radius": 2,
+      "length": "{{tail_h}}",
+      "axis": "y",
+      "faces": {
+        "front": "#ffffff",
+        "side": "#ffffff"
+      }
+    }
+  ]
+}

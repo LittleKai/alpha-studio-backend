@@ -1,0 +1,84 @@
+{
+  "id": "open-bookshelf",
+  "version": 1,
+  "category": "shelf",
+  "tags": [
+    "open",
+    "bookshelf"
+  ],
+  "description": {
+    "vi": "Ke sach mo",
+    "en": "Open bookshelf"
+  },
+  "params": {
+    "width": {
+      "type": "number",
+      "min": 80,
+      "max": 200,
+      "default": 138
+    },
+    "height": {
+      "type": "number",
+      "min": 40,
+      "max": 120,
+      "default": 80
+    },
+    "depth": {
+      "type": "number",
+      "min": 25,
+      "max": 40,
+      "default": 35
+    }
+  },
+  "style": {
+    "shelves": {
+      "values": [
+        1,
+        2,
+        3
+      ],
+      "default": 2
+    }
+  },
+  "boxes": [
+    {
+      "x": 0,
+      "y": 0,
+      "z": 0,
+      "w": "{{width}}",
+      "h": "{{height}}",
+      "d": "{{depth}}",
+      "faces": {
+        "top": "$woodTop",
+        "right": "$woodSide",
+        "left": "$woodDark",
+        "back": "$woodBack"
+      }
+    },
+    {
+      "x": 1,
+      "y": "{{height / 2 - 1}}",
+      "z": 1,
+      "w": "{{width - 2}}",
+      "h": 2,
+      "d": "{{depth - 2}}",
+      "faces": {
+        "top": "$woodTop",
+        "front": "$woodFrontL",
+        "bottom": "$woodDark"
+      }
+    },
+    {
+      "x": 1,
+      "y": 0,
+      "z": 1,
+      "w": "{{width - 2}}",
+      "h": 2,
+      "d": "{{depth - 2}}",
+      "faces": {
+        "top": "$woodTop",
+        "bottom": "$woodDark"
+      }
+    }
+  ]
+}

@@ -1,0 +1,59 @@
+{
+  "id": "mod-equip-soundbar",
+  "version": 1,
+  "name": {
+    "vi": "Loa thanh mỏng Soundbar (Module)",
+    "en": "Slim Soundbar Audio (Module)"
+  },
+  "description": {
+    "vi": "Thanh loa đen dài vuông vắn chạy ngang ngay bên dưới tivi.",
+    "en": "Long slim squared black soundbar speaker placed directly under the TV."
+  },
+  "category": "other",
+  "tags": [
+    "equipment",
+    "soundbar",
+    "audio",
+    "speaker",
+    "tv",
+    "module",
+    "bedroom"
+  ],
+  "params": {
+    "width": {
+      "type": "number",
+      "min": 60,
+      "max": 150,
+      "default": 100
+    },
+    "height": {
+      "type": "number",
+      "min": 4,
+      "max": 10,
+      "default": 6
+    },
+    "depth": {
+      "type": "number",
+      "min": 6,
+      "max": 15,
+      "default": 8
+    }
+  },
+  "boxes": [
+    {
+      "x": 0,
+      "y": 0,
+      "z": 0,
+      "w": "{{width}}",
+      "h": "{{height}}",
+      "d": "{{depth}}",
+      "faces": {
+        "front": "#2e2e2e",
+        "top": "#1f1f1f",
+        "side": "#1f1f1f",
+        "bottom": "#1f1f1f",
+        "back": "#1f1f1f"
+      }
+    }
+  ]
+}

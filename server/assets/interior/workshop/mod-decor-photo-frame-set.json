@@ -1,0 +1,80 @@
+{
+  "id": "mod-decor-photo-frame-set",
+  "version": 1,
+  "name": {
+    "vi": "Bộ 3 khung ảnh chữ nhật (Module)",
+    "en": "Triptych Photo Frame Set (Module)"
+  },
+  "description": {
+    "vi": "Loạt ba khoanh hình vuông mỏng giăng dọc mép tường làm bộ sưu tập ảnh.",
+    "en": "Assembly of exactly 3 similar slim frames aligned tightly on abstract gallery wall."
+  },
+  "category": "other",
+  "tags": [
+    "accessory",
+    "photo",
+    "frame",
+    "set",
+    "art",
+    "wall",
+    "module"
+  ],
+  "params": {
+    "width": {
+      "type": "number",
+      "min": 60,
+      "max": 150,
+      "default": 100
+    },
+    "height": {
+      "type": "number",
+      "min": 30,
+      "max": 100,
+      "default": 45
+    },
+    "thick": {
+      "type": "number",
+      "min": 1,
+      "max": 5,
+      "default": 2
+    }
+  },
+  "boxes": [
+    {
+      "x": 0,
+      "y": 0,
+      "z": 0,
+      "w": "{{width * 0.3}}",
+      "h": "{{height}}",
+      "d": "{{thick}}",
+      "faces": {
+        "front": "#e8e5dc",
+        "side": "$woodDark"
+      }
+    },
+    {
+      "x": "{{width * 0.35}}",
+      "y": 0,
+      "z": 0,
+      "w": "{{width * 0.3}}",
+      "h": "{{height}}",
+      "d": "{{thick}}",
+      "faces": {
+        "front": "#e8e5dc",
+        "side": "$woodDark"
+      }
+    },
+    {
+      "x": "{{width * 0.7}}",
+      "y": 0,
+      "z": 0,
+      "w": "{{width * 0.3}}",
+      "h": "{{height}}",
+      "d": "{{thick}}",
+      "faces": {
+        "front": "#e8e5dc",
+        "side": "$woodDark"
+      }
+    }
+  ]
+}

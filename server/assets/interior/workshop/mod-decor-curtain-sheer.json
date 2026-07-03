@@ -1,0 +1,57 @@
+{
+  "id": "mod-decor-curtain-sheer",
+  "version": 1,
+  "name": {
+    "vi": "Rèm voan mỏng (Module)",
+    "en": "Sheer Translucent Drape (Module)"
+  },
+  "description": {
+    "vi": "Tấm voan mỏng màu kem nhạt đứng lấp ló đón sáng mờ ảo đầu cửa sổ.",
+    "en": "Light translucent fabric panel standing thin to diffuse incoming sunlight."
+  },
+  "category": "other",
+  "tags": [
+    "accessory",
+    "curtain",
+    "sheer",
+    "voile",
+    "translucent",
+    "window",
+    "module"
+  ],
+  "params": {
+    "width": {
+      "type": "number",
+      "min": 40,
+      "max": 250,
+      "default": 100
+    },
+    "height": {
+      "type": "number",
+      "min": 100,
+      "max": 350,
+      "default": 250
+    },
+    "fold_depth": {
+      "type": "number",
+      "min": 2,
+      "max": 10,
+      "default": 5
+    }
+  },
+  "boxes": [
+    {
+      "x": 0,
+      "y": 0,
+      "z": 0,
+      "w": "{{width}}",
+      "h": "{{height}}",
+      "d": "{{fold_depth}}",
+      "faces": {
+        "front": "#fafafa",
+        "side": "#fafafa",
+        "back": "#fafafa"
+      }
+    }
+  ]
+}

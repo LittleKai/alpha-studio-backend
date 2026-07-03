@@ -1,0 +1,74 @@
+{
+  "id": "mod-table-laptop-stand",
+  "version": 1,
+  "name": {
+    "vi": "Giá tản nhiệt kê Laptop (Module)",
+    "en": "Laptop Riser Stand (Module)"
+  },
+  "description": {
+    "vi": "Tấm giá viền nhôm nghiêng lên giúp gác laptop làm việc trên bàn hoặc trên giường.",
+    "en": "Sleek tilted aluminum structure lifting a laptop keyboard to an ergonomic viewing angle."
+  },
+  "category": "other",
+  "tags": [
+    "accessory",
+    "laptop",
+    "stand",
+    "riser",
+    "desk",
+    "module"
+  ],
+  "params": {
+    "width": {
+      "type": "number",
+      "min": 25,
+      "max": 40,
+      "default": 32
+    },
+    "depth": {
+      "type": "number",
+      "min": 20,
+      "max": 35,
+      "default": 25
+    }
+  },
+  "boxes": [
+    {
+      "x": 0,
+      "y": 10,
+      "z": 0,
+      "w": "{{width}}",
+      "h": 1,
+      "d": "{{depth}}",
+      "faces": {
+        "front": "$metal",
+        "top": "$metal",
+        "side": "$metal"
+      }
+    },
+    {
+      "x": 2,
+      "y": 0,
+      "z": "{{depth - 2}}",
+      "w": 3,
+      "h": 10,
+      "d": 2,
+      "faces": {
+        "front": "$metal",
+        "side": "$metal"
+      }
+    },
+    {
+      "x": "{{width - 5}}",
+      "y": 0,
+      "z": "{{depth - 2}}",
+      "w": 3,
+      "h": 10,
+      "d": 2,
+      "faces": {
+        "front": "$metal",
+        "side": "$metal"
+      }
+    }
+  ]
+}

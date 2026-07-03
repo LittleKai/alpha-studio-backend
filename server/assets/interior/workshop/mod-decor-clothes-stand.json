@@ -1,0 +1,86 @@
+{
+  "id": "mod-decor-clothes-stand",
+  "version": 1,
+  "name": {
+    "vi": "Cây treo quần áo nhánh gỗ (Module)",
+    "en": "Branched Clothes Stand Rack (Module)"
+  },
+  "description": {
+    "vi": "Cây dẻo thân đứng mọc nhiều cành túa ra chuyên treo mũ, nón, áo khoác góc phòng.",
+    "en": "Vertical free-standing pole sprouting multiple angle branches for hanging coats and hats."
+  },
+  "category": "other",
+  "tags": [
+    "accessory",
+    "coat",
+    "rack",
+    "clothes",
+    "stand",
+    "wood",
+    "module"
+  ],
+  "params": {
+    "radius": {
+      "type": "number",
+      "min": 1,
+      "max": 5,
+      "default": 2.5
+    },
+    "height": {
+      "type": "number",
+      "min": 140,
+      "max": 200,
+      "default": 175
+    }
+  },
+  "boxes": [
+    {
+      "type": "cylinder",
+      "x": 0,
+      "y": 0,
+      "z": 0,
+      "radius": "{{radius * 4}}",
+      "length": 5,
+      "axis": "y",
+      "faces": {
+        "top": "$woodDark"
+      }
+    },
+    {
+      "type": "cylinder",
+      "x": 0,
+      "y": 0,
+      "z": 0,
+      "radius": "{{radius}}",
+      "length": "{{height}}",
+      "axis": "y",
+      "faces": {
+        "side": "$woodDark"
+      }
+    },
+    {
+      "type": "cylinder",
+      "x": "{{radius}}",
+      "y": "{{height * 0.7}}",
+      "z": 0,
+      "radius": 1,
+      "length": 15,
+      "axis": "x",
+      "faces": {
+        "side": "$woodDark"
+      }
+    },
+    {
+      "type": "cylinder",
+      "x": "{{0 - (radius + 15)}}",
+      "y": "{{height * 0.6}}",
+      "z": 0,
+      "radius": 1,
+      "length": 15,
+      "axis": "x",
+      "faces": {
+        "side": "$woodDark"
+      }
+    }
+  ]
+}

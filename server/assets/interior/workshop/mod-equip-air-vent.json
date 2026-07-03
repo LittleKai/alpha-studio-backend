@@ -1,0 +1,72 @@
+{
+  "id": "mod-equip-air-vent",
+  "version": 1,
+  "name": {
+    "vi": "Miệng gió điều hòa giấu trần (Module)",
+    "en": "Ducted AC Ceiling Vent (Module)"
+  },
+  "description": {
+    "vi": "Khuôn nhựa khe lá lách thổi khí lạnh từ máy âm trần cắm thẳng lên trần nhà.",
+    "en": "Louvered plastic slot flushing with the ceiling blasting cold ducted air."
+  },
+  "category": "other",
+  "tags": [
+    "equipment",
+    "ac",
+    "vent",
+    "aircon",
+    "ducted",
+    "ceiling",
+    "module"
+  ],
+  "params": {
+    "width": {
+      "type": "number",
+      "min": 40,
+      "max": 150,
+      "default": 100
+    },
+    "depth": {
+      "type": "number",
+      "min": 10,
+      "max": 40,
+      "default": 20
+    }
+  },
+  "boxes": [
+    {
+      "x": 0,
+      "y": 0,
+      "z": 0,
+      "w": "{{width}}",
+      "h": 2,
+      "d": "{{depth}}",
+      "faces": {
+        "bottom": "#212121",
+        "side": "#4d4d4d"
+      }
+    },
+    {
+      "x": 2,
+      "y": -0.5,
+      "z": 2,
+      "w": "{{width - 4}}",
+      "h": 0.5,
+      "d": 2,
+      "faces": {
+        "bottom": "#ffffff"
+      }
+    },
+    {
+      "x": 2,
+      "y": -0.5,
+      "z": "{{depth - 4}}",
+      "w": "{{width - 4}}",
+      "h": 0.5,
+      "d": 2,
+      "faces": {
+        "bottom": "#ffffff"
+      }
+    }
+  ]
+}

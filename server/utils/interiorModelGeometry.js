@@ -130,15 +130,17 @@ function resolveRunCoord(run, moduleIndex, item) {
     const localZ = finiteNumber(current.z) ?? 0;
     const originX = finiteNumber(origin.x) ?? 0;
     const originZ = finiteNumber(origin.z) ?? 0;
-    const alongAxisKey = direction === 'north' || direction === 'south' ? 'z' : 'x';
-    const hasExplicitAlong = modules.some((module) => Number.isFinite(module?.[alongAxisKey]) && module[alongAxisKey] > 0);
-    const offset = hasExplicitAlong
+    // Mirrors engine model.js resolveRunCoord: `x` is the position ALONG the
+    // run axis for every direction, `z` is the perpendicular depth offset from
+    // the run's wall line. Auto-offset by module order when no explicit x.
+    const hasExplicitAlong = modules.some((module) => Number.isFinite(module?.x) && module.x > 0);
+    const along = (hasExplicitAlong
         ? 0
-        : modules.slice(0, moduleIndex).reduce((sum, module) => sum + (positiveNumber(module?.width) || 0), 0);
-    if (direction === 'north') return { x: originX + localX, y: localY, z: originZ - offset + localZ, _runDirection: direction };
-    if (direction === 'west') return { x: originX - offset + localX, y: localY, z: originZ + localZ, _runDirection: direction };
-    if (direction === 'south') return { x: originX + localX, y: localY, z: originZ + offset + localZ, _runDirection: direction };
-    return { x: originX + offset + localX, y: localY, z: originZ + localZ, _runDirection: direction };
+        : modules.slice(0, moduleIndex).reduce((sum, module) => sum + (positiveNumber(module?.width) || 0), 0)) + localX;
+    if (direction === 'north') return { x: originX + localZ, y: localY, z: originZ - along, _runDirection: direction };
+    if (direction === 'west') return { x: originX - along, y: localY, z: originZ + localZ, _runDirection: direction };
+    if (direction === 'south') return { x: originX + localZ, y: localY, z: originZ + along, _runDirection: direction };
+    return { x: originX + along, y: localY, z: originZ + localZ, _runDirection: direction };
 }
 
 function itemFootprint(item) {
@@ -229,12 +231,23 @@ export function validateInteriorGeometry(model, options = {}) {
     const modelDepth = positiveNumber(model?.depth);
     if (modelWidth == null || modelHeight == null || modelDepth == null) return warnings;
 
-    allModuleLists(model).forEach((list) => {
+    // For L/U/multi-wall layouts a single run legitimately covers only part of
+    // the model span (the corner block belongs to the other run), so undershoot
+    // is only reported for single-run / legacy straight layouts.
+    const lists = allModuleLists(model);
+    const multiRun = lists.length > 1;
+
+    lists.forEach((list) => {
         const items = preparedRunItems(list);
         const intervals = items.map((item) => item.axis);
         const occupiedLength = unionLength(intervals);
-        if (occupiedLength != null && list.expectedLength != null && Math.abs(occupiedLength - list.expectedLength) > tolerance) {
-            warnings.push(`Geometry: ${list.id} occupied length is ${occupiedLength}cm, expected ${list.expectedLength}cm (diff ${Math.abs(occupiedLength - list.expectedLength)}cm).`);
+        if (occupiedLength != null && list.expectedLength != null) {
+            const diff = occupiedLength - list.expectedLength;
+            if (diff > tolerance) {
+                warnings.push(`Geometry: ${list.id} occupied length is ${occupiedLength}cm, exceeding expected ${list.expectedLength}cm (diff ${Math.round(diff)}cm).`);
+            } else if (!multiRun && Math.abs(diff) > tolerance) {
+                warnings.push(`Geometry: ${list.id} occupied length is ${occupiedLength}cm, expected ${list.expectedLength}cm (diff ${Math.round(Math.abs(diff))}cm).`);
+            }
         }
 
         items.forEach((item) => {

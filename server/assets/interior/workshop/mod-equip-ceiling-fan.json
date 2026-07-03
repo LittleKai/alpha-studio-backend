@@ -1,0 +1,78 @@
+{
+  "id": "mod-equip-ceiling-fan",
+  "version": 1,
+  "name": {
+    "vi": "Quạt trần đèn LED mâm (Module)",
+    "en": "Ceiling Fan with LED (Module)"
+  },
+  "description": {
+    "vi": "Trục gắn quạt trần kèm cánh mỏng ốp sát trần, tích hợp mâm đèn LED tròn ở tâm.",
+    "en": "Ceiling fan module with thin blades and an integrated central LED light pod."
+  },
+  "category": "other",
+  "tags": [
+    "equipment",
+    "fan",
+    "ceiling",
+    "light",
+    "appliance",
+    "bedroom",
+    "module"
+  ],
+  "params": {
+    "radius": {
+      "type": "number",
+      "min": 50,
+      "max": 80,
+      "default": 60
+    },
+    "drop": {
+      "type": "number",
+      "min": 15,
+      "max": 50,
+      "default": 30
+    }
+  },
+  "boxes": [
+    {
+      "type": "cylinder",
+      "x": 0,
+      "y": "{{drop - 5}}",
+      "z": 0,
+      "radius": 5,
+      "length": 5,
+      "axis": "y",
+      "faces": {
+        "side": "$metal",
+        "bottom": "#ffffff"
+      }
+    },
+    {
+      "type": "cylinder",
+      "x": 0,
+      "y": 0,
+      "z": 0,
+      "radius": 1,
+      "length": "{{drop - 5}}",
+      "axis": "y",
+      "faces": {
+        "side": "$metal"
+      }
+    },
+    {
+      "x": "{{0 - (radius)}}",
+      "y": "{{drop - 3}}",
+      "z": "-5",
+      "w": "{{radius * 2}}",
+      "h": 1,
+      "d": 10,
+      "faces": {
+        "top": "$woodDark",
+        "bottom": "$woodDark",
+        "side": "$woodDark",
+        "front": "$woodDark",
+        "back": "$woodDark"
+      }
+    }
+  ]
+}

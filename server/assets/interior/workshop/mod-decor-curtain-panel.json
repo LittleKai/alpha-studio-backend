@@ -1,0 +1,57 @@
+{
+  "id": "mod-decor-curtain-panel",
+  "version": 1,
+  "name": {
+    "vi": "Rèm vải thả dọc (Module)",
+    "en": "Vertical Curtain Panel (Module)"
+  },
+  "description": {
+    "vi": "Một mảng rèm vắt thẳng đứng mềm đổ nếp dọc cạnh cửa sổ.",
+    "en": "Single long hanging fabric drape panel module dropping rigid vertical folds."
+  },
+  "category": "other",
+  "tags": [
+    "accessory",
+    "curtain",
+    "drape",
+    "fabric",
+    "window",
+    "bedroom",
+    "module"
+  ],
+  "params": {
+    "width": {
+      "type": "number",
+      "min": 40,
+      "max": 200,
+      "default": 80
+    },
+    "height": {
+      "type": "number",
+      "min": 100,
+      "max": 350,
+      "default": 250
+    },
+    "fold_depth": {
+      "type": "number",
+      "min": 5,
+      "max": 20,
+      "default": 10
+    }
+  },
+  "boxes": [
+    {
+      "x": 0,
+      "y": 0,
+      "z": 0,
+      "w": "{{width}}",
+      "h": "{{height}}",
+      "d": "{{fold_depth}}",
+      "faces": {
+        "front": "#e3e3e3",
+        "side": "#cfcfcf",
+        "back": "#e3e3e3"
+      }
+    }
+  ]
+}

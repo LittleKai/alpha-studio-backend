@@ -1,0 +1,81 @@
+{
+  "id": "mod-decor-lamp-standing",
+  "version": 1,
+  "name": {
+    "vi": "Đèn cây đứng (Module)",
+    "en": "Floor Standing Lamp (Module)"
+  },
+  "description": {
+    "vi": "Đèn sàn dài dọc cao góc phòng phục vụ chức năng hắt trần thả ánh sáng mềm.",
+    "en": "Tall floor standing lamp casting soft light onto the ceiling from room corners."
+  },
+  "category": "other",
+  "tags": [
+    "accessory",
+    "lamp",
+    "light",
+    "floor",
+    "standing",
+    "module"
+  ],
+  "params": {
+    "radius": {
+      "type": "number",
+      "min": 10,
+      "max": 25,
+      "default": 18
+    },
+    "height": {
+      "type": "number",
+      "min": 120,
+      "max": 180,
+      "default": 150
+    },
+    "shade_h": {
+      "type": "number",
+      "min": 20,
+      "max": 40,
+      "default": 30
+    }
+  },
+  "boxes": [
+    {
+      "type": "cylinder",
+      "x": 0,
+      "y": 0,
+      "z": 0,
+      "radius": 1,
+      "length": "{{height - shade_h}}",
+      "axis": "y",
+      "faces": {
+        "side": "$metal"
+      }
+    },
+    {
+      "type": "cylinder",
+      "x": 0,
+      "y": 0,
+      "z": 0,
+      "radius": "{{radius}}",
+      "length": 2,
+      "axis": "y",
+      "faces": {
+        "side": "$metal"
+      }
+    },
+    {
+      "type": "cylinder",
+      "x": 0,
+      "y": "{{height - shade_h}}",
+      "z": 0,
+      "radius": "{{radius}}",
+      "length": "{{shade_h}}",
+      "axis": "y",
+      "faces": {
+        "side": "#f5f3e6",
+        "top": "#ffffff",
+        "bottom": "#ffffff"
+      }
+    }
+  ]
+}

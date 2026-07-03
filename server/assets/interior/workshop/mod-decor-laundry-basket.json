@@ -1,0 +1,51 @@
+{
+  "id": "mod-decor-laundry-basket",
+  "version": 1,
+  "name": {
+    "vi": "Sọt quần áo góc (Module)",
+    "en": "Laundry Hamper Basket (Module)"
+  },
+  "description": {
+    "vi": "Dạng túi hay lồng vải bọc trụ đứng đựng đồ bẩn vứt ra mỗi ngày khu góc phòng.",
+    "en": "Tall round fabric canvas hamper standing vertical awaiting dirty clothes."
+  },
+  "category": "other",
+  "tags": [
+    "accessory",
+    "laundry",
+    "basket",
+    "hamper",
+    "fabric",
+    "room",
+    "module"
+  ],
+  "params": {
+    "radius": {
+      "type": "number",
+      "min": 15,
+      "max": 25,
+      "default": 20
+    },
+    "height": {
+      "type": "number",
+      "min": 40,
+      "max": 70,
+      "default": 60
+    }
+  },
+  "boxes": [
+    {
+      "type": "cylinder",
+      "x": 0,
+      "y": 0,
+      "z": 0,
+      "radius": "{{radius}}",
+      "length": "{{height}}",
+      "axis": "y",
+      "faces": {
+        "side": "#dbddcc",
+        "top": "#b3b4a6"
+      }
+    }
+  ]
+}

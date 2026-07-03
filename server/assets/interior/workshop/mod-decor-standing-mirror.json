@@ -1,0 +1,101 @@
+{
+  "id": "mod-decor-standing-mirror",
+  "version": 1,
+  "name": {
+    "vi": "Gương đứng viền gỗ (Module)",
+    "en": "Standing Wood Frame Mirror (Module)"
+  },
+  "description": {
+    "vi": "Tấm gương chữ nhật dài soi toàn thân, bo viền gỗ tự nhiên, dựa vào góc tường.",
+    "en": "Tall rectangular full-body mirror framed in warm wood, leaning against the wall."
+  },
+  "category": "other",
+  "tags": [
+    "accessory",
+    "mirror",
+    "standing",
+    "wood",
+    "frame",
+    "bedroom",
+    "module"
+  ],
+  "params": {
+    "width": {
+      "type": "number",
+      "min": 40,
+      "max": 100,
+      "default": 60
+    },
+    "height": {
+      "type": "number",
+      "min": 140,
+      "max": 200,
+      "default": 170
+    },
+    "thick": {
+      "type": "number",
+      "min": 2,
+      "max": 5,
+      "default": 3
+    }
+  },
+  "boxes": [
+    {
+      "x": 0,
+      "y": 0,
+      "z": 0,
+      "w": 4,
+      "h": "{{height}}",
+      "d": "{{thick}}",
+      "faces": {
+        "front": "$wood",
+        "side": "$wood"
+      }
+    },
+    {
+      "x": "{{width - 4}}",
+      "y": 0,
+      "z": 0,
+      "w": 4,
+      "h": "{{height}}",
+      "d": "{{thick}}",
+      "faces": {
+        "front": "$wood",
+        "side": "$wood"
+      }
+    },
+    {
+      "x": 4,
+      "y": 0,
+      "z": 0,
+      "w": "{{width - 8}}",
+      "h": 4,
+      "d": "{{thick}}",
+      "faces": {
+        "front": "$wood"
+      }
+    },
+    {
+      "x": 4,
+      "y": "{{height - 4}}",
+      "z": 0,
+      "w": "{{width - 8}}",
+      "h": 4,
+      "d": "{{thick}}",
+      "faces": {
+        "front": "$wood"
+      }
+    },
+    {
+      "x": 4,
+      "y": 4,
+      "z": "{{thick / 2}}",
+      "w": "{{width - 8}}",
+      "h": "{{height - 8}}",
+      "d": 0.5,
+      "faces": {
+        "front": "#c1e3eb"
+      }
+    }
+  ]
+}

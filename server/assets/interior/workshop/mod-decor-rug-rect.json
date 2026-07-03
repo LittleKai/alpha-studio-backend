@@ -1,0 +1,50 @@
+{
+  "id": "mod-decor-rug-rect",
+  "version": 1,
+  "name": {
+    "vi": "Thảm chữ nhật dệt (Module)",
+    "en": "Rectangular Woven Rug (Module)"
+  },
+  "description": {
+    "vi": "Tấm thảm mềm trải sàn diện tích lớn, chuyên dùng mồi đặt gầm giường chữ nhật.",
+    "en": "Large area soft woven floor rug rectangular patch placed directly under a bed."
+  },
+  "category": "other",
+  "tags": [
+    "accessory",
+    "rug",
+    "carpet",
+    "floor",
+    "fabric",
+    "bedroom",
+    "module"
+  ],
+  "params": {
+    "width": {
+      "type": "number",
+      "min": 100,
+      "max": 300,
+      "default": 200
+    },
+    "depth": {
+      "type": "number",
+      "min": 150,
+      "max": 400,
+      "default": 280
+    }
+  },
+  "boxes": [
+    {
+      "x": 0,
+      "y": 0,
+      "z": 0,
+      "w": "{{width}}",
+      "h": 0.5,
+      "d": "{{depth}}",
+      "faces": {
+        "top": "#d9cebd",
+        "side": "#baa78a"
+      }
+    }
+  ]
+}

@@ -7,8 +7,17 @@ import { extractDsl, validateTemplateStructure } from './templateValidator.js';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-export const BUILTIN_TEMPLATE_DIR = path.resolve(__dirname, '../../../tools/interior-design-engine/src/templates');
-export const WORKSHOP_COMPONENT_DIR = path.resolve(__dirname, '../../../tools/interior-component-workshop/components');
+// Primary: monorepo tools/ folders (local dev source of truth).
+// Fallback: server/assets/interior/* copies bundled into the Docker image by
+// scripts/sync-interior-assets.mjs — the tools/ folders do not exist on Fly.
+export const BUILTIN_TEMPLATE_DIR_CANDIDATES = [
+    path.resolve(__dirname, '../../../tools/interior-design-engine/src/templates'),
+    path.resolve(__dirname, '../assets/interior/templates')
+];
+export const WORKSHOP_COMPONENT_DIR_CANDIDATES = [
+    path.resolve(__dirname, '../../../tools/interior-component-workshop/components'),
+    path.resolve(__dirname, '../assets/interior/workshop')
+];
 
 const TOKEN_ALIASES = new Map([
     ['$wood', '$woodFront'],
@@ -22,6 +31,13 @@ async function pathExists(target) {
     } catch {
         return false;
     }
+}
+
+async function firstExistingDir(candidates) {
+    for (const candidate of candidates) {
+        if (await pathExists(candidate)) return candidate;
+    }
+    return null;
 }
 
 async function readJson(filePath) {
@@ -120,9 +136,10 @@ async function upsertTemplate(raw, { status, authorId = null, sourceProjectId = 
     return { ok: true, id: template.id, version: template.version, status };
 }
 
-export async function seedBuiltinInteriorTemplates({ sourceDir = BUILTIN_TEMPLATE_DIR, logger = console } = {}) {
-    if (!await pathExists(sourceDir)) {
-        logger.warn?.(`[interior:seed] built-in template dir missing, skipped: ${sourceDir}`);
+export async function seedBuiltinInteriorTemplates({ sourceDir, logger = console } = {}) {
+    sourceDir ||= await firstExistingDir(BUILTIN_TEMPLATE_DIR_CANDIDATES);
+    if (!sourceDir || !await pathExists(sourceDir)) {
+        logger.warn?.(`[interior:seed] built-in template dir missing, skipped. Candidates: ${BUILTIN_TEMPLATE_DIR_CANDIDATES.join(' | ')}`);
         return { processed: 0, skipped: true };
     }
     const manifest = await readJson(path.join(sourceDir, 'manifest.json'));
@@ -141,9 +158,10 @@ export async function seedBuiltinInteriorTemplates({ sourceDir = BUILTIN_TEMPLAT
     return { processed, rejected };
 }
 
-export async function seedWorkshopInteriorTemplates({ sourceDir = WORKSHOP_COMPONENT_DIR, logger = console } = {}) {
-    if (!await pathExists(sourceDir)) {
-        logger.warn?.(`[interior:seed] workshop component dir missing, skipped: ${sourceDir}`);
+export async function seedWorkshopInteriorTemplates({ sourceDir, logger = console } = {}) {
+    sourceDir ||= await firstExistingDir(WORKSHOP_COMPONENT_DIR_CANDIDATES);
+    if (!sourceDir || !await pathExists(sourceDir)) {
+        logger.warn?.(`[interior:seed] workshop component dir missing, skipped. Candidates: ${WORKSHOP_COMPONENT_DIR_CANDIDATES.join(' | ')}`);
         return { processed: 0, skipped: true };
     }
     const files = (await fs.readdir(sourceDir))

@@ -1,0 +1,52 @@
+{
+  "id": "mod-equip-air-purifier",
+  "version": 1,
+  "name": {
+    "vi": "Máy lọc không khí trụ tròn (Module)",
+    "en": "Cylindrical Air Purifier (Module)"
+  },
+  "description": {
+    "vi": "Thiết bị lọc khí hình trụ tròn đặt góc phòng ngủ, hút gió 360 độ.",
+    "en": "Round cylindrical air purifier appliance module placed in the corner of a bedroom."
+  },
+  "category": "other",
+  "tags": [
+    "equipment",
+    "appliance",
+    "purifier",
+    "air",
+    "cylinder",
+    "bedroom",
+    "module"
+  ],
+  "params": {
+    "radius": {
+      "type": "number",
+      "min": 10,
+      "max": 25,
+      "default": 15
+    },
+    "height": {
+      "type": "number",
+      "min": 40,
+      "max": 90,
+      "default": 60
+    }
+  },
+  "boxes": [
+    {
+      "type": "cylinder",
+      "x": 0,
+      "y": 0,
+      "z": 0,
+      "radius": "{{radius}}",
+      "length": "{{height}}",
+      "axis": "y",
+      "faces": {
+        "side": "#f5f5f5",
+        "top": "#333333",
+        "bottom": "#f5f5f5"
+      }
+    }
+  ]
+}

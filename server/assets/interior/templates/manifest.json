@@ -1,0 +1,18 @@
+{
+  "templates": [
+    "upper-2door.json",
+    "upper-glass-2door.json",
+    "sliding-2door.json",
+    "sliding-3door.json",
+    "ac-recess-fold.json",
+    "open-bookshelf.json",
+    "l-desk-return.json",
+    "base-cabinet-2door.json",
+    "base-drawer-stack.json",
+    "wall-cabinet-2door.json",
+    "tall-cabinet.json",
+    "corner-cabinet.json",
+    "sink-base.json",
+    "cab-base-rounded-end.json"
+  ]
+}

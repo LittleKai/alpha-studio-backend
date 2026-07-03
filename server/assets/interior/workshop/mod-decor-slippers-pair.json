@@ -1,0 +1,64 @@
+{
+  "id": "mod-decor-slippers-pair",
+  "version": 1,
+  "name": {
+    "vi": "Đôi dép bông nhà (Module)",
+    "en": "Pair of Soft Slippers (Module)"
+  },
+  "description": {
+    "vi": "Hai chiếc dẹt cong cong mô phỏng đôi dép bông mềm đi rảo quanh chốn phòng ngủ.",
+    "en": "Two slight low oval slabs mimicking padded indoor hotel slippers."
+  },
+  "category": "other",
+  "tags": [
+    "accessory",
+    "slippers",
+    "shoes",
+    "floor",
+    "fabric",
+    "bedroom",
+    "module"
+  ],
+  "params": {
+    "width": {
+      "type": "number",
+      "min": 18,
+      "max": 30,
+      "default": 25
+    },
+    "depth": {
+      "type": "number",
+      "min": 20,
+      "max": 35,
+      "default": 28
+    }
+  },
+  "boxes": [
+    {
+      "x": 0,
+      "y": 0,
+      "z": 0,
+      "w": "{{width * 0.4}}",
+      "h": 2,
+      "d": "{{depth}}",
+      "faces": {
+        "top": "#ffffff",
+        "front": "#ffffff",
+        "side": "#ffffff"
+      }
+    },
+    {
+      "x": "{{width * 0.6}}",
+      "y": 0,
+      "z": 0,
+      "w": "{{width * 0.4}}",
+      "h": 2,
+      "d": "{{depth}}",
+      "faces": {
+        "top": "#ffffff",
+        "front": "#ffffff",
+        "side": "#ffffff"
+      }
+    }
+  ]
+}

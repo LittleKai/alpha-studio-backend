@@ -1,0 +1,71 @@
+{
+  "id": "mod-equip-ac-split",
+  "version": 1,
+  "name": {
+    "vi": "Cục lạnh máy lạnh ghép tường (Module)",
+    "en": "Split AC Wall Unit (Module)"
+  },
+  "description": {
+    "vi": "Khối máy điều hòa cục lạnh gắn sát góc tường phía cao trần.",
+    "en": "White oblong air conditioner functional split cooling unit box hugging the high wall."
+  },
+  "category": "other",
+  "tags": [
+    "equipment",
+    "ac",
+    "aircon",
+    "conditioner",
+    "appliance",
+    "wall",
+    "bedroom",
+    "module"
+  ],
+  "params": {
+    "width": {
+      "type": "number",
+      "min": 60,
+      "max": 120,
+      "default": 85
+    },
+    "height": {
+      "type": "number",
+      "min": 20,
+      "max": 40,
+      "default": 30
+    },
+    "depth": {
+      "type": "number",
+      "min": 15,
+      "max": 35,
+      "default": 22
+    }
+  },
+  "boxes": [
+    {
+      "x": 0,
+      "y": 0,
+      "z": 0,
+      "w": "{{width}}",
+      "h": "{{height}}",
+      "d": "{{depth}}",
+      "faces": {
+        "front": "#f2f2f2",
+        "top": "#f2f2f2",
+        "side": "#f2f2f2",
+        "bottom": "#e6e6e6",
+        "back": "#cccccc"
+      }
+    },
+    {
+      "x": 2,
+      "y": 2,
+      "z": "-1",
+      "w": "{{width - 4}}",
+      "h": "{{height / 4}}",
+      "d": 1,
+      "faces": {
+        "front": "#000000"
+      }
+    }
+  ]
+}

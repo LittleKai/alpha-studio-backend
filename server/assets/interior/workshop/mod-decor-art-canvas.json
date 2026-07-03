@@ -1,0 +1,58 @@
+{
+  "id": "mod-decor-art-canvas",
+  "version": 1,
+  "name": {
+    "vi": "Tranh Canvas dẹt (Module)",
+    "en": "Flat Canvas Art (Module)"
+  },
+  "description": {
+    "vi": "Module tranh trí chữ nhật dẹt treo tường, viền cực mỏng mảnh đen.",
+    "en": "Slim rectangular canvas art hanging module with minimal black edge frame."
+  },
+  "category": "other",
+  "tags": [
+    "accessory",
+    "art",
+    "canvas",
+    "painting",
+    "wall",
+    "bedroom",
+    "module"
+  ],
+  "params": {
+    "width": {
+      "type": "number",
+      "min": 30,
+      "max": 200,
+      "default": 100
+    },
+    "height": {
+      "type": "number",
+      "min": 30,
+      "max": 200,
+      "default": 80
+    },
+    "thick": {
+      "type": "number",
+      "min": 1,
+      "max": 5,
+      "default": 2
+    }
+  },
+  "boxes": [
+    {
+      "x": 0,
+      "y": 0,
+      "z": 0,
+      "w": "{{width}}",
+      "h": "{{height}}",
+      "d": "{{thick}}",
+      "faces": {
+        "front": "#ebebeb",
+        "side": "#1a1a1a",
+        "top": "#1a1a1a",
+        "bottom": "#1a1a1a"
+      }
+    }
+  ]
+}

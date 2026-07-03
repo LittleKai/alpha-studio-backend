@@ -1,0 +1,70 @@
+{
+  "id": "mod-decor-lamp-bedside",
+  "version": 1,
+  "name": {
+    "vi": "Đèn ngủ chao vải (Module)",
+    "en": "Fabric Shade Bedside Lamp (Module)"
+  },
+  "description": {
+    "vi": "Bộ phận trụ chóp nón cụt chao đèn vải sáng ấm chân nấm.",
+    "en": "Truncated cone fabric lampshade on a stem stand serving as a nightstand lamp."
+  },
+  "category": "other",
+  "tags": [
+    "accessory",
+    "lamp",
+    "bedside",
+    "light",
+    "shade",
+    "nightstand",
+    "module"
+  ],
+  "params": {
+    "radius": {
+      "type": "number",
+      "min": 8,
+      "max": 20,
+      "default": 12
+    },
+    "height": {
+      "type": "number",
+      "min": 25,
+      "max": 60,
+      "default": 45
+    },
+    "shade_h": {
+      "type": "number",
+      "min": 10,
+      "max": 30,
+      "default": 18
+    }
+  },
+  "boxes": [
+    {
+      "type": "cylinder",
+      "x": 0,
+      "y": 0,
+      "z": 0,
+      "radius": 1.5,
+      "length": "{{height - shade_h}}",
+      "axis": "y",
+      "faces": {
+        "side": "$metal"
+      }
+    },
+    {
+      "type": "cylinder",
+      "x": 0,
+      "y": "{{height - shade_h}}",
+      "z": 0,
+      "radius": "{{radius}}",
+      "length": "{{shade_h}}",
+      "axis": "y",
+      "faces": {
+        "side": "#fff2cc",
+        "top": "#ffffff",
+        "bottom": "#ffffff"
+      }
+    }
+  ]
+}

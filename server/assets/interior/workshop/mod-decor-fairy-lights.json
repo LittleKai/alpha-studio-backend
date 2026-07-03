@@ -1,0 +1,96 @@
+{
+  "id": "mod-decor-fairy-lights",
+  "version": 1,
+  "name": {
+    "vi": "Dây đèn đom đóm LED (Module)",
+    "en": "LED Fairy Lights String (Module)"
+  },
+  "description": {
+    "vi": "Sợi dây căng đính hàng loạt bóng LED siêu nhỏ vàng rực để bao quanh khung giường hoặc cửa sổ.",
+    "en": "Tension wire dotted with tiny bright yellow LEDs glowing softly across frames."
+  },
+  "category": "other",
+  "tags": [
+    "accessory",
+    "fairy",
+    "lights",
+    "led",
+    "string",
+    "decor",
+    "module"
+  ],
+  "params": {
+    "length": {
+      "type": "number",
+      "min": 100,
+      "max": 500,
+      "default": 300
+    }
+  },
+  "boxes": [
+    {
+      "type": "cylinder",
+      "x": 0,
+      "y": 0,
+      "z": 0,
+      "radius": 0.2,
+      "length": "{{length}}",
+      "axis": "x",
+      "faces": {
+        "side": "#404040"
+      }
+    },
+    {
+      "x": "{{length * 0.2}}",
+      "y": -1,
+      "z": -1,
+      "w": 3,
+      "h": 3,
+      "d": 3,
+      "faces": {
+        "front": "#ffff00",
+        "top": "#ffff00",
+        "side": "#ffff00"
+      }
+    },
+    {
+      "x": "{{length * 0.4}}",
+      "y": -1,
+      "z": -1,
+      "w": 3,
+      "h": 3,
+      "d": 3,
+      "faces": {
+        "front": "#ffff00",
+        "top": "#ffff00",
+        "side": "#ffff00"
+      }
+    },
+    {
+      "x": "{{length * 0.6}}",
+      "y": -1,
+      "z": -1,
+      "w": 3,
+      "h": 3,
+      "d": 3,
+      "faces": {
+        "front": "#ffff00",
+        "top": "#ffff00",
+        "side": "#ffff00"
+      }
+    },
+    {
+      "x": "{{length * 0.8}}",
+      "y": -1,
+      "z": -1,
+      "w": 3,
+      "h": 3,
+      "d": 3,
+      "faces": {
+        "front": "#ffff00",
+        "top": "#ffff00",
+        "side": "#ffff00"
+      }
+    }
+  ]
+}

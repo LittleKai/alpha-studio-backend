@@ -1,0 +1,57 @@
+{
+  "id": "mod-equip-socket-switch",
+  "version": 1,
+  "name": {
+    "vi": "Cụm ổ cắm và công tắc (Module)",
+    "en": "Electrical Switch & Socket (Module)"
+  },
+  "description": {
+    "vi": "Tấm mặt nạ nhựa âm tường có chứa công tắc tắt mở đèn và 2 lỗ cắm điện.",
+    "en": "Wall-mounted plastic faceplate encasing a toggle switch and plug sockets."
+  },
+  "category": "other",
+  "tags": [
+    "equipment",
+    "socket",
+    "switch",
+    "electrical",
+    "wall",
+    "module"
+  ],
+  "params": {},
+  "boxes": [
+    {
+      "x": 0,
+      "y": 0,
+      "z": 0,
+      "w": 12,
+      "h": 8,
+      "d": 1,
+      "faces": {
+        "front": "#fcfcfc"
+      }
+    },
+    {
+      "x": 2,
+      "y": 2,
+      "z": 1,
+      "w": 2,
+      "h": 4,
+      "d": 0.5,
+      "faces": {
+        "front": "#e0e0e0"
+      }
+    },
+    {
+      "x": 6,
+      "y": 3,
+      "z": 1,
+      "w": 4,
+      "h": 2,
+      "d": 0.5,
+      "faces": {
+        "front": "#1a1a1a"
+      }
+    }
+  ]
+}

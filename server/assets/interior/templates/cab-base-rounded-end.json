@@ -1,0 +1,166 @@
+{
+  "id": "cab-base-rounded-end",
+  "version": 1,
+  "category": "base-cabinet",
+  "tags": [
+    "kitchen",
+    "base",
+    "rounded",
+    "end",
+    "corner"
+  ],
+  "description": {
+    "vi": "Tu bep duoi bo dau tron",
+    "en": "Rounded end kitchen base cabinet"
+  },
+  "params": {
+    "width": {
+      "type": "number",
+      "min": 35,
+      "max": 80,
+      "default": 50
+    },
+    "height": {
+      "type": "number",
+      "min": 80,
+      "max": 95,
+      "default": 86
+    },
+    "depth": {
+      "type": "number",
+      "min": 55,
+      "max": 70,
+      "default": 60
+    },
+    "radius": {
+      "type": "number",
+      "min": 4,
+      "max": 20,
+      "default": 12
+    }
+  },
+  "style": {
+    "hand": {
+      "values": [
+        "left",
+        "right"
+      ],
+      "default": "right"
+    }
+  },
+  "boxes": [
+    {
+      "x": 0,
+      "y": "{{height - 4}}",
+      "z": 0,
+      "w": "{{width}}",
+      "h": 4,
+      "d": "{{depth}}",
+      "faces": {
+        "top": "$stone",
+        "front": "$stone",
+        "right": "$stone",
+        "left": "$stone"
+      }
+    },
+    {
+      "x": 3,
+      "y": 0,
+      "z": 3,
+      "w": "{{width - 6}}",
+      "h": 8,
+      "d": "{{depth - 6}}",
+      "faces": {
+        "top": "$woodDark",
+        "front": "$woodDark",
+        "right": "$woodDark",
+        "left": "$woodDark"
+      }
+    },
+    {
+      "type": "roundedBox",
+      "x": 0,
+      "y": 0,
+      "z": 0,
+      "w": "{{width}}",
+      "h": "{{height}}",
+      "d": "{{depth}}",
+      "radius": "{{radius}}",
+      "faces": {
+        "top": "$woodTop",
+        "front": "$woodFront",
+        "right": "$woodSide",
+        "left": "$woodDark",
+        "back": "$woodBack"
+      }
+    },
+    {
+      "type": "roundedBox",
+      "x": 2,
+      "y": 8,
+      "z": "{{depth - 1}}",
+      "w": "{{width - 4}}",
+      "h": "{{height - 14}}",
+      "d": 1,
+      "radius": "{{radius / 2}}",
+      "faces": {
+        "front": "$woodFrontL",
+        "top": "$woodTop"
+      }
+    },
+    {
+      "type": "cylinder",
+      "if": "{{style.hand == 'right'}}",
+      "x": "{{width - 10}}",
+      "y": "{{height / 2 - 2}}",
+      "z": "{{depth + 0.5}}",
+      "radius": 2,
+      "length": 3,
+      "axis": "z",
+      "faces": {
+        "front": "$handle"
+      }
+    },
+    {
+      "type": "cylinder",
+      "if": "{{style.hand != 'right'}}",
+      "x": 8,
+      "y": "{{height / 2 - 2}}",
+      "z": "{{depth + 0.5}}",
+      "radius": 2,
+      "length": 3,
+      "axis": "z",
+      "faces": {
+        "front": "$handle"
+      }
+    },
+    {
+      "x": 5,
+      "y": 12,
+      "z": "{{depth - 0.4}}",
+      "w": "{{width - 10}}",
+      "h": 1.5,
+      "d": 0.4,
+      "faces": {
+        "top": "$woodDark",
+        "front": "$woodDark",
+        "right": "$woodDark",
+        "left": "$woodDark"
+      }
+    },
+    {
+      "x": 5,
+      "y": "{{height - 13.5}}",
+      "z": "{{depth - 0.4}}",
+      "w": "{{width - 10}}",
+      "h": 1.5,
+      "d": 0.4,
+      "faces": {
+        "top": "$woodDark",
+        "front": "$woodDark",
+        "right": "$woodDark",
+        "left": "$woodDark"
+      }
+    }
+  ]
+}

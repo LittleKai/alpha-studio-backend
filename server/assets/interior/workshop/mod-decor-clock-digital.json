@@ -1,0 +1,59 @@
+{
+  "id": "mod-decor-clock-digital",
+  "version": 1,
+  "name": {
+    "vi": "Đồng hồ LED báo thức (Module)",
+    "en": "Digital LED Alarm Clock (Module)"
+  },
+  "description": {
+    "vi": "Cục đồng hồ báo thức LED kỹ thuật số nhỏ viền gỗ đặt trên tủ tab.",
+    "en": "Small digital LED alarm clock encased in wood block placed on a nightstand."
+  },
+  "category": "other",
+  "tags": [
+    "accessory",
+    "clock",
+    "alarm",
+    "time",
+    "digital",
+    "nightstand",
+    "module"
+  ],
+  "params": {
+    "width": {
+      "type": "number",
+      "min": 10,
+      "max": 25,
+      "default": 15
+    },
+    "height": {
+      "type": "number",
+      "min": 5,
+      "max": 12,
+      "default": 7
+    },
+    "depth": {
+      "type": "number",
+      "min": 5,
+      "max": 10,
+      "default": 6
+    }
+  },
+  "boxes": [
+    {
+      "x": 0,
+      "y": 0,
+      "z": 0,
+      "w": "{{width}}",
+      "h": "{{height}}",
+      "d": "{{depth}}",
+      "faces": {
+        "front": "#1a1a1a",
+        "top": "$woodDark",
+        "side": "$woodDark",
+        "bottom": "$woodDark",
+        "back": "$woodDark"
+      }
+    }
+  ]
+}
