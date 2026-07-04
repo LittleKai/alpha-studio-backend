@@ -13,6 +13,12 @@ const crmConversationSchema = new mongoose.Schema({
         default: null,
         index: true
     },
+    channel: {
+        type: String,
+        enum: ['zalo_personal', 'zalo_oa', 'facebook_page', 'tiktok'],
+        default: 'zalo_personal',
+        index: true
+    },
     accountId: {
         type: String,
         required: true,

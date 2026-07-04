@@ -344,10 +344,28 @@ function stageZaloBackendForWindows(winReleaseDir) {
         ].join('\r\n'),
         'utf8'
     );
+}
 
+/**
+ * Stages the Flutter Web build output
+ * and stages the compiled Flutter Web assets into the frontend's `public/crm/` folder.
+ */
+function buildAndStageFlutterWeb(crmDir, publicCrmDir) {
+    const buildWebDir = path.join(crmDir, 'build/web');
 
+    console.log(`\n[build] Building Flutter Web...`);
+    execSync('flutter build web --release --base-href /crm/', { cwd: CRM_DIR, stdio: 'inherit' });
 
+    if (fs.existsSync(publicCrmDir)) {
+        console.log(`[build] Cleaning existing staging directory: ${publicCrmDir}...`);
+        fs.rmSync(publicCrmDir, { recursive: true, force: true });
+    }
+    fs.mkdirSync(publicCrmDir, { recursive: true });
 
+    console.log(`[build] Copying Flutter Web assets from ${buildWebDir} to ${publicCrmDir}...`);
+    fs.cpSync(buildWebDir, publicCrmDir, { recursive: true });
+
+    console.log(`✅ Flutter Web successfully staged to: ${publicCrmDir}`);
 }
 
 /**
