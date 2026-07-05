@@ -1,7 +1,13 @@
 import crypto from 'crypto';
 
 const ALGORITHM = 'aes-256-cbc';
-const ENCRYPTION_KEY = process.env.ENCRYPTION_KEY || process.env.JWT_SECRET || 'alpha-studio-fallback-secret-key';
+const ENCRYPTION_KEY = process.env.ENCRYPTION_KEY || process.env.JWT_SECRET || (() => {
+    if (process.env.NODE_ENV === 'production') {
+        throw new Error('ENCRYPTION_KEY or JWT_SECRET environment variable is required in production');
+    }
+    console.warn('[encryption] ENCRYPTION_KEY/JWT_SECRET not set — using a random ephemeral key (dev/test only).');
+    return crypto.randomBytes(32).toString('hex');
+})();
 
 function getKey() {
     return crypto.createHash('sha256').update(String(ENCRYPTION_KEY)).digest();

@@ -34,6 +34,7 @@ import aiRoutes from './routes/ai.js';
 import interiorRoutes from './routes/interior.js';
 import skillRoutes from './routes/skills.js';
 import crmRoutes from './routes/crm.js';
+import channelWebhookRoutes from './routes/channelWebhooks.js';
 import { configureBucketCors } from './utils/b2Storage.js';
 import { seedInteriorTemplateAssets } from './utils/interiorTemplateAssets.js';
 import { runSubscriptionMaintenance } from './jobs/crmSubscriptionJobs.js';
@@ -66,7 +67,10 @@ app.use(cors(buildCorsOptions(process.env)));
 // 5mb headroom for prompts, settings, and the legacy inline-base64 reference
 // image path. Studio's primary path is now B2 temp upload (FE → B2 → URL),
 // so payloads stay small. Default 100kb is too tight for any base64 image.
-app.use(express.json({ limit: '5mb' }));
+app.use(express.json({
+    limit: '5mb',
+    verify: (req, res, buf) => { req.rawBody = buf; }
+}));
 app.use(cookieParser());
 
 const localMount = localStorageMount(process.env);
@@ -107,6 +111,7 @@ app.use('/api/ai', aiRoutes);
 app.use('/api/vocab', vocabRoutes);
 app.use('/api/interior', interiorRoutes);
 app.use('/api/crm', crmRoutes);
+app.use('/api/crm', channelWebhookRoutes);
 app.use('/api/skills', skillRoutes);
 
 // Sitemap (no /api prefix — served at root)

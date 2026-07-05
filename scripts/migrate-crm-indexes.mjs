@@ -5,6 +5,7 @@ import CrmPairingSession from '../server/models/CrmPairingSession.js';
 import CrmAgentCommand from '../server/models/CrmAgentCommand.js';
 import CrmBillingOrder from '../server/models/CrmBillingOrder.js';
 import CrmAuditLog from '../server/models/CrmAuditLog.js';
+import CrmChannelIntegration from '../server/models/CrmChannelIntegration.js';
 
 const uri = process.env.MONGODB_URI;
 
@@ -19,7 +20,8 @@ const models = [
     CrmPairingSession,
     CrmAgentCommand,
     CrmBillingOrder,
-    CrmAuditLog
+    CrmAuditLog,
+    CrmChannelIntegration
 ];
 
 try {

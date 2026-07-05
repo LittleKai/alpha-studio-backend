@@ -1,7 +1,14 @@
 import jwt from 'jsonwebtoken';
+import crypto from 'crypto';
 import User from '../models/User.js';
 
-const JWT_SECRET = process.env.JWT_SECRET || 'alpha-studio-secret-key-2025';
+const JWT_SECRET = process.env.JWT_SECRET || (() => {
+    if (process.env.NODE_ENV === 'production') {
+        throw new Error('JWT_SECRET environment variable is required in production');
+    }
+    console.warn('[auth] JWT_SECRET not set — using a random ephemeral secret (dev/test only). Tokens will not survive restarts.');
+    return crypto.randomBytes(32).toString('hex');
+})();
 
 // Generate JWT token
 export const generateToken = (userId) => {

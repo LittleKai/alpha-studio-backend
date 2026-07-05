@@ -27,6 +27,7 @@ import CrmGroupInsight from '../models/CrmGroupInsight.js';
 import CrmSegment from '../models/CrmSegment.js';
 import CrmTask from '../models/CrmTask.js';
 import SystemSetting from '../models/SystemSetting.js';
+import CrmChannelIntegration from '../models/CrmChannelIntegration.js';
 
 import { crmPairingLimiter, crmDeviceLimiter, crmAiLimiter, crmMessageSendLimiter } from '../middleware/crmRateLimit.js';
 
@@ -56,6 +57,7 @@ import {
     replaceActiveDevice
 } from '../utils/crmDeviceSessions.js';
 import crmEventHub from '../utils/crmEventHub.js';
+import { encrypt, decrypt } from '../utils/encryption.js';
 import { setSseHeaders, writeEvent } from '../agent-runner/sse.js';
 import {
     buildChatbotConfigSnapshot,
@@ -273,10 +275,11 @@ function normalizeThreadType(value) {
     return value === 'group' ? 'group' : 'user';
 }
 
-async function upsertConversationFromInbound({ userId, deviceId, event, enforceManagedGroup = false }) {
+export async function upsertConversationFromInbound({ userId, deviceId, event, enforceManagedGroup = false }) {
     const accountId = String(event.accountId || '').trim();
     const threadId = String(event.threadId || '').trim();
     const threadType = normalizeThreadType(event.threadType);
+    const channel = String(event.channel || 'zalo_personal').trim();
     const isMetadataOnly = event.localFirst === true;
     const content = String(
         isMetadataOnly ? event.lastMessagePreview || '' : event.content || ''
@@ -326,6 +329,7 @@ async function upsertConversationFromInbound({ userId, deviceId, event, enforceM
                     accountId,
                     threadId,
                     threadType,
+                    channel,
                     customerId: metadataCustomer?._id || existingConversation?.customerId || null,
                     displayName: event.displayName || existingConversation?.displayName || threadId,
                     avatarUrl: event.avatarUrl || existingConversation?.avatarUrl || '',
@@ -392,6 +396,7 @@ async function upsertConversationFromInbound({ userId, deviceId, event, enforceM
                 accountId,
                 threadId,
                 threadType,
+                channel,
                 customerId: customer?._id || null,
                 displayName,
                 avatarUrl,
@@ -425,6 +430,7 @@ async function upsertConversationFromInbound({ userId, deviceId, event, enforceM
                 accountId,
                 threadId,
                 threadType,
+                channel,
                 direction,
                 senderId: event.senderId || '',
                 senderName: event.senderName || '',
@@ -667,7 +673,7 @@ function notifyCommandWaiter(deviceId) {
 // Central place to create an CrmAgentCommand so a device long-polling
 // /agent/commands/next is woken up immediately instead of waiting out
 // the rest of its waitMs window.
-async function createAgentCommand(payload) {
+export async function createAgentCommand(payload) {
     const command = await CrmAgentCommand.create(payload);
     notifyCommandWaiter(command.deviceId);
     return command;
@@ -3221,6 +3227,86 @@ router.post('/conversations/:id/read', authMiddleware, async (req, res) => {
     } catch (error) {
         console.error('Conversation read error:', error);
         res.status(500).json({ success: false, message: 'Loi server khi danh dau da doc.' });
+    }
+});
+
+router.post('/agent/channels/register', agentAuthMiddleware, async (req, res) => {
+    try {
+        const { channel, externalAccountId, appId, verifyToken, appSecret, enabled } = req.body;
+        if (!['facebook_page', 'tiktok'].includes(channel)) {
+            return res.status(400).json({ success: false, message: 'Kenh khong hop le.' });
+        }
+        if (!externalAccountId || !verifyToken || !appSecret) {
+            return res.status(400).json({ success: false, message: 'Thieu thong tin dang ky kenh.' });
+        }
+
+        const integration = await CrmChannelIntegration.findOneAndUpdate(
+            { userId: req.crmDevice.userId, channel, externalAccountId: String(externalAccountId).trim() },
+            {
+                $set: {
+                    externalAccountId: String(externalAccountId).trim(),
+                    appId: String(appId || '').trim(),
+                    verifyToken: String(verifyToken).trim(),
+                    appSecret: encrypt(String(appSecret).trim()),
+                    enabled: enabled !== false
+                }
+            },
+            { upsert: true, new: true, setDefaultsOnInsert: true }
+        );
+
+        res.json({
+            success: true,
+            data: {
+                id: integration._id,
+                channel: integration.channel,
+                externalAccountId: integration.externalAccountId,
+                enabled: integration.enabled
+            }
+        });
+    } catch (error) {
+        if (error?.code === 11000) {
+            return res.status(409).json({ success: false, message: 'Tai khoan kenh nay da duoc dang ky boi mot nguoi dung khac.' });
+        }
+        console.error('Channel integration register error:', error);
+        res.status(500).json({ success: false, message: 'Loi server khi dang ky kenh.' });
+    }
+});
+
+router.get('/agent/channels', agentAuthMiddleware, async (req, res) => {
+    try {
+        const integrations = await CrmChannelIntegration.find({ userId: req.crmDevice.userId })
+            .select('_id channel externalAccountId appId enabled createdAt updatedAt')
+            .sort({ createdAt: 1 });
+
+        res.json({
+            success: true,
+            data: integrations.map((integration) => ({
+                id: integration._id,
+                channel: integration.channel,
+                externalAccountId: integration.externalAccountId,
+                appId: integration.appId,
+                enabled: integration.enabled
+            }))
+        });
+    } catch (error) {
+        console.error('Channel integration list error:', error);
+        res.status(500).json({ success: false, message: 'Loi server khi lay danh sach kenh.' });
+    }
+});
+
+router.delete('/agent/channels/:id', agentAuthMiddleware, async (req, res) => {
+    try {
+        const integration = await CrmChannelIntegration.findOneAndDelete({
+            _id: req.params.id,
+            userId: req.crmDevice.userId
+        });
+        if (!integration) {
+            return res.status(404).json({ success: false, message: 'Khong tim thay kenh.' });
+        }
+        res.json({ success: true, data: { id: integration._id } });
+    } catch (error) {
+        console.error('Channel integration delete error:', error);
+        res.status(500).json({ success: false, message: 'Loi server khi xoa kenh.' });
     }
 });
 

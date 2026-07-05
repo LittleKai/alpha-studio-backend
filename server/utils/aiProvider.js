@@ -274,9 +274,14 @@ async function fetchImageAsDataUrl(url) {
 
 export async function callOpenClaw(content, sessionId) {
     const openClawUrl = process.env.OPENCLAW_URL || 'http://localhost:18791/api/chat';
+    const openClawHeaders = { 'Content-Type': 'application/json' };
+    // Token chung với api-server (env API_TOKEN phía server) — bắt buộc khi endpoint expose public
+    if (process.env.OPENCLAW_API_TOKEN) {
+        openClawHeaders['x-api-token'] = process.env.OPENCLAW_API_TOKEN;
+    }
     const proxyResponse = await fetch(openClawUrl, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: openClawHeaders,
         body: JSON.stringify({
             messages: [{ role: 'user', content }],
             sessionId
