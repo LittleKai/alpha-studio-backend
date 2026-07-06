@@ -57,6 +57,7 @@ import {
     replaceActiveDevice
 } from '../utils/crmDeviceSessions.js';
 import crmEventHub from '../utils/crmEventHub.js';
+import webchatEventHub from '../utils/webchatEventHub.js';
 import { encrypt, decrypt } from '../utils/encryption.js';
 import { setSseHeaders, writeEvent } from '../agent-runner/sse.js';
 import {
@@ -3232,23 +3233,39 @@ router.post('/conversations/:id/read', authMiddleware, async (req, res) => {
 
 router.post('/agent/channels/register', agentAuthMiddleware, async (req, res) => {
     try {
-        const { channel, externalAccountId, appId, verifyToken, appSecret, enabled } = req.body;
-        if (!['facebook_page', 'tiktok'].includes(channel)) {
+        const { channel, externalAccountId, appId, verifyToken, appSecret, botToken, enabled, widgetName, welcomeMessage, primaryColorHex } = req.body;
+        if (!['facebook_page', 'tiktok', 'instagram', 'whatsapp', 'telegram', 'webchat'].includes(channel)) {
             return res.status(400).json({ success: false, message: 'Kenh khong hop le.' });
         }
-        if (!externalAccountId || !verifyToken || !appSecret) {
+        if (!externalAccountId) {
+            return res.status(400).json({ success: false, message: 'Thieu thong tin dang ky kenh.' });
+        }
+        if (channel === 'telegram') {
+            if (!botToken) {
+                return res.status(400).json({ success: false, message: 'Thieu thong tin dang ky kenh.' });
+            }
+        } else if (channel === 'webchat') {
+            // No 3rd-party webhook secret for webchat — the widget's public identifier is the externalAccountId itself.
+        } else if (!verifyToken || !appSecret) {
             return res.status(400).json({ success: false, message: 'Thieu thong tin dang ky kenh.' });
         }
 
+        const hasNoWebhookSecret = channel === 'telegram' || channel === 'webchat';
         const integration = await CrmChannelIntegration.findOneAndUpdate(
             { userId: req.crmDevice.userId, channel, externalAccountId: String(externalAccountId).trim() },
             {
                 $set: {
                     externalAccountId: String(externalAccountId).trim(),
                     appId: String(appId || '').trim(),
-                    verifyToken: String(verifyToken).trim(),
-                    appSecret: encrypt(String(appSecret).trim()),
-                    enabled: enabled !== false
+                    verifyToken: hasNoWebhookSecret ? undefined : String(verifyToken).trim(),
+                    appSecret: hasNoWebhookSecret ? undefined : encrypt(String(appSecret).trim()),
+                    botToken: channel === 'telegram' ? encrypt(String(botToken).trim()) : undefined,
+                    enabled: enabled !== false,
+                    ...(channel === 'webchat' ? {
+                        widgetName: String(widgetName || '').trim(),
+                        welcomeMessage: String(welcomeMessage || '').trim(),
+                        primaryColorHex: String(primaryColorHex || '#4F46E5').trim()
+                    } : {})
                 }
             },
             { upsert: true, new: true, setDefaultsOnInsert: true }
@@ -3325,6 +3342,14 @@ router.post('/agent/events/message', agentAuthMiddleware, async (req, res) => {
                     message: result.message,
                     conversation: result.conversation
                 });
+
+                if (result.message.channel === 'webchat' && result.message.direction === 'outbound') {
+                    webchatEventHub.publish(
+                        `${result.conversation.accountId}:${result.conversation.threadId}`,
+                        'message.new',
+                        result.message
+                    );
+                }
             }
             crmEventHub.publish(req.crmDevice.userId, 'conversation.updated', result.conversation);
         }

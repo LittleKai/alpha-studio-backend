@@ -27,7 +27,7 @@ test('agent inbound route only persists metadata and never generates a reply', (
 
 test('local-first metadata contract does not require content', () => {
     assert.match(routeSource, /isMetadataOnly = event\.localFirst === true/);
-    assert.match(routeSource, /\(!isMetadataOnly && !content\)/);
+    assert.match(routeSource, /\(!isMetadataOnly && !content && messageType === 'text'\)/);
     assert.match(routeSource, /metadataOnly: true/);
 });
 

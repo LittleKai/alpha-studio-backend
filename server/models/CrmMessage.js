@@ -24,7 +24,7 @@ const crmMessageSchema = new mongoose.Schema({
     },
     channel: {
         type: String,
-        enum: ['zalo_personal', 'zalo_oa', 'facebook_page', 'tiktok'],
+        enum: ['zalo_personal', 'zalo_oa', 'facebook_page', 'tiktok', 'instagram', 'whatsapp', 'telegram', 'webchat'],
         default: 'zalo_personal',
         index: true
     },

@@ -9,7 +9,7 @@ const crmChannelIntegrationSchema = new mongoose.Schema({
     },
     channel: {
         type: String,
-        enum: ['facebook_page', 'tiktok'],
+        enum: ['facebook_page', 'tiktok', 'instagram', 'whatsapp', 'telegram', 'webchat'],
         required: true
     },
     externalAccountId: {
@@ -23,16 +23,31 @@ const crmChannelIntegrationSchema = new mongoose.Schema({
         default: ''
     },
     verifyToken: {
-        type: String,
-        required: true
+        type: String
     },
     appSecret: {
-        type: String,
-        required: true
+        type: String
+    },
+    botToken: {
+        type: String
     },
     enabled: {
         type: Boolean,
         default: true
+    },
+    // Webchat-only public widget display config (no 3rd-party API for this channel,
+    // so this is the only place the public config endpoint can read it from).
+    widgetName: {
+        type: String,
+        trim: true
+    },
+    welcomeMessage: {
+        type: String,
+        trim: true
+    },
+    primaryColorHex: {
+        type: String,
+        trim: true
     }
 }, {
     timestamps: true

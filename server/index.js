@@ -1,4 +1,6 @@
 import express from 'express';
+import path from 'path';
+import { fileURLToPath } from 'url';
 import cors from 'cors';
 import cookieParser from 'cookie-parser';
 import dotenv from 'dotenv';
@@ -35,6 +37,7 @@ import interiorRoutes from './routes/interior.js';
 import skillRoutes from './routes/skills.js';
 import crmRoutes from './routes/crm.js';
 import channelWebhookRoutes from './routes/channelWebhooks.js';
+import webchatPublicRoutes from './routes/webchatPublic.js';
 import { configureBucketCors } from './utils/b2Storage.js';
 import { seedInteriorTemplateAssets } from './utils/interiorTemplateAssets.js';
 import { runSubscriptionMaintenance } from './jobs/crmSubscriptionJobs.js';
@@ -63,6 +66,13 @@ app.use(helmet({
 
 console.log('Allowed CORS origins:', buildAllowedOrigins(process.env));
 
+// Public Webchat widget routes: mounted BEFORE the app-wide CORS whitelist
+// because arbitrary customer domains embed this widget. It carries no
+// cookies/credentials (bearer-style session token in body/query only), so
+// reflecting any Origin here is safe and it never falls through to the
+// restrictive global policy below.
+app.use('/api/public/webchat', webchatPublicRoutes);
+
 app.use(cors(buildCorsOptions(process.env)));
 // 5mb headroom for prompts, settings, and the legacy inline-base64 reference
 // image path. Studio's primary path is now B2 temp upload (FE → B2 → URL),
@@ -77,6 +87,9 @@ const localMount = localStorageMount(process.env);
 if (localMount) {
     app.use(localMount.route, express.static(localMount.root));
 }
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+app.use('/webchat', express.static(path.join(__dirname, 'public', 'webchat')));
 
 // Request logging (development)
 if (process.env.NODE_ENV !== 'production') {
