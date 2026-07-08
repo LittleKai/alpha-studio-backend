@@ -117,7 +117,11 @@ router.get('/', async (req, res) => {
         // Build query
         const query = {};
 
-        if (category) query.category = category;
+        if (category) {
+            // Support comma-separated categories (e.g., "Marketing,Content Marketing")
+            const cats = category.split(',').map(c => c.trim()).filter(Boolean);
+            query.category = cats.length === 1 ? cats[0] : { $in: cats };
+        }
         if (tier) query.tier = tier;
         if (install_type) query.install_type = install_type;
 
