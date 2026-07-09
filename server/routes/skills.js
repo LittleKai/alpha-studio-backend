@@ -9,7 +9,7 @@ let filterCountsCacheTime = 0;
 const FILTER_COUNTS_TTL = 5 * 60 * 1000; // 5 minutes
 
 // Fields to return for list/index endpoints (exclude heavy `sections`)
-const INDEX_FIELDS = 'slug name headline headline_vi short_description short_description_vi tier category difficulty install_type estimated_time_saving author install_command source_repo_url works_with tags';
+const INDEX_FIELDS = 'slug name headline headline_vi short_description short_description_vi tier category difficulty install_type estimated_time_saving author install_command source_repo_url github_stars works_with tags';
 
 /**
  * Parse estimated_time_saving string like "2 hours" / "30 minutes" into minutes.
@@ -101,6 +101,8 @@ async function getFilterCounts() {
 // @desc    Get all skills with filtering, pagination, search
 // @access  Public
 router.get('/', async (req, res) => {
+    // Cache for 30 minutes — skills data changes infrequently
+    res.set('Cache-Control', 'public, max-age=1800');
     try {
         const {
             page = 1,

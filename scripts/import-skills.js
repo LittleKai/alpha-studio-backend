@@ -64,6 +64,8 @@ async function importSkills() {
             author: skill.author || '',
             install_command: skill.install_command || '',
             source_repo_url: skill.source_repo_url || '',
+            github_stars: Number(skill.github_stars) || 0,
+            github_stars_updated_at: skill.github_stars_updated_at || '',
             works_with: skill.works_with || [],
             tags: skill.tags || [],
             sections: {

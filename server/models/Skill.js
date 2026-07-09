@@ -17,6 +17,8 @@ const skillSchema = new mongoose.Schema({
     author: { type: String, default: '' },
     install_command: { type: String, default: '' },
     source_repo_url: { type: String, default: '' },
+    github_stars: { type: Number, default: 0 },
+    github_stars_updated_at: { type: String, default: '' },
     works_with: [{ type: String }],
     tags: [{ type: String }],
     sections: {
