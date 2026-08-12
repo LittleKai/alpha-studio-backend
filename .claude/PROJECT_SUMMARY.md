@@ -348,118 +348,6 @@ alpha-studio-backend/
 | B2 Presigned Upload | ✅ Complete | routes/upload.js, utils/b2Storage.js | Generate presigned PUT URL for browser-direct upload to Backblaze B2; `listAllFiles()` for bucket enumeration |
 | Workflow Projects API | ✅ Complete | models/WorkflowProject.js, routes/workflow.js | CRUD projects with team, tasks, chatHistory, expenseLog — auth required; GET /projects shows all non-completed for users |
 | Workflow Documents API | ✅ Complete | models/WorkflowDocument.js, routes/workflow.js | CRUD document records with status, comments, note — auth required; GET ?projectId returns all project docs to members |
-├── /workflow
-│   │   ├── GET    /projects          # List user's projects (auth)
-│   │   ├── POST   /projects          # Create project (auth)
-│   │   ├── PUT    /projects/:id      # Update project (auth, creator/admin)
-│   │   ├── DELETE /projects/:id      # Delete project + docs (auth, creator/admin)
-│   │   ├── GET    /users/search      # Search users by name (auth)
-│   │   ├── GET    /users/:id         # Get user public profile (auth)
-│   │   ├── GET    /documents         # List user's docs, ?projectId=xxx (auth)
-│   │   ├── POST   /documents         # Create document record (auth)
-│   │   ├── PUT    /documents/:id     # Update document (auth, creator/admin)
-│   │   └── DELETE /documents/:id     # Delete document (auth, creator/admin)
-├── /chat (auth required)
-│   ├── GET    /history          # User's chat history (?limit=50, max 200, oldest→newest)
-│   ├── POST   /send             # Send single message → save user msg + forward to OpenClaw + save reply
-│   └── DELETE /history          # Clear user's chat history (DB only; OpenClaw session memory persists)
-└── /health               # Health check endpoint
-```
-
----
-
-## 3. Key Decisions & Patterns
-
-### Authentication System
-- **Password Security:** bcrypt with 12 salt rounds
-- **Token:** JWT with 7-day expiration
-- **Storage:** httpOnly cookie + Authorization header support
-- **Middleware:** `authMiddleware` for protected routes
-
-### Database Architecture (MongoDB Atlas)
-- **Connection:** MongoDB Atlas Cloud (Cluster0)
-- **Database Name:** `alpha-studio`
-- **Collections:** 13 collections
-  - `users` - User accounts with hashed passwords + balance
-  - `courses` - Course information
-  - `students` - Student profiles
-  - `partners` - Partner profiles
-  - `projects` - User projects
-  - `studio_sessions` - AI studio session history
-  - `transformations` - Available transformations
-  - `api_usage` - API usage tracking
-  - `transactions` - Payment transactions (topup, spend, refund, manual_topup, bonus)
-  - `webhooklogs` - Casso webhook logs for debugging/reprocessing
-  - `prompts` - Shared prompts with multiple contents, ratings, engagement
-  - `resources` - Resource hub files with metadata and engagement
-  - `comments` - Comments for prompts and resources
-- **Documentation:** See DATABASE.md for detailed schema
-
-### CORS Configuration
-- Development: localhost:3000, localhost:5173, 127.0.0.1:5173
-- Production defaults: `https://giaiphapsangtao.com`, `https://www.giaiphapsangtao.com`, `https://alphastudio.vercel.app`
-- Extra production/staging origins: `FRONTEND_URL`, `FRONTEND_URL_PROD`, `FRONTEND_URLS`, or `CORS_ORIGINS`
-- Supports credentials for cookie-based auth
-- Methods: GET, POST, PUT, PATCH, DELETE, OPTIONS
-
-### Admin Authorization
-- **adminOnly middleware:** Checks `user.role === 'admin'`
-- **Protected routes:** All /api/courses/* endpoints
-- Returns 403 Forbidden for non-admin users
-
-### Error Handling
-- Centralized error middleware
-- User-friendly error messages
-- Duplicate key detection (MongoDB code 11000)
-- Mongoose validation error handling
-
----
-
-## 4. Active Features & Status
-
-| Feature | Status | Files Involved | Notes |
-|---------|--------|----------------|-------|
-| User Registration | ✅ Complete | routes/auth.js | Email + password validation |
-| User Login | ✅ Complete | routes/auth.js | JWT token generation |
-| User Logout | ✅ Complete | routes/auth.js | Cookie clearing |
-| Get Current User | ✅ Complete | routes/auth.js | Protected route |
-| Update Profile | ✅ Complete | routes/auth.js | Name update |
-| Change Password | ✅ Complete | routes/auth.js | Old password verification |
-| Health Check | ✅ Complete | index.js | API status endpoint |
-| Password Hashing | ✅ Complete | models/User.js | bcrypt with 12 rounds |
-| JWT Middleware | ✅ Complete | middleware/auth.js | Token verification |
-| Admin Middleware | ✅ Complete | middleware/auth.js | Role-based authorization |
-| CORS Support | ✅ Complete | index.js | Multi-origin + PATCH method |
-| Course CRUD | ✅ Complete | routes/courses.js | Create, Read, Update, Delete |
-| Course Publishing | ✅ Complete | routes/courses.js | Publish, Unpublish, Archive |
-| Course Statistics | ✅ Complete | routes/courses.js | Aggregated stats endpoint |
-| Multilingual Courses | ✅ Complete | models/Course.js | VI/EN title and description |
-| Course Modules/Lessons | ✅ Complete | models/Course.js | Nested schema structure |
-| Job CRUD | ✅ Complete | routes/jobs.js | Create, Read, Update, Delete |
-| Job Publishing | ✅ Complete | routes/jobs.js | Publish, Close |
-| Job Statistics | ✅ Complete | routes/jobs.js | Aggregated stats endpoint |
-| Partner CRUD | ✅ Complete | routes/partners.js | Create, Read, Update, Delete |
-| Partner Publishing | ✅ Complete | routes/partners.js | Publish, Unpublish |
-| Partner Statistics | ✅ Complete | routes/partners.js | Aggregated stats endpoint |
-| Partner Skills | ✅ Complete | models/Partner.js | String array for skills |
-| Stale Index Cleanup | ✅ Complete | db/connection.js | Auto-drops stale indexes on startup |
-| Payment System | ✅ Complete | routes/payment.js, models/Transaction.js | Credit packages, VietQR, Casso webhook |
-| Webhook Logging | ✅ Complete | models/WebhookLog.js | Stores all incoming webhooks for debugging |
-| Admin Management | ✅ Complete | routes/admin.js | Users, transactions, webhook management |
-| Manual Top-up | ✅ Complete | routes/admin.js | Admin can top-up users manually |
-| Webhook Assignment | ✅ Complete | routes/admin.js | Admin can assign unmatched webhooks to users |
-| Transaction Timeout | ✅ Complete | routes/admin.js | Auto-timeout after 5 min without webhook match |
-| Share Prompts API | ✅ Complete | routes/prompts.js, models/Prompt.js | CRUD, like, bookmark, rate, download, featured, moderation |
-| Resource Hub API | ✅ Complete | routes/resources.js, models/Resource.js | CRUD, file upload (50MB), like, bookmark, rate, download |
-| Comments API | ✅ Complete | routes/comments.js, models/Comment.js | Comments for prompts/resources with likes |
-| Course Enrollment API | ✅ Complete | routes/enrollments.js, models/Enrollment.js | Enroll with credit deduction for paid courses; Transaction recorded; progress tracking |
-| Course Reviews API | ✅ Complete | routes/reviews.js, models/Review.js | CRUD, rating distribution, helpful votes, admin reply |
-| Lesson Video/Documents | ✅ Complete | models/Course.js | videoUrl and documents array per lesson |
-| Article CMS | ✅ Complete | models/Article.js, routes/articles.js | Bilingual articles for About & Services pages, admin CRUD |
-| Cloud Desktop API | ✅ Complete | models/HostMachine.js, models/CloudSession.js, routes/cloud.js | User connect/disconnect, admin machine/session management, agent heartbeat, cron cleanup |
-| B2 Presigned Upload | ✅ Complete | routes/upload.js, utils/b2Storage.js | Generate presigned PUT URL for browser-direct upload to Backblaze B2; `listAllFiles()` for bucket enumeration |
-| Workflow Projects API | ✅ Complete | models/WorkflowProject.js, routes/workflow.js | CRUD projects with team, tasks, chatHistory, expenseLog — auth required; GET /projects shows all non-completed for users |
-| Workflow Documents API | ✅ Complete | models/WorkflowDocument.js, routes/workflow.js | CRUD document records with status, comments, note — auth required; GET ?projectId returns all project docs to members |
 | Workflow User Profile API | ✅ Complete | routes/workflow.js | GET /users/:id returns public profile (name, avatar, role, email, phone, bio, skills, location, socials) — auth required |
 | Storage Cleanup API | ✅ Complete | routes/admin.js, utils/b2Storage.js | Lists all B2 files; cross-references WorkflowDocument/Resource (file+previewImages)/Course (videoUrl+documents)/Prompt (exampleImages); returns `data` (orphaned) + `referencedFiles` each with `source`, `uploader`, `referenced` — super admin only |
 | Studio Usage Tracking (legacy) | ✅ Complete | models/User.js, routes/studio.js | `studioUsage: {date, count}` on User; GET /studio/usage + POST /studio/use; 3 free uses/day; admin/mod unlimited |
@@ -515,6 +403,56 @@ alpha-studio-backend/
 - **Long-poll disconnect hardening:** `/agent/commands/next` registers `req.on('close')` while parked and re-checks `req.destroyed`/`res.writableEnded` before claiming, so a command created while the agent's connection already died stays `queued` for the next poll instead of being marked `sent` into a dead socket (previously stranded until the 1h TTL).
 - **BE-7 (mobile command-authorization review, closes Task 1.3-security):** audited every route that creates a `CrmAgentCommand` (`/conversations/:id/send`, `/send-attachment`, `/messages/:messageId/recall`, `/campaigns/:id/start`, `/campaigns/:id/cancel`) — all require `authMiddleware` + `requireActiveSubscription`, and each independently re-fetches its target (`CrmConversation`/`CrmCampaign`/`CrmDevice`) scoped to `userId: req.user._id` before calling `createAgentCommand()`, which itself trusts the caller's `userId`/`deviceId` with no independent re-check. Cross-user access returns **404** (not 403) so a user can't distinguish "not yours" from "doesn't exist" — a deliberate anti-enumeration choice, not a gap (the tasklist's DoD phrasing said "test 403"; 404 is the stricter, correct behavior here). **Decision: no per-command JWT signature needed** — the agent already authenticates via `x-agent-secret` + `deviceId` (`agentAuthMiddleware`), and every command a device can claim was already scoped to that device's owner at creation time; adding per-command signing would duplicate protection the ownership check already provides. Added `crmMessageSendLimiter` (30 req/min) to `/conversations/:id/send` and `/send-attachment` — the only unthrottled command-creating routes reachable directly from a mobile/web client (campaigns already require human approval + are lower-frequency by nature).
 
+## 4b. State & Data Dependency Graph
+
+```mermaid
+flowchart LR
+    FE["alpha-studio (FE)<br/>Vercel"]
+    CRM["tools/alpha-crm"]
+    ENTRY["server/index.js<br/>Express 5 · ES Modules"]
+    CORS["CORS allowlist<br/>FRONTEND_URL* · CORS_ORIGINS"]
+    AUTH["middleware/auth.js<br/>authMiddleware + adminOnly"]
+    ROUTES["routes/<br/>auth · courses · payment · admin<br/>cloud · workflow · interior · chat · crm"]
+    MODELS["models/ (Mongoose)"]
+    CONN["db/connection.js<br/>pool 0-5"]
+    DB[("MongoDB Atlas 'alpha-studio'")]
+    CRON["node-cron 60s<br/>quét máy offline"]
+    HA["Host Agent<br/>x-agent-secret"]
+    FA["Flow Agent"]
+    B2[("Backblaze B2")]
+    CASSO["Casso webhook<br/>thanh toán"]
+    AI["OpenClaw / GCLI proxy<br/>Gemini SDK fallback"]
+
+    FE --> CORS --> ENTRY --> AUTH --> ROUTES
+    CRM --> CORS
+    ROUTES --> MODELS --> CONN --> DB
+    ROUTES --> HA
+    ROUTES --> FA
+    ROUTES --> B2
+    ROUTES --> AI
+    CASSO -->|"POST webhook"| ROUTES
+    CRON --> MODELS
+    HA -->|"heartbeat 30s"| ROUTES
+```
+
+**Invalidate / consistency rules** — hợp đồng bắt buộc:
+
+| Khi thay đổi / Sau khi | Phải làm kèm | Nếu quên sẽ bị |
+|---|---|---|
+| 🔴 Thêm field lưu **URL/key B2** vào bất kỳ model nào | Thêm logic quét field đó vào `usedKeys` của `GET /api/admin/storage/orphaned` (`routes/admin.js`) **và** cập nhật bảng B2 field trong `CLAUDE.md` root | Orphan checker coi file đang dùng là rác — hoặc để rác tích tụ vĩnh viễn trong bucket |
+| Sửa schema trong `models/` | Cập nhật `DATABASE.md`; cân nhắc script migration trong `db/`; **phải được user yêu cầu rõ ràng** | `DATABASE.md` (nguồn tham chiếu schema duy nhất) lệch với thực tế |
+| Đổi shape response của bất kỳ route nào | Cập nhật service tương ứng trong `alpha-studio/src/services/` + `tools/alpha-crm` | FE parse `undefined`, hiện màn trắng thay vì lỗi rõ ràng |
+| Ghi giao dịch tín dụng (topup/spend/refund/bonus) | Cập nhật `user.balance` **và** tạo bản ghi `transactions` trong cùng luồng | Số dư lệch với lịch sử giao dịch, không đối soát được |
+| Xử lý webhook Casso | Ghi `webhooklogs` **trước** khi xử lý, và idempotent theo mã giao dịch | Casso retry → cộng tiền 2 lần cho cùng một lần chuyển khoản |
+| Ngừng nhận heartbeat từ một máy > 2 phút | Cron 60s đánh dấu `HostMachine` offline **và** kết thúc mọi `CloudSession` active của máy đó | Session "ma" chiếm slot của máy đã chết, user không kết nối được |
+| Thêm origin FE mới (domain / preview URL) | Thêm vào allowlist CORS qua `FRONTEND_URL` / `FRONTEND_URLS` / `CORS_ORIGINS` | FE mới bị chặn CORS — lỗi hiện ra dưới dạng "Failed to fetch" rất khó đoán |
+| Thêm route cần quyền admin | Gắn `adminOnly` **sau** `authMiddleware` (không chỉ kiểm tra role trong handler) | Route lọt quyền — user thường gọi được endpoint quản trị |
+| Thêm route tạo `CrmAgentCommand` hoặc route dễ bị lạm dụng | Re-fetch target scoped `userId: req.user._id` (trả **404**, không phải 403 — chống enumeration) + thêm limiter vào `middleware/crmRateLimit.js` | Truy cập chéo user, hoặc route không giới hạn tần suất bị spam |
+
+> **Pool nhỏ:** `MONGODB_MAX_POOL_SIZE=5`, `MIN=0`. Đừng thêm truy vấn N+1 hay cursor chạy dài trong request path — pool cạn là **toàn bộ** API treo, không riêng endpoint đó.
+
+---
+
 ## 5. Known Issues & TODOs
 
 ### High Priority
@@ -525,8 +463,9 @@ alpha-studio-backend/
 ### Medium Priority
 - [ ] Forgot password / password reset not implemented
 - [ ] Email verification not implemented
-- [ ] No testing framework configured
+- [x] ~~No testing framework configured~~ — **sai, đã lỗi thời**: `package.json` có `"test": "node --test \"test/*.test.js\" \"server/**/*.test.js\" \"server/**/*.test.mjs\""` và `test/` đang có suite thật (cors-config, database-lifecycle, retention, mongodb-m0-*, interior-version-archive…). Đây là project **duy nhất** trong workspace có test suite Node — xem Test Policy trong `CLAUDE.md` root.
 - [ ] No ESLint/Prettier configuration
+- [x] ~~File PROJECT_SUMMARY.md bị lặp nội dung~~ — **đã dọn**: xoá bản trùng của "## 3. Key Decisions & Patterns" + "## 4. Active Features & Status" (hai bản Key Decisions giống hệt từng ký tự; bảng Active Features giữ lại bản 63 dòng vốn là superset của bản 42 dòng) cùng mảnh cây API routes bị dán lộn vào giữa bảng. Gộp 2 heading `Quick Commands` trùng. Đánh số section giờ liền mạch: 1 → 2 → 3 → 4 → 4b → 5 → 6 → 7 → 8.
 
 ### Low Priority
 - [ ] API documentation (Swagger/OpenAPI)
@@ -538,10 +477,11 @@ alpha-studio-backend/
 ## 6. Important Context for Claude
 
 ### When making changes:
-2. Follow naming conventions in CONVENTIONS.md
-3. Use ES Module syntax (import/export)
-4. Handle errors consistently with try/catch
-5. Return consistent JSON response format: `{ success, message, data? }`
+1. Follow naming conventions in CONVENTIONS.md
+2. Use ES Module syntax (import/export)
+3. Handle errors consistently with try/catch
+4. Return consistent JSON response format: `{ success, message, data? }`
+5. Add/update tests in `test/` — chạy `npm test` (`node --test`) trước khi kết thúc task
 
 ### Critical Files (read before major changes):
 - `server/models/User.js` - User schema and password hashing + balance field
@@ -582,9 +522,27 @@ INTERIOR_IMAGE_API_KEY=...           # Optional override used by /interior/gener
 INTERIOR_IMAGE_MODEL=gemini-2.5-flash-image
 ```
 
+### Secrets & Credentials
+
+Backend là nơi giữ **toàn bộ secret thật** của hệ thống (Frontend không được giữ secret nào — mọi biến `VITE_*` đều public). Nơi lưu hợp lệ: `.env` local (gitignored) + biến môi trường trên Fly.io.
+
+| Secret | Hậu quả nếu lộ |
+|---|---|
+| `MONGODB_URI` | Toàn quyền đọc/ghi database production |
+| `JWT_SECRET` | Ký được token giả cho **bất kỳ** user, kể cả admin. Đổi giá trị = vô hiệu mọi phiên đang đăng nhập |
+| `B2_ACCESS_KEY_ID`, `B2_SECRET_ACCESS_KEY` | Toàn quyền trên bucket lưu trữ (khoá học, tài liệu, video) |
+| `CASSO_WEBHOOK_SECRET` | Giả được webhook thanh toán → tự cộng tín dụng |
+| `GEMINI_API_KEY`, `INTERIOR_IMAGE_API_KEY` | Bị dùng chùa, tính tiền vào tài khoản dự án |
+
+- **Không** `console.log` các giá trị trên, header `Authorization`, hay body request đăng nhập/webhook — log Fly.io đọc lại được.
+- **Không** trả secret hay stack trace thô về client trong response lỗi; giữ format `{ success: false, message: '...' }`.
+- 🔴 **Tài khoản seed có mật khẩu mặc định được ghi công khai trong file này** (mục "Sample Users": `admin@alphastudio.com` / `student@example.com`). Đây là dữ liệu của `npm run db:init` cho môi trường dev. **Phải xác nhận hai tài khoản này không tồn tại — hoặc đã đổi mật khẩu — trên database production.** Không chạy `db:init` với `MONGODB_URI` production.
+
+> Chỉ ghi **tên biến**. Không bao giờ ghi giá trị thật vào file này.
+
 
 ## 7. Quick Commands
-## 8. Quick Commands
+
 ```bash
 # Development
 npm run dev          # Start with nodemon (auto-reload)
