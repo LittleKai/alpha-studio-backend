@@ -11,11 +11,14 @@ const PUBLIC_KEYS = [
     'useApiForEdit',
     'useApiForVideo',
     'useOpenClawForChat',
-    'gcliBotModel'
+    'gcliBotModel',
+    'landingVideoQuality'
 ];
 
 const GCLI_BOT_ALLOWED_MODELS = ['gemini-2.5-flash'];
 const GCLI_BOT_DEFAULT_MODEL = 'gemini-2.5-flash';
+const LANDING_VIDEO_QUALITIES = ['high', 'standard'];
+const LANDING_VIDEO_DEFAULT_QUALITY = 'high';
 
 router.get('/public', async (req, res) => {
     try {
@@ -33,6 +36,7 @@ router.get('/public', async (req, res) => {
         if (data.useApiForVideo === undefined) data.useApiForVideo = false;
         if (data.useOpenClawForChat === undefined) data.useOpenClawForChat = true;
         if (!GCLI_BOT_ALLOWED_MODELS.includes(data.gcliBotModel)) data.gcliBotModel = GCLI_BOT_DEFAULT_MODEL;
+        if (!LANDING_VIDEO_QUALITIES.includes(data.landingVideoQuality)) data.landingVideoQuality = LANDING_VIDEO_DEFAULT_QUALITY;
 
         res.json({ success: true, data });
     } catch (error) {
@@ -56,6 +60,7 @@ router.get('/', authMiddleware, adminOnly, async (req, res) => {
         if (data.useApiForVideo === undefined) data.useApiForVideo = false;
         if (data.useOpenClawForChat === undefined) data.useOpenClawForChat = true;
         if (!GCLI_BOT_ALLOWED_MODELS.includes(data.gcliBotModel)) data.gcliBotModel = GCLI_BOT_DEFAULT_MODEL;
+        if (!LANDING_VIDEO_QUALITIES.includes(data.landingVideoQuality)) data.landingVideoQuality = LANDING_VIDEO_DEFAULT_QUALITY;
         if (data.geminiApiKey === undefined) data.geminiApiKey = '';
         else if (data.geminiApiKey) data.geminiApiKey = '********';
         if (data.videoApiKey === undefined) data.videoApiKey = '';
@@ -83,6 +88,10 @@ router.post('/', authMiddleware, adminOnly, async (req, res) => {
 
             if (key === 'gcliBotModel' && !GCLI_BOT_ALLOWED_MODELS.includes(value)) {
                 return res.status(400).json({ success: false, message: `gcliBotModel không hợp lệ.` });
+            }
+
+            if (key === 'landingVideoQuality' && !LANDING_VIDEO_QUALITIES.includes(value)) {
+                return res.status(400).json({ success: false, message: `landingVideoQuality không hợp lệ.` });
             }
 
             let finalValue = value;

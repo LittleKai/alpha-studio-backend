@@ -1,6 +1,8 @@
 # Project Summary
 
-*Latest Session: Security audit & hardening — `JWT_SECRET`/`ENCRYPTION_KEY` giờ bắt buộc ở production (không còn fallback hardcode, dev/test dùng key ngẫu nhiên ephemeral), toàn bộ npm vulnerabilities đã vá (nodemailer 9, mongoose, fast-xml-parser, path-to-regexp, ws...), `callOpenClaw` hỗ trợ gửi `x-api-token` (env `OPENCLAW_API_TOKEN`) khi OpenClaw api-server bật auth.*
+*Latest Session: Added `landingVideoQuality` (`'high'` | `'standard'`) to `PUBLIC_KEYS` and system settings routes (`server/routes/settings.js`). Validates allowed qualities and exposes `landingVideoQuality` via both `GET /api/settings/public` (default `'high'`) and `GET /api/settings`, saved via `POST /api/settings`.*
+
+*Previous session: Security audit & hardening — `JWT_SECRET`/`ENCRYPTION_KEY` giờ bắt buộc ở production (không còn fallback hardcode, dev/test dùng key ngẫu nhiên ephemeral), toàn bộ npm vulnerabilities đã vá (nodemailer 9, mongoose, fast-xml-parser, path-to-regexp, ws...), `callOpenClaw` hỗ trợ gửi `x-api-token` (env `OPENCLAW_API_TOKEN`) khi OpenClaw api-server bật auth.*
 
 ## 1. Project Overview
 - **Name:** Alpha Studio Backend
