@@ -550,10 +550,10 @@ async function main() {
             console.log('Local Zalo backend staged beside the Windows app.');
             await verifyStagedBackend(path.join(winReleaseDir, 'zalo-bot-service'));
 
-            // Utilize native PowerShell Compress-Archive since the workspace is on Windows
-            const zipCmd = `powershell -Command "Compress-Archive -Path '${winReleaseDir}\\*' -DestinationPath '${zipDestPath}' -Force"`;
-            console.log(`Running: ${zipCmd}`);
-            execSync(zipCmd, { stdio: 'inherit' });
+            // Utilize native tar since it is built into Windows 10+ and much faster & robust than Compress-Archive
+            const zipCmd = `tar -a -c -f "${zipDestPath}" *`;
+            console.log(`Running: ${zipCmd} (in ${winReleaseDir})`);
+            execSync(zipCmd, { cwd: winReleaseDir, stdio: 'inherit' });
             console.log(`✅ Windows release successfully zipped to: ${zipDestPath}`);
         } catch (err) {
             console.error('❌ Error zipping Windows release:', err.message);

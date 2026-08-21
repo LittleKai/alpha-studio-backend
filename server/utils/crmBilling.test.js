@@ -171,8 +171,8 @@ test('fulfillCrmBillingOrder preserves an active trial record when upgrading to 
         userId: 'user-trial',
         productId: 'crm_monthly',
         orderType: 'subscription',
-        amountVnd: 500000,
-        credits: 5250,
+        amountVnd: 200000,
+        credits: 2100,
         transactionCode: 'CRMTRIALUP',
         metadata: {},
         async save(options) {

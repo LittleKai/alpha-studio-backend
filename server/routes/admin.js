@@ -691,6 +691,13 @@ function extractB2Key(url) {
  * Enriched with uploader info where a WorkflowDocument record exists.
  * Super-admin only (aduc5525@gmail.com).
  */
+// Desktop app releases (VocabFlip, VietYaku) live on B2 but are never referenced
+// from MongoDB — their `version.json` manifest is the source of truth, published
+// by each app's build-and-release skill. Treat them as referenced so they are
+// never listed as orphaned and deleted, which would 404 the /studio download links.
+const APP_RELEASE_PREFIXES = ['vocabflip-app/', 'vietyaku-app/'];
+const isAppReleaseKey = (key) => APP_RELEASE_PREFIXES.some(prefix => key.startsWith(prefix));
+
 router.get('/storage/orphaned', async (req, res) => {
     if (req.user.email !== SUPER_ADMIN_EMAIL) {
         return res.status(403).json({ success: false, message: 'Không có quyền' });
@@ -801,8 +808,12 @@ router.get('/storage/orphaned', async (req, res) => {
             referenced,
         });
 
-        const orphaned = b2Files.filter(f => !usedKeys.has(f.key)).map(f => toFileObj(f, false));
-        const referenced = b2Files.filter(f => usedKeys.has(f.key)).map(f => toFileObj(f, true));
+        const orphaned = b2Files
+            .filter(f => !usedKeys.has(f.key) && !isAppReleaseKey(f.key))
+            .map(f => toFileObj(f, false));
+        const referenced = b2Files
+            .filter(f => usedKeys.has(f.key) || isAppReleaseKey(f.key))
+            .map(f => toFileObj(f, true));
 
         res.json({
             success: true,
@@ -828,6 +839,12 @@ router.delete('/storage/orphaned', async (req, res) => {
     const { key } = req.body;
     if (!key) {
         return res.status(400).json({ success: false, message: 'key là bắt buộc' });
+    }
+    if (isAppReleaseKey(key)) {
+        return res.status(400).json({
+            success: false,
+            message: 'Không thể xóa bản phát hành ứng dụng qua đây — xóa trực tiếp trên Backblaze B2'
+        });
     }
     try {
         await deleteB2File(key);

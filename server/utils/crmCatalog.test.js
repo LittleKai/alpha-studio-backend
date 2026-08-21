@@ -7,12 +7,12 @@ test('CRM Catalog Plans & Packs structure', (t) => {
     const monthly = CRM_PLANS.crm_monthly;
     assert.ok(monthly);
     assert.strictEqual(monthly.id, 'crm_monthly');
-    assert.strictEqual(monthly.priceVnd, 500000);
-    assert.strictEqual(monthly.priceCredits, 5250);
-    assert.strictEqual(monthly.includedAiLimit, 1000);
+    assert.strictEqual(monthly.priceVnd, 200000);
+    assert.strictEqual(monthly.priceCredits, 2100);
+    assert.strictEqual(monthly.includedAiLimit, 100);
 
     assert.strictEqual(CRM_TRIAL.id, 'crm_trial');
-    assert.strictEqual(CRM_TRIAL.durationDays, 14);
+    assert.strictEqual(CRM_TRIAL.durationDays, 60);
     assert.strictEqual(CRM_TRIAL.includedAiLimit, 100);
     assert.strictEqual(CRM_TRIAL.deviceLimit, 1);
 

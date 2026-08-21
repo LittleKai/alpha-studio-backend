@@ -44,8 +44,8 @@ Alpha Studio (tại địa chỉ https://giaiphapsangtao.com/) là một nền t
   - Hạn mức AI (AI Quota) hàng tháng hỗ trợ soạn thảo, tối ưu kịch bản và phản hồi tin nhắn tự động.
   - **Tóm tắt cuộc trò chuyện nhóm AI (Local-first & Privacy-first)**: Ứng dụng CRM cho phép quét tin nhắn từ bộ lưu trữ cục bộ, gửi dữ liệu transient lên đám mây để AI tổng hợp tóm tắt (insights, cơ hội, nhiệm vụ) và tự động đồng bộ vào quản lý tác vụ mà không lưu trữ tin nhắn thô trên backend.
 - **Gói dịch vụ & gia hạn**:
-  - Đăng ký mới tài khoản mặc định được tặng dùng thử 14 ngày (crm_trial) với 100 lượt yêu cầu AI.
-  - Giấy phép chính gia hạn hàng tháng (1 tháng) giá 5250 credits (hoặc 500.000đ) bao gồm 1000 lượt yêu cầu AI.
+  - Đăng ký mới tài khoản mặc định được tặng dùng thử 2 tháng (60 ngày) (crm_trial) với 100 lượt yêu cầu AI.
+  - Giấy phép chính gia hạn hàng tháng (1 tháng) giá 2100 credits (hoặc 200.000đ) bao gồm 100 lượt yêu cầu AI.
   - Có các gói mua thêm hạn mức AI vĩnh viễn (AI Top-up): Gói +200 lượt AI (1000 credits hoặc 100.000đ), gói +1000 lượt AI (5000 credits hoặc 500.000đ), và gói +2000 lượt AI (10000 credits hoặc 1.000.000đ).
   - Hỗ trợ thanh toán nhanh bằng số dư Ví Credits hoặc quét mã VietQR tự động duyệt 24/7.
 

@@ -7,9 +7,9 @@ export const CRM_PLANS = {
     crm_monthly: {
         id: 'crm_monthly',
         name: 'Gói Alpha CRM Hàng Tháng',
-        priceVnd: 500000,
-        priceCredits: 5250,
-        includedAiLimit: 1000,
+        priceVnd: 200000,
+        priceCredits: 2100,
+        includedAiLimit: 100,
         deviceLimit: 1,
         durationDays: 30
     }
@@ -20,7 +20,7 @@ export const CRM_TRIAL = {
     name: 'Dùng thử Alpha CRM',
     includedAiLimit: 100,
     deviceLimit: 1,
-    durationDays: 14
+    durationDays: 60
 };
 
 export const CRM_AI_PACKS = {

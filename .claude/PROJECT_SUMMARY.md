@@ -1,6 +1,12 @@
 # Project Summary
 
-*Latest Session: Added `landingVideoQuality` (`'high'` | `'standard'`) to `PUBLIC_KEYS` and system settings routes (`server/routes/settings.js`). Validates allowed qualities and exposes `landingVideoQuality` via both `GET /api/settings/public` (default `'high'`) and `GET /api/settings`, saved via `POST /api/settings`.*
+*Latest Session: Built and released Alpha CRM v0.1.4 (Build 27) to Backblaze B2 CDN via `scripts/release-to-b2.js`. Updated Windows bundling to use native `tar` for fast reliable zipping (`alpha-crm-windows.zip`), built Android release (`alpha-crm-v0.1.4.apk`), and updated `crm-app/version.json`.*
+
+*Previous session: Updated CRM monthly subscription (`crm_monthly`) in `server/utils/crmCatalog.js` to 200,000 VND (2,100 Credits) and 100 included AI requests. Updated unit tests (`test/crmCatalog.test.js`, `test/crmBilling.test.js`).*
+
+*Previous session: Increased CRM trial duration from 14 to 60 days (2 months) in `CRM_TRIAL` (`server/utils/crmCatalog.js`), `server/utils/crmTrial.js`, and updated unit tests (`test/crmTrial.test.js`, `test/crmCatalog.test.js`).*
+
+*Previous session: Added `landingVideoQuality` (`'high'` | `'standard'`) to `PUBLIC_KEYS` and system settings routes (`server/routes/settings.js`). Validates allowed qualities and exposes `landingVideoQuality` via both `GET /api/settings/public` (default `'high'`) and `GET /api/settings`, saved via `POST /api/settings`.*
 
 *Previous session: Security audit & hardening — `JWT_SECRET`/`ENCRYPTION_KEY` giờ bắt buộc ở production (không còn fallback hardcode, dev/test dùng key ngẫu nhiên ephemeral), toàn bộ npm vulnerabilities đã vá (nodemailer 9, mongoose, fast-xml-parser, path-to-regexp, ws...), `callOpenClaw` hỗ trợ gửi `x-api-token` (env `OPENCLAW_API_TOKEN`) khi OpenClaw api-server bật auth.*
 
@@ -315,6 +321,8 @@ alpha-studio-backend/
 | Get Current User | ✅ Complete | routes/auth.js | Protected route |
 | Update Profile | ✅ Complete | routes/auth.js | Name update |
 | Change Password | ✅ Complete | routes/auth.js | Old password verification |
+| VietYaku release metadata | ✅ Complete | routes/vietyaku.js, models/SystemSetting.js, test/vietyaku-release.test.js | `GET /api/vietyaku/releases/latest` (public). Fetches the `vietyaku-app/version.json` manifest that VietYaku's build-and-release skill uploads to B2, normalises it via `parseVietYakuManifest`, and caches the result in `SystemSetting` key `vietyaku_latest_release`. Three-tier fallback: B2 → cached setting → hardcoded v1.1.0 URL. Same shape as the VocabFlip endpoint. A new VietYaku release needs **no backend deploy**. |
+| B2 app-release prefixes protected | ✅ Complete | routes/admin.js | `APP_RELEASE_PREFIXES = ['vocabflip-app/', 'vietyaku-app/']` — desktop app releases have no MongoDB record, so `GET /storage/orphaned` counts them as referenced and `DELETE /storage/orphaned` refuses them. Without this they would be listed as orphans and deleting them would 404 the `/studio` download links. |
 | Health Check | ✅ Complete | index.js | API status endpoint |
 | Password Hashing | ✅ Complete | models/User.js | bcrypt with 12 rounds |
 | JWT Middleware | ✅ Complete | middleware/auth.js | Token verification |

@@ -5,7 +5,7 @@ import {
     createInitialCrmTrialSubscription
 } from './crmTrial.js';
 
-test('buildCrmTrialSubscriptionData creates a 14-day 100-request trial', () => {
+test('buildCrmTrialSubscriptionData creates a 60-day 100-request trial', () => {
     const now = new Date('2026-06-19T00:00:00.000Z');
     const data = buildCrmTrialSubscriptionData({ userId: 'user-1', now });
 
@@ -18,7 +18,7 @@ test('buildCrmTrialSubscriptionData creates a 14-day 100-request trial', () => {
     assert.strictEqual(data.extraAiRemaining, 0);
     assert.strictEqual(data.deviceLimit, 1);
     assert.strictEqual(data.periodStart.toISOString(), '2026-06-19T00:00:00.000Z');
-    assert.strictEqual(data.periodEnd.toISOString(), '2026-07-03T00:00:00.000Z');
+    assert.strictEqual(data.periodEnd.toISOString(), '2026-08-18T00:00:00.000Z');
     assert.strictEqual(data.trialStartedAt.toISOString(), '2026-06-19T00:00:00.000Z');
 });
 
@@ -99,7 +99,7 @@ test('createInitialCrmTrialSubscription persists a first trial and audit log', a
     assert.strictEqual(result.created, true);
     assert.strictEqual(saves.length, 1);
     assert.strictEqual(result.subscription.includedAiLimit, 100);
-    assert.strictEqual(result.subscription.periodEnd.toISOString(), '2026-07-03T00:00:00.000Z');
+    assert.strictEqual(result.subscription.periodEnd.toISOString(), '2026-08-18T00:00:00.000Z');
     assert.deepStrictEqual(audits, [
         {
             userId: 'user-1',
@@ -107,7 +107,7 @@ test('createInitialCrmTrialSubscription persists a first trial and audit log', a
             action: 'subscription_trial_started',
             details: {
                 plan: 'crm_trial',
-                durationDays: 14,
+                durationDays: 60,
                 includedAiLimit: 100
             }
         }
