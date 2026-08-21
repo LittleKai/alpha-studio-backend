@@ -127,7 +127,7 @@ router.get('/releases/latest', async (_req, res) => {
     try {
         let b2Data = null;
         try {
-            const response = await fetch('https://cdn.giaiphapsangtao.com/file/alpha-studio/vocabflip-app/version.json');
+            const response = await fetch('https://f004.backblazeb2.com/file/alpha-studio/vocabflip-app/version.json');
             if (response.ok) {
                 const release = await response.json();
                 const assets = release.assets || [];
@@ -144,10 +144,10 @@ router.get('/releases/latest', async (_req, res) => {
                     version,
                     windowsInstallerUrl: windowsAsset
                         ? windowsAsset.browser_download_url
-                        : `https://cdn.giaiphapsangtao.com/file/alpha-studio/vocabflip-app/releases/vocabflip-windows-v${version}.zip`,
+                        : `https://f004.backblazeb2.com/file/alpha-studio/vocabflip-app/releases/vocabflip-windows-v${version}.zip`,
                     androidApkUrl: androidAsset
                         ? androidAsset.browser_download_url
-                        : `https://cdn.giaiphapsangtao.com/file/alpha-studio/vocabflip-app/releases/vocabflip-v${version}.apk`,
+                        : `https://f004.backblazeb2.com/file/alpha-studio/vocabflip-app/releases/vocabflip-v${version}.apk`,
                     releaseNotes: release.body || 'VocabFlip release build',
                     publishedAt: release.published_at || new Date().toISOString(),
                     windowsSize: windowsAsset?.size,
@@ -178,8 +178,8 @@ router.get('/releases/latest', async (_req, res) => {
         // Final fallback if both CDN fetch and DB cache are unavailable
         return ok(res, {
             version: '1.1.6',
-            windowsInstallerUrl: 'https://cdn.giaiphapsangtao.com/file/alpha-studio/vocabflip-app/releases/vocabflip-windows-v1.1.6.zip',
-            androidApkUrl: 'https://cdn.giaiphapsangtao.com/file/alpha-studio/vocabflip-app/releases/vocabflip-v1.1.6.apk',
+            windowsInstallerUrl: 'https://f004.backblazeb2.com/file/alpha-studio/vocabflip-app/releases/vocabflip-windows-v1.1.6.zip',
+            androidApkUrl: 'https://f004.backblazeb2.com/file/alpha-studio/vocabflip-app/releases/vocabflip-v1.1.6.apk',
             releaseNotes: 'VocabFlip release build',
             publishedAt: new Date().toISOString(),
         });

@@ -3,15 +3,24 @@ import SystemSetting from '../models/SystemSetting.js';
 
 const router = express.Router();
 
-const B2_BASE_URL = 'https://cdn.giaiphapsangtao.com/file/alpha-studio/vietyaku-app';
-const MANIFEST_URL = `${B2_BASE_URL}/version.json`;
 const SETTING_KEY = 'vietyaku_latest_release';
 const FALLBACK_VERSION = '1.1.0';
 
 const GITHUB_RELEASES_URL = 'https://github.com/LittleKai/VietYaku/releases';
 
+// Lazy: dotenv.config() in index.js runs before any request but AFTER ES module
+// imports, so reading process.env at module level would capture undefined.
+function baseUrl() {
+    const cdn = (process.env.CDN_BASE_URL || 'https://f004.backblazeb2.com/file/alpha-studio').replace(/\/+$/, '');
+    return `${cdn}/vietyaku-app`;
+}
+
+function manifestUrl() {
+    return `${baseUrl()}/version.json`;
+}
+
 function windowsZipUrl(version) {
-    return `${B2_BASE_URL}/releases/VietYaku-windows-x64-v${version}.zip`;
+    return `${baseUrl()}/releases/VietYaku-windows-x64-v${version}.zip`;
 }
 
 /**
@@ -28,10 +37,17 @@ export function parseVietYakuManifest(manifest) {
         return name.includes('windows') && name.endsWith('.zip');
     }) || assets.find((asset) => (asset.name || '').toLowerCase().endsWith('.zip'));
 
+    const androidAsset = assets.find((asset) => {
+        const name = (asset.name || '').toLowerCase();
+        return name.includes('android') && name.endsWith('.apk');
+    }) || assets.find((asset) => (asset.name || '').toLowerCase().endsWith('.apk'));
+
     return {
         version,
         windowsZipUrl: windowsAsset?.browser_download_url || windowsZipUrl(version),
         windowsSize: windowsAsset?.size,
+        androidApkUrl: androidAsset?.browser_download_url,
+        androidSize: androidAsset?.size,
         releaseNotes: manifest?.body || '',
         releaseUrl: manifest?.html_url || GITHUB_RELEASES_URL,
         publishedAt: manifest?.published_at || new Date().toISOString(),
@@ -43,7 +59,10 @@ router.get('/releases/latest', async (_req, res) => {
     try {
         let release = null;
         try {
-            const response = await fetch(MANIFEST_URL, { cache: 'no-store' });
+            // Cache-bust at the edge: version.json is overwritten in place on every
+            // release, so a cached copy (positive or negative) pins this endpoint to a
+            // stale answer. `cache: 'no-store'` only covers Node's own cache, not the CDN.
+            const response = await fetch(`${manifestUrl()}?t=${Date.now()}`, { cache: 'no-store' });
             if (response.ok) {
                 release = parseVietYakuManifest(await response.json());
                 await SystemSetting.findOneAndUpdate(

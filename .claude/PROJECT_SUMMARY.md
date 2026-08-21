@@ -1,6 +1,10 @@
-# Project Summary
+*Latest Session: **`cdn.giaiphapsangtao.com` no longer resolves** (NXDOMAIN from both Google and Cloudflare public resolvers), which silently broke every desktop-app download link — VocabFlip and Alpha CRM included; they only looked healthy because their routes were serving metadata cached in `SystemSetting` from before the host disappeared. Switched the platform to the direct B2 host `https://f004.backblazeb2.com/file/alpha-studio`: `CDN_BASE_URL` updated on Fly.io, and the hardcoded host removed from `routes/vietyaku.js`, `routes/vocab.js`, and `routes/crm.js`. `routes/vietyaku.js` now derives its base from `CDN_BASE_URL` lazily inside the handler (reading `process.env` at module level would capture `undefined` — `dotenv.config()` runs after ES module imports, same constraint as `utils/b2Storage.js`) and cache-busts the manifest fetch, since `version.json` is overwritten in place on every release. The three `version.json` manifests on B2 were rewritten to the new host, verified with HEAD requests. Note `routes/vocab.js` and `routes/crm.js` still hardcode the (now correct) host rather than reading `CDN_BASE_URL` — worth unifying.*
 
-*Latest Session: Built and released Alpha CRM v0.1.4 (Build 27) to Backblaze B2 CDN via `scripts/release-to-b2.js`. Updated Windows bundling to use native `tar` for fast reliable zipping (`alpha-crm-windows.zip`), built Android release (`alpha-crm-v0.1.4.apk`), and updated `crm-app/version.json`.*
+*Previous session: Updated `routes/vietyaku.js` (`parseVietYakuManifest`) to parse `androidAsset` (`androidApkUrl` and `androidSize`), with unit tests in `test/vietyaku-release.test.js`.*
+
+*Previous session: Built and released Alpha CRM v0.1.4 (Build 27) to Backblaze B2 CDN via `scripts/release-to-b2.js`. Updated Windows bundling to use native `tar` for fast reliable zipping (`alpha-crm-windows.zip`), built Android release (`alpha-crm-v0.1.4.apk`), and updated `crm-app/version.json`.*
+
+*Previous session: Added `routes/vietyaku.js` — `GET /api/vietyaku/releases/latest` reads the VietYaku `version.json` manifest from B2, caches it in `SystemSetting`, and falls back three ways (covered by `test/vietyaku-release.test.js`). Also protected desktop app release prefixes (`vocabflip-app/`, `vietyaku-app/`) from the B2 orphan checker in `routes/admin.js`.*
 
 *Previous session: Updated CRM monthly subscription (`crm_monthly`) in `server/utils/crmCatalog.js` to 200,000 VND (2,100 Credits) and 100 included AI requests. Updated unit tests (`test/crmCatalog.test.js`, `test/crmBilling.test.js`).*
 

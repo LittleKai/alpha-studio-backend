@@ -1,7 +1,13 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
+// Pin the base URL so the derived-URL assertions do not depend on whatever
+// CDN_BASE_URL the machine running the tests happens to have.
+process.env.CDN_BASE_URL = 'https://cdn.example.test/file/alpha-studio';
+
 import { parseVietYakuManifest } from '../server/routes/vietyaku.js';
+
+const DERIVED_BASE = 'https://cdn.example.test/file/alpha-studio/vietyaku-app';
 
 const FULL_MANIFEST = {
     tag_name: 'v1.2.0',
@@ -42,7 +48,7 @@ test('derives the B2 download URL when the manifest has no assets', () => {
 
     assert.equal(
         release.windowsZipUrl,
-        'https://cdn.giaiphapsangtao.com/file/alpha-studio/vietyaku-app/releases/VietYaku-windows-x64-v1.3.0.zip'
+        `${DERIVED_BASE}/releases/VietYaku-windows-x64-v1.3.0.zip`
     );
     assert.equal(release.windowsSize, undefined);
 });
@@ -66,9 +72,24 @@ test('picks a zip asset even when the name does not contain "windows"', () => {
     assert.equal(release.windowsSize, 10);
 });
 
+test('picks an android apk asset when present', () => {
+    const release = parseVietYakuManifest({
+        tag_name: 'v1.5.0',
+        assets: [
+            { name: 'VietYaku-windows-x64-v1.5.0.zip', browser_download_url: 'https://example.com/app.zip', size: 50000000 },
+            { name: 'VietYaku-android-v1.5.0.apk', browser_download_url: 'https://example.com/app.apk', size: 30000000 },
+        ],
+    });
+
+    assert.equal(release.windowsZipUrl, 'https://example.com/app.zip');
+    assert.equal(release.androidApkUrl, 'https://example.com/app.apk');
+    assert.equal(release.androidSize, 30000000);
+});
+
 test('never throws on a malformed manifest', () => {
     const release = parseVietYakuManifest(null);
 
     assert.equal(release.version, '1.1.0');
     assert.match(release.windowsZipUrl, /VietYaku-windows-x64-v1\.1\.0\.zip$/);
+    assert.equal(release.androidApkUrl, undefined);
 });
