@@ -17,6 +17,7 @@
     "db:m0:migrate": "node scripts/migrate-mongodb-m0.mjs",
     "db:m0:rollback": "node scripts/rollback-mongodb-m0.mjs",
     "db:m0:audit": "node scripts/audit-mongodb-m0.mjs",
+    "db:migrate-b2-host": "node scripts/migrate-b2-host.mjs",
     "seed:interior-templates": "node scripts/seed-interior-templates.mjs",
     "sync:interior-assets": "node scripts/sync-interior-assets.mjs",
     "import:skills": "node scripts/import-skills.js"
