@@ -1,3 +1,9 @@
+// PHẢI đứng trước mọi import khác: ESM chạy hết import trước mọi câu lệnh cấp
+// module, nên `dotenv.config()` ở dưới chạy SAU khi middleware/auth.js đã đọc
+// process.env.JWT_SECRET — khiến nó luôn thấy undefined và rơi vào secret ngẫu
+// nhiên, đăng xuất mọi người sau mỗi lần nodemon restart. Cùng loại bẫy đã ghi
+// trong PROJECT_SUMMARY cho routes/vietyaku.js và utils/b2Storage.js.
+import 'dotenv/config';
 import express from 'express';
 import path from 'path';
 import { fileURLToPath } from 'url';
@@ -18,7 +24,6 @@ import paymentRoutes from './routes/payment.js';
 import adminRoutes from './routes/admin.js';
 import settingsRoutes from './routes/settings.js';
 import promptRoutes from './routes/prompts.js';
-import resourceRoutes from './routes/resources.js';
 import commentRoutes from './routes/comments.js';
 import enrollmentRoutes from './routes/enrollments.js';
 import reviewRoutes from './routes/reviews.js';
@@ -36,6 +41,7 @@ import vietyakuRoutes from './routes/vietyaku.js';
 import aiRoutes from './routes/ai.js';
 import interiorRoutes from './routes/interior.js';
 import skillRoutes from './routes/skills.js';
+import eventLibraryRoutes from './routes/eventLibrary.js';
 import crmRoutes from './routes/crm.js';
 import channelWebhookRoutes from './routes/channelWebhooks.js';
 import webchatPublicRoutes from './routes/webchatPublic.js';
@@ -109,7 +115,6 @@ app.use('/api/payment', paymentRoutes);
 app.use('/api/admin', adminRoutes);
 app.use('/api/settings', settingsRoutes);
 app.use('/api/prompts', promptRoutes);
-app.use('/api/resources', resourceRoutes);
 app.use('/api/comments', commentRoutes);
 app.use('/api/enrollments', enrollmentRoutes);
 app.use('/api/reviews', reviewRoutes);
@@ -128,6 +133,7 @@ app.use('/api/interior', interiorRoutes);
 app.use('/api/crm', crmRoutes);
 app.use('/api/crm', channelWebhookRoutes);
 app.use('/api/skills', skillRoutes);
+app.use('/api/event-library', eventLibraryRoutes);
 
 // Sitemap (no /api prefix — served at root)
 app.use('/sitemap.xml', sitemapRoutes);

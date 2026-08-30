@@ -3,7 +3,7 @@ import mongoose from 'mongoose';
 const commentSchema = new mongoose.Schema({
     targetType: {
         type: String,
-        enum: ['prompt', 'resource'],
+        enum: ['prompt'],
         required: [true, 'Target type is required']
     },
     targetId: {

@@ -5,7 +5,7 @@ import User from '../models/User.js';
 import Transaction from '../models/Transaction.js';
 import WebhookLog from '../models/WebhookLog.js';
 import WorkflowDocument from '../models/WorkflowDocument.js';
-import Resource from '../models/Resource.js';
+import EventLibraryItem from '../models/EventLibraryItem.js';
 import Course from '../models/Course.js';
 import Prompt from '../models/Prompt.js';
 import StudioGeneration from '../models/StudioGeneration.js';
@@ -723,28 +723,6 @@ router.get('/storage/orphaned', async (req, res) => {
         // 3. Collect all used keys from all collections
         const usedKeys = new Set(docKeyMap.keys());
 
-        // Resources: main file + preview images
-        const resources = await Resource.find({}, 'file previewImages author').populate('author', 'name').lean();
-        for (const r of resources) {
-            // Main file
-            const fileKey = r.file?.publicId || extractB2Key(r.file?.url);
-            if (fileKey) {
-                usedKeys.add(fileKey);
-                if (!docKeyMap.has(fileKey)) {
-                    docKeyMap.set(fileKey, {
-                        uploader: r.author?.name || 'Unknown',
-                        uploadedAt: null,
-                        source: 'resource'
-                    });
-                }
-            }
-            // Preview images (stored in B2)
-            for (const img of (r.previewImages || [])) {
-                const imgKey = img.publicId || extractB2Key(img.url);
-                if (imgKey) usedKeys.add(imgKey);
-            }
-        }
-
         // Prompts: example images
         const prompts = await Prompt.find({}, 'exampleImages').lean();
         for (const p of prompts) {
@@ -791,6 +769,25 @@ router.get('/storage/orphaned', async (req, res) => {
                         const key = extractB2Key(doc.url);
                         if (key) usedKeys.add(key);
                     }
+                }
+            }
+        }
+
+        // Event library attachments (tài liệu đính kèm case study / template)
+        const libraryItems = await EventLibraryItem.find({}, 'attachments owner')
+            .populate('owner', 'name')
+            .lean();
+        for (const item of libraryItems) {
+            for (const att of (item.attachments || [])) {
+                const key = att.fileKey || extractB2Key(att.url);
+                if (!key) continue;
+                usedKeys.add(key);
+                if (!docKeyMap.has(key)) {
+                    docKeyMap.set(key, {
+                        uploader: item.owner?.name || 'Unknown',
+                        uploadedAt: null,
+                        source: 'event-library'
+                    });
                 }
             }
         }

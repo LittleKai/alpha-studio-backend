@@ -99,8 +99,8 @@ router.post('/', authMiddleware, modOnly, async (req, res) => {
     try {
         const { title, excerpt, content, thumbnail, category, tags, order, isFeatured } = req.body;
 
-        if (!title?.vi || !title?.en) {
-            return res.status(400).json({ success: false, message: 'Cần tiêu đề cả tiếng Việt và tiếng Anh' });
+        if (!title?.vi) {
+            return res.status(400).json({ success: false, message: 'Cần tiêu đề tiếng Việt' });
         }
 
         if (!category || !['about', 'services'].includes(category)) {

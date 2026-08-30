@@ -16,7 +16,7 @@ const lessonSchema = new mongoose.Schema({
     },
     title: {
         vi: { type: String, required: true },
-        en: { type: String, required: true }
+        en: { type: String, default: '' }
     },
     duration: {
         type: Number,
@@ -49,7 +49,7 @@ const moduleSchema = new mongoose.Schema({
     },
     title: {
         vi: { type: String, required: true },
-        en: { type: String, required: true }
+        en: { type: String, default: '' }
     },
     lessons: [lessonSchema]
 }, { _id: false });
@@ -70,7 +70,7 @@ const courseSchema = new mongoose.Schema({
         },
         en: {
             type: String,
-            required: [true, 'English title is required'],
+            default: '',
             trim: true
         }
     },

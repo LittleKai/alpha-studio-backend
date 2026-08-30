@@ -4,7 +4,7 @@ import { noInlineMediaPlugin } from '../validation/inlineMedia.js';
 const articleSchema = new mongoose.Schema({
     title: {
         vi: { type: String, required: [true, 'Cần tiêu đề tiếng Việt'] },
-        en: { type: String, required: [true, 'English title is required'] }
+        en: { type: String, default: '' }
     },
     slug: {
         type: String,

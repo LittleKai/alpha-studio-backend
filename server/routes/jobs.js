@@ -237,10 +237,10 @@ router.post('/', authMiddleware, modOnly, async (req, res) => {
             applicationDeadline
         } = req.body;
 
-        if (!title?.vi || !title?.en) {
+        if (!title?.vi) {
             return res.status(400).json({
                 success: false,
-                message: 'Title in both Vietnamese and English is required'
+                message: 'Vietnamese title is required'
             });
         }
 

@@ -24,7 +24,7 @@ const promptSchema = new mongoose.Schema({
         },
         en: {
             type: String,
-            required: [true, 'English title is required'],
+            default: '',
             trim: true
         }
     },

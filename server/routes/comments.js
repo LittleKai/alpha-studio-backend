@@ -1,7 +1,6 @@
 import express from 'express';
 import Comment from '../models/Comment.js';
 import Prompt from '../models/Prompt.js';
-import Resource from '../models/Resource.js';
 import { authMiddleware, modOnly } from '../middleware/auth.js';
 
 const router = express.Router();
@@ -10,7 +9,6 @@ const router = express.Router();
 const getTargetModel = (targetType) => {
     switch (targetType) {
         case 'prompt': return Prompt;
-        case 'resource': return Resource;
         default: return null;
     }
 };
@@ -70,7 +68,7 @@ router.get('/:targetType/:targetId', async (req, res) => {
         const { targetType, targetId } = req.params;
         const { page = 1, limit = 20, sort = '-createdAt' } = req.query;
 
-        if (!['prompt', 'resource'].includes(targetType)) {
+        if (!['prompt'].includes(targetType)) {
             return res.status(400).json({
                 success: false,
                 message: 'Invalid target type'
@@ -134,7 +132,7 @@ router.post('/:targetType/:targetId', authMiddleware, async (req, res) => {
         const { targetType, targetId } = req.params;
         const { content, parentComment } = req.body;
 
-        if (!['prompt', 'resource'].includes(targetType)) {
+        if (!['prompt'].includes(targetType)) {
             return res.status(400).json({
                 success: false,
                 message: 'Invalid target type'

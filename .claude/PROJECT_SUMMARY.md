@@ -1,4 +1,14 @@
-*Latest Session: **`cdn.giaiphapsangtao.com` no longer resolves** (NXDOMAIN from both Google and Cloudflare public resolvers), which silently broke every desktop-app download link — VocabFlip and Alpha CRM included; they only looked healthy because their routes were serving metadata cached in `SystemSetting` from before the host disappeared. Switched the platform to the direct B2 host `https://f004.backblazeb2.com/file/alpha-studio`: `CDN_BASE_URL` updated on Fly.io, and the hardcoded host removed from `routes/vietyaku.js`, `routes/vocab.js`, and `routes/crm.js`. `routes/vietyaku.js` now derives its base from `CDN_BASE_URL` lazily inside the handler (reading `process.env` at module level would capture `undefined` — `dotenv.config()` runs after ES module imports, same constraint as `utils/b2Storage.js`) and cache-busts the manifest fetch, since `version.json` is overwritten in place on every release. The three `version.json` manifests on B2 were rewritten to the new host, verified with HEAD requests. Note `routes/vocab.js` and `routes/crm.js` still hardcode the (now correct) host rather than reading `CDN_BASE_URL` — worth unifying. Stored URLs in Mongo carried the dead host too, which also defeated `extractB2Key()` (its `CDN_BASE_URL` prefix no longer matched, and its `.backblazeb2.com/file/{bucket}/` fallback never did) — so presigned downloads for course videos and lesson documents were broken, not just the direct links. `scripts/migrate-b2-host.mjs` (`npm run db:migrate-b2-host`, dry-run by default, `--apply` to write, idempotent) rewrites the host across every B2 URL field; it has been run: 3 documents / 3 URLs (1 WorkflowDocument, 2 Course lesson videos). Its field inventory mirrors the orphan checker in `routes/admin.js` — keep the two in sync.*
+*Latest Session: **Tương tác của mục thư viện: like + review (sao kèm nhận xét trong cùng một phiếu) — không có khối bình luận riêng.** `EventLibraryItem` thêm `likes[]`/`likesCount` và `ratings[]` (mỗi phần tử `{user, score 1–5, comment, timestamps}`) cùng `rating{average,count}`. `POST /:slug/like` bật/tắt; `POST /:slug/rate` nhận `{score, comment}` — mỗi người đúng **một** phiếu, chấm lại thì ghi đè cả điểm lẫn nhận xét (`upsertRating` cắt nhận xét ở `MAX_REVIEW_COMMENT = 1000`). `GET /:slug` **không trả `likes`/`ratings`** (vừa lộ danh sách người dùng vừa phình) mà trả `me: { liked, score, comment }` cho riêng người đang xem, cộng `reviews[]` — 30 phiếu có nhận xét mới nhất, populate `ratings.user` để lấy tên/avatar; `INDEX_FIELDS` cũng loại hai mảng này. **Không tái sử dụng `/api/comments`**: `Comment.targetType` giữ nguyên `['prompt']`, không có target `library`, và `commentsCount` đã gỡ khỏi schema (force-unset trên 26 bản ghi cũ qua raw driver — Mongoose strict mode nuốt `$unset` cho field không còn trong schema, báo `modifiedCount` nhưng không xoá gì). Backfill 27 mục cũ thiếu field mặc định. Test cho `toggleLike`/`upsertRating`/`summarizeRatings`; `npm test` 155/155.*
+
+*Previous session: **Cập nhật toàn diện bộ thông tin ngữ cảnh cho Trợ lý AI Chatbot (`venue.md`).** Đồng bộ và làm mới toàn bộ dữ liệu kiến thức cho chatbot tư vấn hỗ trợ trên web tại cả `server/context/alpha-studio-bot/venue.md` và `tools/openclaw-server/workspaces/alpha-studio/venue.md`. Nội dung cập nhật bao gồm: (1) **Thư viện Tri Thức Sự Kiện** (`/studio/event-library`) thay thế hoàn toàn Kho tài nguyên cũ, 7 loại hình nội dung, 8 loại khối soạn thảo, cơ chế xuất bản từ Workflow; (2) **Thư viện Kỹ Năng AI** (`/studio/skills`); (3) **VietYaku** (`/studio/vietyaku`) dịch Nhật/Trung sang Việt cho Windows và Android; (4) **VocabFlip** (`/studio/vocab`) thuật toán FSRS, tra từ điển StarDict offline 0ms, luyện viết chữ Hán/Kanji 16.2K ký tự `animCJK`, AI Flashcard generator; (5) **Alpha CRM** (`/studio/crm`) tiếp thị đa kênh (Zalo, FB, TikTok, IG, WhatsApp, Telegram, Webchat), chính sách dùng thử 2 tháng & gói gia hạn 2.100 credits/200K, bảo mật dữ liệu cục bộ & tóm tắt nhóm AI transient; (6) **AI Interior Design** (`/studio/interior-design`) hỗ trợ đa dạng bố cục `runs[]` (L/U/Island/Galley/song song), thư viện 197 components, bo góc `roundedBox`, trụ tròn `cylinder`, phân tích phác thảo & render AI, chế độ xác nhận 2 bước; (7) Cập nhật hệ sinh thái Khóa học, Share Prompts, Ví VietQR Casso tự động và Cloud Desktop.*
+
+*Previous session: **Tiếng Anh không còn bắt buộc cho nội dung đăng lên web.** Gỡ `required` khỏi nhánh `en` trong `models/Article.js` (`title.en`), `models/Course.js` (`title.en` của khoá học, của module và của lesson), `models/Job.js` và `models/Prompt.js` (`title.en`) — tất cả chuyển thành `default: ''`. Bốn route `POST` đổi điều kiện `!title?.vi || !title?.en` thành `!title?.vi`, thông báo lỗi còn "Cần tiêu đề tiếng Việt" / "Vietnamese title is required": `routes/articles.js`, `routes/courses.js`, `routes/jobs.js`, `routes/prompts.js`. Route `PUT` chỉ gán field nên không cần sửa; sinh slug vốn đã fallback (`title.en || title.vi` ở Course/Prompt, `title.vi` ở Article) nên không ảnh hưởng. Frontend chịu trách nhiệm hiển thị bản VI khi EN trống — backend **không** tự nhân bản giá trị, để phân biệt "chưa dịch" với "đã dịch". Test mới `test/optional-english-content.test.js` (8 case, dùng `validateSync()` nên không cần DB): mỗi model phải hợp lệ khi thiếu `title.en` và phải báo lỗi khi thiếu `title.vi`. `npm test` 148/148. **Sửa kèm một lỗi hạ tầng phát hiện khi test end-to-end:** `server/index.js` gọi `dotenv.config()` ở dòng 57, nhưng ESM chạy hết import trước mọi câu lệnh cấp module, nên `middleware/auth.js` đọc `process.env.JWT_SECRET` ở pha import và luôn thấy `undefined` — mỗi lần nodemon restart sinh secret mới và đá mọi người đang đăng nhập ra với `Invalid token.`, dù `.env` có JWT_SECRET hợp lệ. Sửa bằng `import 'dotenv/config';` làm import đầu tiên. Chỉ ảnh hưởng dev (Fly.io cấp env trước khi module nạp). Ghi lại ở `.claude/IMPORTANT_FIXED_BUGS.md` — cùng loại bẫy với `utils/b2Storage.js` và `routes/vietyaku.js`. **Dữ liệu mẫu:** `scripts/seed-event-library-skills.mjs` (6 skill nghiệp vụ sự kiện) và `scripts/seed-event-library-cases.mjs` (6 case study) — cùng quy ước dry-run / `--apply` / `clean`, slug cố định nên idempotent, case liên kết sang skill qua khối `linkedItems`. Cả hai để `verification: 'unverified'` vì là nội dung biên tập chưa qua rà soát; bộ case dùng **khách hàng ẩn danh và số liệu minh hoạ**, có khối cảnh báo đặt đầu bài — không gắn kết quả bịa cho thương hiệu có thật. Thêm `seed-event-library-prompts.mjs` (6 prompt, nội dung prompt bọc `<pre>` trong khối richText) và `seed-event-library-templates.mjs` (6 template). **Template seed KHÔNG có `attachments`** — không có file thật để upload và bịa URL B2 sẽ tạo link 404, nên cấu trúc template viết thẳng vào thân bài dạng bảng/checklist; card do đó không hiện nút "Tải về" (đúng thiết kế). Cả 4 bộ đều liên kết chéo qua `linkedItems`, tổng 24 mục platform. Cả 24 mục có **ảnh bìa** sinh bằng skill `delegate --type=image` của `D:Dev.lib_pjhybrid-ai-skills` (Gemini image qua Antigravity, không dùng API key Gemini trực tiếp) rồi đẩy lên Cloudinary folder `event-library`; URL hardcode trong hằng `COVER` của từng script seed, ảnh master đã xoá sau khi lên Cloudinary, chỉ giữ `deliverables/event-library-covers/README.md` chứa bảng prompt để sinh lại khi cần. Bốn loại dùng bốn ngôn ngữ hình ảnh khác nhau để phân biệt trên lưới: skill = hậu trường/nghề, case study = phóng sự có đám đông, prompt = tĩnh vật trừu tượng không người, template = flat-lay biểu mẫu nền sáng.*
+
+*Previous session: Thân bài của `EventLibraryItem` chuyển từ một khối `content` TinyMCE duy nhất sang **`sections[]` — danh sách khối có thứ tự** với 8 `kind` (`richText`, `keyValue`, `metrics`, `bulletGroups`, `steps`, `quote`, `gallery`, `linkedItems`), cộng `gallery[]` ảnh phụ. Tất cả gộp trong một sub-schema thay vì 8 sub-schema để mảng giữ được thứ tự người đăng sắp; mỗi khối chỉ dùng field thuộc `kind` của nó và `sanitizeSections()` cắt sạch phần thừa, bỏ `kind` lạ, chặn payload phình (30 khối / 50 phần tử mỗi khối). Chữ trong khối là **một ngôn ngữ** — chỉ `title`/`summary`/`content` ở cấp mục còn song ngữ. `GET /` bỏ luôn `sections` khỏi projection (`-content -sections`) nên danh sách không kéo thân bài. **Kho tài nguyên cũ đã bị gỡ hẳn**: `models/Resource.js` và `routes/resources.js` xoá, `/api/resources` không còn, `comments.js` bỏ target `resource`, orphan checker trong `admin.js` bỏ khối Resource và bù lại phần quy kết người upload vào khối `EventLibraryItem` (`source: 'event-library'`). `scripts/migrate-resources-to-library.mjs` (dry-run mặc định, `--apply` để ghi, idempotent qua `origin.refId`) đã chạy: 2 bản ghi chuyển sang thư viện, giữ nguyên URL/key B2 nên file không thành mồ côi. 5 test mới cho `sanitizeSections`; `npm test` 140/140.*
+
+*Previous session: Added the **Event Knowledge Library** (`models/EventLibraryItem.js`, `routes/eventLibrary.js` mounted at `/api/event-library`, `test/event-library.test.js`) — one collection holding all 7 content types (`itemType`) from two sources: `ownership: platform` (editorial/crawled, admin-only, always public) and `ownership: user` (published from Workflow, `visibility: private|public`, scoped to `owner`). Every read goes through `buildVisibilityFilter(user)`; `POST /publish/project/:id` and `POST /publish/document/:id` convert a `WorkflowProject`/`WorkflowDocument` into a per-account item and are gated by `canPublishProject`/`canPublishDocument`. `routes/admin.js` orphan checker now also scans `EventLibraryItem.attachments[].fileKey/url`. 22 new unit tests; `npm test` 135/135.*
+
+*Previous session: **`cdn.giaiphapsangtao.com` no longer resolves** (NXDOMAIN from both Google and Cloudflare public resolvers), which silently broke every desktop-app download link — VocabFlip and Alpha CRM included; they only looked healthy because their routes were serving metadata cached in `SystemSetting` from before the host disappeared. Switched the platform to the direct B2 host `https://f004.backblazeb2.com/file/alpha-studio`: `CDN_BASE_URL` updated on Fly.io, and the hardcoded host removed from `routes/vietyaku.js`, `routes/vocab.js`, and `routes/crm.js`. `routes/vietyaku.js` now derives its base from `CDN_BASE_URL` lazily inside the handler (reading `process.env` at module level would capture `undefined` — `dotenv.config()` runs after ES module imports, same constraint as `utils/b2Storage.js`) and cache-busts the manifest fetch, since `version.json` is overwritten in place on every release. The three `version.json` manifests on B2 were rewritten to the new host, verified with HEAD requests. Note `routes/vocab.js` and `routes/crm.js` still hardcode the (now correct) host rather than reading `CDN_BASE_URL` — worth unifying. Stored URLs in Mongo carried the dead host too, which also defeated `extractB2Key()` (its `CDN_BASE_URL` prefix no longer matched, and its `.backblazeb2.com/file/{bucket}/` fallback never did) — so presigned downloads for course videos and lesson documents were broken, not just the direct links. `scripts/migrate-b2-host.mjs` (`npm run db:migrate-b2-host`, dry-run by default, `--apply` to write, idempotent) rewrites the host across every B2 URL field; it has been run: 3 documents / 3 URLs (1 WorkflowDocument, 2 Course lesson videos). Its field inventory mirrors the orphan checker in `routes/admin.js` — keep the two in sync.*
 
 *Previous session: Updated `routes/vietyaku.js` (`parseVietYakuManifest`) to parse `androidAsset` (`androidApkUrl` and `androidSize`), with unit tests in `test/vietyaku-release.test.js`.*
 
@@ -50,14 +60,14 @@ alpha-studio-backend/
 │   │   ├── Transaction.js         # Payment transactions (topup, spend, etc.)
 │   │   ├── WebhookLog.js          # Casso webhook logging
 │   │   ├── Prompt.js              # Shared prompts with multiple contents, ratings
-│   │   ├── Resource.js            # Resource hub with file upload (50MB)
-│   │   ├── Comment.js             # Comments for prompts/resources
+│   │   ├── Comment.js             # Comments for prompts
 │   │   ├── Article.js             # Articles for About & Services pages (bilingual)
 │   │   ├── HostMachine.js         # Cloud host machine registry
 │   │   ├── CloudSession.js        # Cloud desktop sessions
 │   │   ├── InteriorAiLog.js       # Raw AI request/response per Interior /chat call (TTL 30 days)
 │   │   ├── WorkflowProject.js     # Workflow projects (team, tasks, chatHistory, expenseLog)
 │   │   ├── WorkflowDocument.js    # Workflow documents (file metadata, status, comments)
+│   │   ├── EventLibraryItem.js    # Thư viện sự kiện — 7 itemType, ownership platform|user, visibility public|private
 │   │   ├── FeaturedStudent.js     # Featured students (userId ref, order, label, hired)
 │   │   └── ChatMessage.js         # AI consultation chat history (userId, role, content) — display only; OpenClaw maintains session memory via x-openclaw-session-key
 │   ├── middleware/
@@ -70,14 +80,14 @@ alpha-studio-backend/
 │       ├── payment.js             # Payment API (create, confirm, cancel, webhook)
 │       ├── admin.js               # Admin API (users, transactions, webhook management)
 │       ├── prompts.js             # Prompts API (CRUD, like, bookmark, rate, download)
-│       ├── resources.js           # Resources API (CRUD, like, bookmark, rate, download)
-│       ├── comments.js            # Comments API for prompts/resources
+│       ├── comments.js            # Comments API for prompts
 │       ├── enrollments.js         # Course enrollment API (enroll, progress, check)
 │       ├── reviews.js             # Course reviews API (CRUD, like, helpful, rating distribution)
 │       ├── articles.js            # Articles API (CRUD, publish/unpublish, public + admin)
 │       ├── cloud.js              # Cloud desktop API (connect, disconnect, admin machines/sessions, heartbeat)
 │       ├── upload.js             # B2 presigned URL endpoint (POST /presign, DELETE /file)
 │       ├── workflow.js           # Workflow API (CRUD projects + documents, auth required)
+│       ├── eventLibrary.js       # Event library API (list/detail/stats, user CRUD, publish from Workflow)
 │       ├── featuredStudents.js   # Featured students API (public GET, admin CRUD + reorder)
 │       └── chat.js               # AI consultation API (auth required) — GET /history, POST /send, DELETE /history; forwards to OpenClaw via OPENCLAW_URL
 │   └── utils/
@@ -105,6 +115,16 @@ alpha-studio-backend/
 │   ├── GET  /me          # Get current user (auth required)
 │   ├── PUT  /profile     # Update profile (auth required)
 │   └── PUT  /password    # Change password (auth required)
+├── /event-library
+│   ├── GET    /            # List (public; adds the caller's own private items when signed in)
+│   ├── GET    /stats       # Totals for the hero stat strip
+│   ├── GET    /:slug       # Detail + related (increments stats.views)
+│   ├── POST   /:slug/use   # Increments stats.uses (download / "use now" button)
+│   ├── POST   /            # Create (auth; ownership=platform is admin-only)
+│   ├── PUT    /:id         # Update (owner or admin)
+│   ├── DELETE /:id         # Delete (owner or admin)
+│   ├── POST   /publish/project/:projectId    # WorkflowProject → case study (creator/team/admin)
+│   └── POST   /publish/document/:documentId  # WorkflowDocument → template (uploader/admin)
 ├── /courses (admin only)
 │   ├── GET    /           # List courses (pagination, filters, search)
 │   ├── GET    /stats      # Course statistics
@@ -172,22 +192,6 @@ alpha-studio-backend/
 │   ├── POST   /:id/like          # Toggle like (auth)
 │   ├── POST   /:id/bookmark      # Toggle bookmark (auth)
 │   ├── POST   /:id/download      # Track download (auth)
-│   ├── POST   /:id/rate          # Rate 1-5 stars (auth)
-│   ├── PATCH  /:id/hide          # Hide content (mod/admin)
-│   ├── PATCH  /:id/unhide        # Restore content (mod/admin)
-│   └── PATCH  /:id/feature       # Toggle featured (admin)
-├── /resources
-│   ├── GET    /                  # List resources (pagination, filters, search)
-│   ├── GET    /featured          # Get featured resources
-│   ├── GET    /my/created        # Get user's created resources (auth)
-│   ├── GET    /my/bookmarked     # Get user's bookmarked resources (auth)
-│   ├── GET    /:slug             # Get single resource by slug
-│   ├── POST   /                  # Create resource (auth)
-│   ├── PUT    /:id               # Update resource (auth, owner)
-│   ├── DELETE /:id               # Delete resource (auth, owner)
-│   ├── POST   /:id/like          # Toggle like (auth)
-│   ├── POST   /:id/bookmark      # Toggle bookmark (auth)
-│   ├── POST   /:id/download      # Track download + get file URL (auth)
 │   ├── POST   /:id/rate          # Rate 1-5 stars (auth)
 │   ├── PATCH  /:id/hide          # Hide content (mod/admin)
 │   ├── PATCH  /:id/unhide        # Restore content (mod/admin)
@@ -291,8 +295,8 @@ alpha-studio-backend/
   - `transactions` - Payment transactions (topup, spend, refund, manual_topup, bonus)
   - `webhooklogs` - Casso webhook logs for debugging/reprocessing
   - `prompts` - Shared prompts with multiple contents, ratings, engagement
-  - `resources` - Resource hub files with metadata and engagement
-  - `comments` - Comments for prompts and resources
+  - `eventlibraryitems` - Thư viện tri thức sự kiện (7 itemType, sections[], platform/user)
+  - `comments` - Comments for prompts
 - **Documentation:** See DATABASE.md for detailed schema
 
 ### CORS Configuration
@@ -327,6 +331,7 @@ alpha-studio-backend/
 | Change Password | ✅ Complete | routes/auth.js | Old password verification |
 | VietYaku release metadata | ✅ Complete | routes/vietyaku.js, models/SystemSetting.js, test/vietyaku-release.test.js | `GET /api/vietyaku/releases/latest` (public). Fetches the `vietyaku-app/version.json` manifest that VietYaku's build-and-release skill uploads to B2, normalises it via `parseVietYakuManifest`, and caches the result in `SystemSetting` key `vietyaku_latest_release`. Three-tier fallback: B2 → cached setting → hardcoded v1.1.0 URL. Same shape as the VocabFlip endpoint. A new VietYaku release needs **no backend deploy**. |
 | B2 app-release prefixes protected | ✅ Complete | routes/admin.js | `APP_RELEASE_PREFIXES = ['vocabflip-app/', 'vietyaku-app/']` — desktop app releases have no MongoDB record, so `GET /storage/orphaned` counts them as referenced and `DELETE /storage/orphaned` refuses them. Without this they would be listed as orphans and deleting them would 404 the `/studio` download links. |
+| Event Knowledge Library | ✅ Complete | models/EventLibraryItem.js, routes/eventLibrary.js, test/event-library.test.js | One collection, 7 `itemType` (case_study/prompt/workflow/skill/template/report/playbook) and two sources. `ownership: "platform"` = editorial/crawled content of the site: admin-only to create, always `visibility: "public"`, no `owner`. `ownership: "user"` = published by an account: `owner` set, `visibility` private (default) or public. **Every read path composes `buildVisibilityFilter(user)`** — guests see platform + public community items, a signed-in user additionally sees their own private items, admin sees everything. Filters (`category`, `industries`, `objectives`, `kpis`, `budgetTier`, `verification`, `depth`) are whitelisted through `parseCsv` and search input is regex-escaped. Publishing from Workflow (`mapProjectToLibraryItem` / `mapDocumentToLibraryItem`) always forces `ownership: user`, `owner: req.user._id` and `verification: unverified` so a poster cannot promote their own item to site content; `origin.{kind,refId}` blocks publishing the same project/document twice (409). **Tương tác:** `likes[]`/`likesCount` + `ratings[]` (`{user, score, comment}`, mỗi người một phiếu) → `POST /:slug/like`, `POST /:slug/rate`; nhận xét nằm trong chính phiếu chấm, không dùng `/api/comments`. `GET /:slug` trả `me:{liked,score,comment}` + `reviews[]` (30 phiếu có nhận xét mới nhất) thay vì lộ hai mảng gốc. 24 mục platform seed sẵn qua `scripts/seed-event-library-{skills,cases,prompts,templates}.mjs`. |
 | Health Check | ✅ Complete | index.js | API status endpoint |
 | Password Hashing | ✅ Complete | models/User.js | bcrypt with 12 rounds |
 | JWT Middleware | ✅ Complete | middleware/auth.js | Token verification |
@@ -352,8 +357,7 @@ alpha-studio-backend/
 | Webhook Assignment | ✅ Complete | routes/admin.js | Admin can assign unmatched webhooks to users |
 | Transaction Timeout | ✅ Complete | routes/admin.js | Auto-timeout after 5 min without webhook match |
 | Share Prompts API | ✅ Complete | routes/prompts.js, models/Prompt.js | CRUD, like, bookmark, rate, download, featured, moderation |
-| Resource Hub API | ✅ Complete | routes/resources.js, models/Resource.js | CRUD, file upload (50MB), like, bookmark, rate, download |
-| Comments API | ✅ Complete | routes/comments.js, models/Comment.js | Comments for prompts/resources with likes |
+| Comments API | ✅ Complete | routes/comments.js, models/Comment.js | Comments for prompts with likes. `targetType` chỉ còn `['prompt']` — target `resource` gỡ cùng Kho tài nguyên, và Thư viện sự kiện **không** dùng API này (nhận xét đi kèm phiếu chấm trong `EventLibraryItem.ratings[]`) |
 | Course Enrollment API | ✅ Complete | routes/enrollments.js, models/Enrollment.js | Enroll with credit deduction for paid courses; Transaction recorded; progress tracking |
 | Course Reviews API | ✅ Complete | routes/reviews.js, models/Review.js | CRUD, rating distribution, helpful votes, admin reply |
 | Lesson Video/Documents | ✅ Complete | models/Course.js | videoUrl and documents array per lesson |
@@ -363,7 +367,7 @@ alpha-studio-backend/
 | Workflow Projects API | ✅ Complete | models/WorkflowProject.js, routes/workflow.js | CRUD projects with team, tasks, chatHistory, expenseLog — auth required; GET /projects shows all non-completed for users |
 | Workflow Documents API | ✅ Complete | models/WorkflowDocument.js, routes/workflow.js | CRUD document records with status, comments, note — auth required; GET ?projectId returns all project docs to members |
 | Workflow User Profile API | ✅ Complete | routes/workflow.js | GET /users/:id returns public profile (name, avatar, role, email, phone, bio, skills, location, socials) — auth required |
-| Storage Cleanup API | ✅ Complete | routes/admin.js, utils/b2Storage.js | Lists all B2 files; cross-references WorkflowDocument/Resource (file+previewImages)/Course (videoUrl+documents)/Prompt (exampleImages); returns `data` (orphaned) + `referencedFiles` each with `source`, `uploader`, `referenced` — super admin only |
+| Storage Cleanup API | ✅ Complete | routes/admin.js, utils/b2Storage.js | Lists all B2 files; cross-references WorkflowDocument/EventLibraryItem (attachments)/Course (videoUrl+documents)/Prompt (exampleImages); returns `data` (orphaned) + `referencedFiles` each with `source`, `uploader`, `referenced` — super admin only |
 | Studio Usage Tracking (legacy) | ✅ Complete | models/User.js, routes/studio.js | `studioUsage: {date, count}` on User; GET /studio/usage + POST /studio/use; 3 free uses/day; admin/mod unlimited |
 | Flow Image/Video Generation | ✅ Complete (Phase 2) | models/{FlowServer,StudioGeneration,User}.js, routes/studio.js, routes/cloud.js | `POST /studio/image/generate` (5/day), `POST /studio/video/generate` (1/day), `GET /studio/media/:genId/:idx` (B2 redirect or agent proxy stream), `POST /studio/save/:genId/:idx` (B2 upload), `GET /studio/history`; agent register+heartbeat via `/cloud/flow-heartbeat` + admin CRUD `/cloud/admin/flow-servers`; cron marks flow-server offline >2min |
 | AI Consultation Chat | ✅ Complete | models/ChatMessage.js, routes/chat.js, routes/settings.js, utils/aiProvider.js, server/context/alpha-studio-bot | `POST /chat/send` saves user msg then routes via admin setting `useOpenClawForChat`: OpenClaw (`OPENCLAW_URL`, session memory) by default, or direct gcli (`GCLI_DIRECT_URL`) with bundled Alpha Studio workspace context and up to 3 previous MongoDB chat messages. `GET /chat/history` display history; `DELETE /chat/history` clears DB history. |
