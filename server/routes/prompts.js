@@ -30,6 +30,34 @@ async function getUserId(authHeader) {
     }
 }
 
+// ─── Tệp đính kèm B2 ───────────────────────────────────────────────────────
+
+// Trần số tệp mỗi prompt — chặn payload phình document.
+export const MAX_ATTACHMENTS = 10;
+
+/**
+ * Chỉ admin/mod được gắn tệp vào prompt. Prompt là nội dung ai đăng cũng được,
+ * nên cho tất cả upload lên B2 là mở cửa cho người lạ đổ file vào bucket.
+ */
+export function canManageAttachments(user) {
+    return user?.role === 'admin' || user?.role === 'mod';
+}
+
+/** Ép đúng hình dạng, bỏ mục thiếu `url`, giới hạn số lượng. */
+export function sanitizeAttachments(list) {
+    const str = (v) => (typeof v === 'string' ? v : (v == null ? '' : String(v)));
+    return (Array.isArray(list) ? list : [])
+        .filter(a => a && str(a.url).trim())
+        .slice(0, MAX_ATTACHMENTS)
+        .map(a => ({
+            name: str(a.name),
+            url: str(a.url).trim(),
+            fileKey: str(a.fileKey),
+            size: str(a.size),
+            mime: str(a.mime)
+        }));
+}
+
 // @route   GET /api/prompts
 // @desc    Get all prompts with filtering, pagination, search
 // @access  Public
@@ -315,6 +343,7 @@ router.post('/', authMiddleware, async (req, res) => {
             category,
             platform,
             exampleImages,
+            attachments,
             tags
         } = req.body;
 
@@ -346,6 +375,7 @@ router.post('/', authMiddleware, async (req, res) => {
             category: category || 'other',
             platform: platform || 'other',
             exampleImages: exampleImages || [],
+            attachments: canManageAttachments(req.user) ? sanitizeAttachments(attachments) : [],
             tags: tags || [],
             author: req.user._id,
             status: 'published',  // Auto-publish
@@ -410,6 +440,7 @@ router.put('/:id', authMiddleware, async (req, res) => {
             category,
             platform,
             exampleImages,
+            attachments,
             tags
         } = req.body;
 
@@ -421,6 +452,11 @@ router.put('/:id', authMiddleware, async (req, res) => {
         if (category) prompt.category = category;
         if (platform) prompt.platform = platform;
         if (exampleImages) prompt.exampleImages = exampleImages;
+        // Người không phải admin/mod sửa prompt thì giữ nguyên tệp đang có —
+        // không cho họ gỡ hay thay tệp của mục đã được duyệt.
+        if (attachments !== undefined && canManageAttachments(req.user)) {
+            prompt.attachments = sanitizeAttachments(attachments);
+        }
         if (tags) prompt.tags = tags;
 
         await prompt.save();

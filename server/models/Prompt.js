@@ -84,6 +84,20 @@ const promptSchema = new mongoose.Schema({
         publicId: String,
         caption: String
     }],
+    /**
+     * Tệp đính kèm trên Backblaze B2 (workflow .json, bộ tham số, tài liệu…).
+     * Khác `exampleImages` vốn là ảnh nhỏ trên Cloudinary.
+     *
+     * CHỈ admin/mod đặt được — routes/prompts.js bỏ trường này với người khác.
+     * `fileKey` phục vụ orphan checker trong routes/admin.js.
+     */
+    attachments: [{
+        name: { type: String, default: '' },
+        url: { type: String, required: true },
+        fileKey: { type: String, default: '' },
+        size: { type: String, default: '' },
+        mime: { type: String, default: '' }
+    }],
     tags: [{
         type: String,
         trim: true,

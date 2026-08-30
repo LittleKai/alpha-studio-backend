@@ -38,6 +38,21 @@ export const VERIFICATIONS = ['verified', 'partner_sourced', 'unverified'];
 
 export const DEPTHS = ['basic', 'deep', 'benchmark', 'forecast'];
 
+/**
+ * Cấp quyền đọc nội dung chi tiết:
+ *   - `public` — ai thấy mục là đọc được toàn bộ.
+ *   - `pro`    — chỉ tài khoản đã từng tích luỹ đủ credit mới mở được thân bài
+ *                và tệp đính kèm; người khác vẫn thấy card, tiêu đề, tóm tắt.
+ */
+export const ACCESS_LEVELS = ['public', 'pro'];
+
+/**
+ * Ngưỡng credit TÍCH LUỸ (không phải số dư hiện tại) để mở mục `pro`.
+ * Tính cả credit nạp tiền lẫn credit admin cấp tay — xem `lifetimeCreditsOf`
+ * trong `routes/eventLibrary.js`.
+ */
+export const PRO_MIN_LIFETIME_CREDITS = 200;
+
 const localizedString = () => ({
     vi: { type: String, default: '' },
     en: { type: String, default: '' }
@@ -160,6 +175,10 @@ const eventLibraryItemSchema = new mongoose.Schema({
     budgetTier: { type: String, enum: [...BUDGET_TIERS, ''], default: '' },
     verification: { type: String, enum: VERIFICATIONS, default: 'unverified', index: true },
     depth: { type: String, enum: DEPTHS, default: 'basic' },
+
+    // Chỉ admin đặt được — xem `ACCESS_LEVELS`
+    accessLevel: { type: String, enum: ACCESS_LEVELS, default: 'public', index: true },
+
     tags: [{ type: String }],
 
     metrics: { type: [metricSchema], default: [] },

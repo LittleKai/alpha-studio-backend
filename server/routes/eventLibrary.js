@@ -1,8 +1,10 @@
 import express from 'express';
 import mongoose from 'mongoose';
 import EventLibraryItem, {
-    ITEM_TYPES, CATEGORIES, OBJECTIVES, KPIS, BUDGET_TIERS, VERIFICATIONS, DEPTHS
+    ITEM_TYPES, CATEGORIES, OBJECTIVES, KPIS, BUDGET_TIERS, VERIFICATIONS, DEPTHS,
+    ACCESS_LEVELS, PRO_MIN_LIFETIME_CREDITS
 } from '../models/EventLibraryItem.js';
+import Transaction from '../models/Transaction.js';
 import WorkflowProject from '../models/WorkflowProject.js';
 import WorkflowDocument from '../models/WorkflowDocument.js';
 import { authMiddleware, verifyToken } from '../middleware/auth.js';
@@ -297,6 +299,78 @@ export function mapDocumentToLibraryItem(doc, user, overrides = {}) {
     };
 }
 
+// ─── Khoá nội dung theo credit tích luỹ ────────────────────────────────────
+
+/**
+ * Những loại giao dịch làm TĂNG credit của tài khoản. Cả nạp tiền
+ * (`topup`) lẫn admin cấp tay (`manual_topup`, `bonus`) đều tính — người dùng
+ * "từng sở hữu" số credit đó bất kể nguồn nào.
+ *
+ * `spend` và `refund` không nằm ở đây: tiêu rồi vẫn coi là đã từng sở hữu, còn
+ * hoàn tiền chỉ trả lại phần đã tính một lần.
+ */
+export const CREDIT_IN_TYPES = ['topup', 'manual_topup', 'bonus'];
+
+/**
+ * Tổng credit một tài khoản đã từng nhận. Không dùng `user.balance` vì số dư
+ * giảm dần theo mức tiêu — người đã nạp 500 rồi tiêu hết vẫn phải mở được nội
+ * dung `pro`.
+ */
+export async function lifetimeCreditsOf(userId) {
+    const [row] = await Transaction.aggregate([
+        {
+            $match: {
+                userId: new mongoose.Types.ObjectId(String(userId)),
+                status: 'completed',
+                type: { $in: CREDIT_IN_TYPES }
+            }
+        },
+        { $group: { _id: null, total: { $sum: '$credits' } } }
+    ]);
+    return row?.total || 0;
+}
+
+/**
+ * Ai được đọc thân bài của một mục `pro`.
+ *
+ * `lifetimeCredits` truyền từ ngoài vào để hàm này thuần và test được; số dư
+ * hiện tại được tính bù cho tài khoản cũ có credit nhưng thiếu bản ghi
+ * `Transaction` tương ứng.
+ */
+export function hasProAccess(item, user, lifetimeCredits = 0) {
+    if (item?.accessLevel !== 'pro') return true;
+    if (!user) return false;
+    if (user.role === 'admin') return true;
+    if (item.owner && String(item.owner) === String(user._id)) return true;
+    const earned = Math.max(Number(lifetimeCredits) || 0, Number(user.balance) || 0);
+    return earned >= PRO_MIN_LIFETIME_CREDITS;
+}
+
+/**
+ * Bản rút gọn của một mục bị khoá: giữ phần "quảng cáo" (tiêu đề, tóm tắt, ảnh
+ * bìa, phân loại, số liệu) và bỏ phần trả phí (thân bài, khối nội dung, tệp
+ * đính kèm). Cắt ở server — không bao giờ gửi nội dung xuống rồi mới ẩn bằng CSS.
+ */
+export function redactLockedItem(item) {
+    return {
+        ...item,
+        content: { vi: '', en: '' },
+        sections: [],
+        attachments: [],
+        locked: true
+    };
+}
+
+/**
+ * Áp cổng `pro` lên một danh sách mục. Chỉ truy vấn tổng credit MỘT lần, và chỉ
+ * khi trong danh sách thực sự có mục bị khoá.
+ */
+export async function applyProGate(items, user) {
+    if (!items.some(i => i.accessLevel === 'pro')) return items;
+    const lifetime = user?._id ? await lifetimeCreditsOf(user._id) : 0;
+    return items.map(i => (hasProAccess(i, user, lifetime) ? i : redactLockedItem(i)));
+}
+
 // ─── Optional auth ─────────────────────────────────────────────────────────
 
 /**
@@ -412,9 +486,13 @@ router.get('/', optionalAuth, async (req, res) => {
         };
         const facets = counts[0] || {};
 
+        // Card của mục `pro` vẫn hiện, nhưng nút tải phải mất với người chưa đủ
+        // credit — nếu không, link B2 trong `attachments` là cửa sau vào nội dung.
+        const gated = await applyProGate(items, req.user);
+
         res.json({
             success: true,
-            data: items,
+            data: gated,
             pagination: { total, page, limit, pages: Math.ceil(total / limit) },
             filterCounts: {
                 itemTypes: toMap(facets.itemTypes),
@@ -489,12 +567,25 @@ router.get('/:slug', optionalAuth, async (req, res) => {
 
         const { likes, ratings, ...safe } = item;
 
+        // Cổng `pro`: người chưa tích luỹ đủ credit chỉ nhận phần giới thiệu.
+        const lifetime = (safe.accessLevel === 'pro' && req.user?._id)
+            ? await lifetimeCreditsOf(req.user._id)
+            : 0;
+        const unlocked = hasProAccess(safe, req.user, lifetime);
+        const gatedRelated = await applyProGate(related, req.user);
+
         res.json({
             success: true,
-            data: safe,
-            related,
+            data: unlocked ? safe : redactLockedItem(safe),
+            related: gatedRelated,
             reviews,
-            me: { liked: myLiked, score: mine?.score ?? 0, comment: mine?.comment ?? '' }
+            me: { liked: myLiked, score: mine?.score ?? 0, comment: mine?.comment ?? '' },
+            access: {
+                level: safe.accessLevel || 'public',
+                unlocked,
+                requiredCredits: PRO_MIN_LIFETIME_CREDITS,
+                lifetimeCredits: lifetime
+            }
         });
     } catch (error) {
         console.error('Event library detail error:', error);
@@ -507,6 +598,23 @@ router.get('/:slug', optionalAuth, async (req, res) => {
 // @access  Public
 router.post('/:slug/use', optionalAuth, async (req, res) => {
     try {
+        const target = await EventLibraryItem.findOne({
+            $and: [buildVisibilityFilter(req.user), { slug: req.params.slug }]
+        }).select('accessLevel owner').lean();
+
+        if (!target) {
+            return res.status(404).json({ success: false, message: 'Không tìm thấy nội dung' });
+        }
+        if (target.accessLevel === 'pro') {
+            const lifetime = req.user?._id ? await lifetimeCreditsOf(req.user._id) : 0;
+            if (!hasProAccess(target, req.user, lifetime)) {
+                return res.status(403).json({
+                    success: false,
+                    message: `Nội dung này dành cho tài khoản đã tích luỹ từ ${PRO_MIN_LIFETIME_CREDITS} credit trở lên`
+                });
+            }
+        }
+
         const updated = await EventLibraryItem.findOneAndUpdate(
             { $and: [buildVisibilityFilter(req.user), { slug: req.params.slug }] },
             { $inc: { 'stats.uses': 1 } },
@@ -605,6 +713,11 @@ router.post('/', authMiddleware, async (req, res) => {
         const item = await EventLibraryItem.create({
             ...body,
             sections: sanitizeSections(body.sections),
+            // Khoá theo credit là công cụ vận hành của web — người dùng thường
+            // không tự đặt được cho nội dung của mình.
+            accessLevel: (req.user.role === 'admin' && ACCESS_LEVELS.includes(body.accessLevel))
+                ? body.accessLevel
+                : 'public',
             slug: slugifyTitle(title),
             ownership: isPlatform ? 'platform' : 'user',
             visibility: isPlatform ? 'public' : (body.visibility === 'public' ? 'public' : 'private'),
@@ -638,7 +751,10 @@ router.put('/:id', authMiddleware, async (req, res) => {
         }
 
         // Những trường người dùng không được tự đổi
-        const { _id, slug, ownership, owner, origin, stats, ...updatable } = req.body || {};
+        const { _id, slug, ownership, owner, origin, stats, accessLevel, ...updatable } = req.body || {};
+        if (req.user.role === 'admin' && ACCESS_LEVELS.includes(accessLevel)) {
+            item.accessLevel = accessLevel;
+        }
         if (req.user.role === 'admin' && ['platform', 'user'].includes(ownership)) {
             item.ownership = ownership;
             if (ownership === 'platform') {

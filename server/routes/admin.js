@@ -5,6 +5,7 @@ import User from '../models/User.js';
 import Transaction from '../models/Transaction.js';
 import WebhookLog from '../models/WebhookLog.js';
 import WorkflowDocument from '../models/WorkflowDocument.js';
+import WorkflowProject from '../models/WorkflowProject.js';
 import EventLibraryItem from '../models/EventLibraryItem.js';
 import Course from '../models/Course.js';
 import Prompt from '../models/Prompt.js';
@@ -671,7 +672,7 @@ router.get('/stats', async (req, res) => {
 const SUPER_ADMIN_EMAIL = 'aduc5525@gmail.com';
 
 /** Extract B2 object key from a CDN or direct B2 URL */
-function extractB2Key(url) {
+export function extractB2Key(url) {
     if (!url) return null;
     const cdnBase = process.env.CDN_BASE_URL;
     if (cdnBase && url.startsWith(cdnBase)) {
@@ -686,11 +687,27 @@ function extractB2Key(url) {
 }
 
 /**
- * GET /api/admin/storage/orphaned
- * List B2 files that have no reference in any MongoDB collection.
- * Enriched with uploader info where a WorkflowDocument record exists.
- * Super-admin only (aduc5525@gmail.com).
+ * Đọc mọi B2 key nhúng trong một chuỗi HTML.
+ *
+ * Ảnh chèn bằng TinyMCE trong `WorkflowProject.description` đi thẳng lên B2
+ * (prefix `project-descriptions/`) nhưng URL chỉ nằm trong chuỗi HTML — không
+ * có field B2 riêng nào trỏ tới. Không quét ở đây thì checker xếp chúng vào
+ * orphaned và `DELETE /storage/orphaned` sẽ xoá ảnh đang dùng.
+ *
+ * Quét mọi URL trong chuỗi chứ không riêng `<img src>`: link tải, ảnh nền
+ * trong `style`, `srcset`… đều là tham chiếu thật, bỏ sót là mất dữ liệu.
  */
+export function extractB2KeysFromHtml(html) {
+    if (!html || typeof html !== 'string') return [];
+    const keys = new Set();
+    for (const raw of html.match(/https?:\/\/[^\s"'<>)]+/gi) || []) {
+        const url = raw.replace(/&amp;/gi, '&').replace(/[.,;]+$/, '');
+        const key = extractB2Key(url);
+        if (key) keys.add(key);
+    }
+    return [...keys];
+}
+
 // Desktop app releases (VocabFlip, VietYaku) live on B2 but are never referenced
 // from MongoDB — their `version.json` manifest is the source of truth, published
 // by each app's build-and-release skill. Treat them as referenced so they are
@@ -698,15 +715,17 @@ function extractB2Key(url) {
 const APP_RELEASE_PREFIXES = ['vocabflip-app/', 'vietyaku-app/'];
 const isAppReleaseKey = (key) => APP_RELEASE_PREFIXES.some(prefix => key.startsWith(prefix));
 
-router.get('/storage/orphaned', async (req, res) => {
-    if (req.user.email !== SUPER_ADMIN_EMAIL) {
-        return res.status(403).json({ success: false, message: 'Không có quyền' });
-    }
-    try {
-        // 1. List all files in B2
-        const b2Files = await listAllFiles();
-
-        // 2. Build map: key → { uploader, uploadedAt } from WorkflowDocument
+/**
+ * Quét mọi collection để dựng tập key B2 đang được tham chiếu.
+ *
+ * Dùng chung cho cả GET (liệt kê orphan) và DELETE (chặn xoá nhầm). Đây phải là
+ * NGUỒN DUY NHẤT: tách đôi logic ra hai chỗ là kiểu gì cũng lệch, và lệch ở đây
+ * nghĩa là xoá mất file đang dùng.
+ *
+ * Trả về `docKeyMap` để GET còn hiển thị ai upload; DELETE chỉ cần `usedKeys`.
+ */
+export async function collectReferencedKeys() {
+        // Build map: key → { uploader, uploadedAt } from WorkflowDocument
         const docKeyMap = new Map(); // key → { uploader, uploadedAt, id }
         const wfDocs = await WorkflowDocument.find({}, 'fileKey url uploader uploadDate createdAt').lean();
         for (const doc of wfDocs) {
@@ -720,15 +739,28 @@ router.get('/storage/orphaned', async (req, res) => {
             }
         }
 
-        // 3. Collect all used keys from all collections
         const usedKeys = new Set(docKeyMap.keys());
 
-        // Prompts: example images
-        const prompts = await Prompt.find({}, 'exampleImages').lean();
+        // Prompts: example images + tệp đính kèm B2 (admin/mod gắn)
+        const prompts = await Prompt.find({}, 'exampleImages attachments author')
+            .populate('author', 'name')
+            .lean();
         for (const p of prompts) {
             for (const img of (p.exampleImages || [])) {
                 const imgKey = img.publicId || extractB2Key(img.url);
                 if (imgKey) usedKeys.add(imgKey);
+            }
+            for (const att of (p.attachments || [])) {
+                const attKey = att.fileKey || extractB2Key(att.url);
+                if (!attKey) continue;
+                usedKeys.add(attKey);
+                if (!docKeyMap.has(attKey)) {
+                    docKeyMap.set(attKey, {
+                        uploader: p.author?.name || 'Unknown',
+                        uploadedAt: null,
+                        source: 'prompt'
+                    });
+                }
             }
         }
 
@@ -773,6 +805,22 @@ router.get('/storage/orphaned', async (req, res) => {
             }
         }
 
+        // Ảnh TinyMCE nhúng trong mô tả dự án (prefix `project-descriptions/`).
+        // URL chỉ nằm trong chuỗi HTML nên phải parse ra, không có field để đọc.
+        const wfProjects = await WorkflowProject.find({ description: /https?:\/\// }, 'description name').lean();
+        for (const project of wfProjects) {
+            for (const key of extractB2KeysFromHtml(project.description)) {
+                usedKeys.add(key);
+                if (!docKeyMap.has(key)) {
+                    docKeyMap.set(key, {
+                        uploader: project.name || 'Unknown',
+                        uploadedAt: null,
+                        source: 'project-description'
+                    });
+                }
+            }
+        }
+
         // Event library attachments (tài liệu đính kèm case study / template)
         const libraryItems = await EventLibraryItem.find({}, 'attachments owner')
             .populate('owner', 'name')
@@ -792,7 +840,63 @@ router.get('/storage/orphaned', async (req, res) => {
             }
         }
 
-        // 4. Build orphaned + referenced lists
+    return { usedKeys, docKeyMap };
+}
+
+/**
+ * Cache ngắn cho `collectReferencedKeys()`.
+ *
+ * Trang admin xoá hàng loạt bằng vòng lặp tuần tự (`CloudAdminTab.tsx`), nên nếu
+ * mỗi lần DELETE đều quét lại 8 collection thì xoá 200 file = 1600 lượt quét.
+ * TTL ngắn để một đợt xoá chỉ trả giá một lần, mà cửa sổ dữ liệu cũ vẫn nhỏ.
+ *
+ * GET luôn tính mới (`maxAgeMs: 0`) vì đó là danh sách admin nhìn và tin theo.
+ */
+let referencedCache = null; // { at: number, usedKeys: Set }
+
+export async function getReferencedKeys({ maxAgeMs = 0 } = {}) {
+    if (referencedCache && Date.now() - referencedCache.at < maxAgeMs) {
+        return referencedCache.usedKeys;
+    }
+    const { usedKeys } = await collectReferencedKeys();
+    referencedCache = { at: Date.now(), usedKeys };
+    return usedKeys;
+}
+
+/** Cửa sổ dùng lại kết quả quét khi xoá hàng loạt. */
+export const DELETE_GUARD_TTL_MS = 10_000;
+
+/**
+ * Lý do một key KHÔNG được xoá, hoặc `null` nếu xoá được.
+ * Tách riêng để test được mà không cần MongoDB.
+ */
+export function blockedDeleteReason(key, usedKeys) {
+    if (!key) return 'key là bắt buộc';
+    if (isAppReleaseKey(key)) {
+        return 'Không thể xóa bản phát hành ứng dụng qua đây — xóa trực tiếp trên Backblaze B2';
+    }
+    if (usedKeys && usedKeys.has(key)) {
+        return 'File này đang được tham chiếu trong cơ sở dữ liệu — tải lại danh sách trước khi xóa';
+    }
+    return null;
+}
+
+/**
+ * GET /api/admin/storage/orphaned
+ * List B2 files that have no reference in any MongoDB collection.
+ * Enriched with uploader info where a WorkflowDocument record exists.
+ * Super-admin only (aduc5525@gmail.com).
+ */
+router.get('/storage/orphaned', async (req, res) => {
+    if (req.user.email !== SUPER_ADMIN_EMAIL) {
+        return res.status(403).json({ success: false, message: 'Không có quyền' });
+    }
+    try {
+        const b2Files = await listAllFiles();
+        const { usedKeys, docKeyMap } = await collectReferencedKeys();
+        referencedCache = { at: Date.now(), usedKeys };
+
+        // Build orphaned + referenced lists
         const toFileObj = (f, referenced) => ({
             key: f.key,
             filename: f.key.split('/').pop(),
@@ -837,13 +941,16 @@ router.delete('/storage/orphaned', async (req, res) => {
     if (!key) {
         return res.status(400).json({ success: false, message: 'key là bắt buộc' });
     }
-    if (isAppReleaseKey(key)) {
-        return res.status(400).json({
-            success: false,
-            message: 'Không thể xóa bản phát hành ứng dụng qua đây — xóa trực tiếp trên Backblaze B2'
-        });
-    }
     try {
+        // Danh sách trên trang admin có thể đã cũ — ai đó chèn ảnh vào mô tả dự án
+        // sau lúc admin bấm tải danh sách là dòng đó thành xoá nhầm. Đối chiếu lại
+        // ngay trước khi xoá; đây là thao tác không hoàn tác được.
+        const usedKeys = await getReferencedKeys({ maxAgeMs: DELETE_GUARD_TTL_MS });
+        const blocked = blockedDeleteReason(key, usedKeys);
+        if (blocked) {
+            return res.status(409).json({ success: false, message: blocked });
+        }
+
         await deleteB2File(key);
         res.json({ success: true, message: 'Đã xóa file khỏi B2' });
     } catch (error) {

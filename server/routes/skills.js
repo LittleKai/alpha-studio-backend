@@ -1,5 +1,6 @@
 import express from 'express';
 import Skill from '../models/Skill.js';
+import { authMiddleware, adminOnly } from '../middleware/auth.js';
 
 const router = express.Router();
 
@@ -23,6 +24,12 @@ function parseTimeSavingMinutes(str) {
     const unit = match[2].toLowerCase();
     if (unit.startsWith('hour') || unit.startsWith('hr')) return value * 60;
     return value;
+}
+
+/** Xoá cache bộ đếm filter — gọi sau mỗi lần admin sửa/xoá skill. */
+function invalidateFilterCountsCache() {
+    filterCountsCache = null;
+    filterCountsCacheTime = 0;
 }
 
 /**
@@ -379,6 +386,174 @@ router.get('/:slug', async (req, res) => {
         res.status(500).json({
             success: false,
             message: 'Server error while fetching skill'
+        });
+    }
+});
+
+// ── Admin: sửa / xoá skill ────────────────────────────────────────────────
+
+const TIERS = ['Gold', 'Silver', 'Bronze', ''];
+const DIFFICULTIES = ['Beginner', 'Intermediate', 'Advanced', ''];
+
+// Field vô hướng admin được phép sửa. `slug` cố ý không nằm đây: đổi slug là
+// đổi URL công khai của skill nên phải xử lý riêng, không sửa nhầm qua form.
+const EDITABLE_STRINGS = [
+    'source', 'url', 'name', 'headline', 'headline_vi',
+    'short_description', 'short_description_vi', 'tier', 'category',
+    'difficulty', 'install_type', 'estimated_time_saving', 'author',
+    'install_command', 'source_repo_url'
+];
+
+const EDITABLE_SECTION_STRINGS = [
+    'overview', 'overview_vi', 'setup', 'setup_vi', 'usage', 'usage_vi'
+];
+
+/** Chuẩn hoá mảng chuỗi: bỏ giá trị rỗng, cắt khoảng trắng, khử trùng lặp. */
+function cleanStringArray(value) {
+    if (!Array.isArray(value)) return null;
+    const out = [];
+    for (const item of value) {
+        if (typeof item !== 'string') continue;
+        const trimmed = item.trim();
+        if (trimmed && !out.includes(trimmed)) out.push(trimmed);
+    }
+    return out;
+}
+
+/**
+ * Lọc body của PUT /api/skills/:slug thành object $set an toàn.
+ * Trả `{ error }` khi dữ liệu không hợp lệ, ngược lại trả `{ update }`.
+ * Chỉ field có mặt trong body mới được đưa vào update (partial update).
+ */
+export function sanitizeSkillInput(body) {
+    if (!body || typeof body !== 'object' || Array.isArray(body)) {
+        return { error: 'Dữ liệu không hợp lệ' };
+    }
+
+    const update = {};
+
+    for (const field of EDITABLE_STRINGS) {
+        if (body[field] === undefined) continue;
+        if (typeof body[field] !== 'string') {
+            return { error: `Trường ${field} phải là chuỗi` };
+        }
+        update[field] = body[field].trim();
+    }
+
+    if (update.name !== undefined && !update.name) {
+        return { error: 'Tên skill không được để trống' };
+    }
+    if (update.tier !== undefined && !TIERS.includes(update.tier)) {
+        return { error: 'Cấp độ (tier) không hợp lệ' };
+    }
+    if (update.difficulty !== undefined && !DIFFICULTIES.includes(update.difficulty)) {
+        return { error: 'Độ khó không hợp lệ' };
+    }
+    if (update.category !== undefined && !update.category) {
+        return { error: 'Danh mục không được để trống' };
+    }
+
+    if (body.github_stars !== undefined) {
+        const stars = Number(body.github_stars);
+        if (!Number.isFinite(stars) || stars < 0) {
+            return { error: 'Số sao GitHub không hợp lệ' };
+        }
+        update.github_stars = Math.round(stars);
+    }
+
+    for (const field of ['works_with', 'tags']) {
+        if (body[field] === undefined) continue;
+        const cleaned = cleanStringArray(body[field]);
+        if (!cleaned) return { error: `Trường ${field} phải là mảng chuỗi` };
+        update[field] = cleaned;
+    }
+
+    if (body.sections !== undefined) {
+        const sections = body.sections;
+        if (!sections || typeof sections !== 'object' || Array.isArray(sections)) {
+            return { error: 'Trường sections phải là object' };
+        }
+        for (const field of EDITABLE_SECTION_STRINGS) {
+            if (sections[field] === undefined) continue;
+            if (typeof sections[field] !== 'string') {
+                return { error: `Trường sections.${field} phải là chuỗi` };
+            }
+            update[`sections.${field}`] = sections[field];
+        }
+        for (const field of ['requirements', 'related_skills']) {
+            if (sections[field] === undefined) continue;
+            const cleaned = cleanStringArray(sections[field]);
+            if (!cleaned) return { error: `Trường sections.${field} phải là mảng chuỗi` };
+            update[`sections.${field}`] = cleaned;
+        }
+    }
+
+    if (Object.keys(update).length === 0) {
+        return { error: 'Không có trường nào để cập nhật' };
+    }
+
+    return { update };
+}
+
+// @route   PUT /api/skills/:slug
+// @desc    Update a skill
+// @access  Admin
+router.put('/:slug', authMiddleware, adminOnly, async (req, res) => {
+    try {
+        const { update, error } = sanitizeSkillInput(req.body);
+        if (error) {
+            return res.status(400).json({ success: false, message: error });
+        }
+
+        const skill = await Skill.findOneAndUpdate(
+            { slug: req.params.slug },
+            { $set: update },
+            { new: true, runValidators: true }
+        ).lean();
+
+        if (!skill) {
+            return res.status(404).json({ success: false, message: 'Không tìm thấy skill' });
+        }
+
+        // Tier/category/difficulty có thể đã đổi → bộ đếm filter phải tính lại
+        invalidateFilterCountsCache();
+
+        res.json({
+            success: true,
+            message: 'Đã cập nhật skill',
+            data: skill
+        });
+    } catch (error) {
+        console.error('Update skill error:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Lỗi server khi cập nhật skill'
+        });
+    }
+});
+
+// @route   DELETE /api/skills/:slug
+// @desc    Delete a skill
+// @access  Admin
+router.delete('/:slug', authMiddleware, adminOnly, async (req, res) => {
+    try {
+        const skill = await Skill.findOneAndDelete({ slug: req.params.slug }).lean();
+
+        if (!skill) {
+            return res.status(404).json({ success: false, message: 'Không tìm thấy skill' });
+        }
+
+        invalidateFilterCountsCache();
+
+        res.json({
+            success: true,
+            message: 'Đã xoá skill'
+        });
+    } catch (error) {
+        console.error('Delete skill error:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Lỗi server khi xoá skill'
         });
     }
 });

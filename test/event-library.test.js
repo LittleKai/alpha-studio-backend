@@ -17,8 +17,12 @@ import {
     toggleLike,
     upsertRating,
     summarizeRatings,
-    MAX_REVIEW_COMMENT
+    MAX_REVIEW_COMMENT,
+    hasProAccess,
+    redactLockedItem,
+    CREDIT_IN_TYPES
 } from '../server/routes/eventLibrary.js';
+import { PRO_MIN_LIFETIME_CREDITS } from '../server/models/EventLibraryItem.js';
 
 const OWNER_ID = 'owner-object-id';
 const MEMBER = { _id: OWNER_ID, role: 'user', name: 'Thanh Tân' };
@@ -389,4 +393,65 @@ test('chấm không kèm nhận xét vẫn hợp lệ, comment là chuỗi rỗn
     assert.equal(r.comment, '');
     // phiếu suông vẫn tính vào trung bình
     assert.deepEqual(summarizeRatings([r]), { average: 4, count: 1 });
+});
+
+// ─── khoá nội dung theo credit tích luỹ ────────────────────────────────────
+
+const PRO_ITEM = { accessLevel: 'pro', owner: OWNER_ID };
+const FREE_ITEM = { accessLevel: 'public', owner: OWNER_ID };
+const STRANGER = { _id: 'someone-else', role: 'user', balance: 0 };
+
+test('mục public mở cho tất cả, kể cả khách chưa đăng nhập', () => {
+    assert.equal(hasProAccess(FREE_ITEM, null, 0), true);
+    assert.equal(hasProAccess({}, null, 0), true, 'thiếu accessLevel = public');
+});
+
+test('mục pro đóng với khách và với người chưa đủ credit tích luỹ', () => {
+    assert.equal(hasProAccess(PRO_ITEM, null, 0), false);
+    assert.equal(hasProAccess(PRO_ITEM, STRANGER, PRO_MIN_LIFETIME_CREDITS - 1), false);
+});
+
+test('mục pro mở đúng từ ngưỡng tích luỹ, không phụ thuộc số dư còn lại', () => {
+    // Đã nạp đủ rồi tiêu sạch — vẫn phải xem được
+    assert.equal(hasProAccess(PRO_ITEM, { ...STRANGER, balance: 0 }, PRO_MIN_LIFETIME_CREDITS), true);
+    assert.equal(hasProAccess(PRO_ITEM, STRANGER, PRO_MIN_LIFETIME_CREDITS + 5000), true);
+});
+
+test('số dư hiện tại bù cho tài khoản cũ không có bản ghi giao dịch', () => {
+    assert.equal(hasProAccess(PRO_ITEM, { ...STRANGER, balance: PRO_MIN_LIFETIME_CREDITS }, 0), true);
+});
+
+test('admin và chủ sở hữu luôn mở được mục pro', () => {
+    assert.equal(hasProAccess(PRO_ITEM, ADMIN, 0), true);
+    assert.equal(hasProAccess(PRO_ITEM, MEMBER, 0), true);
+});
+
+test('credit admin cấp tay được tính như credit nạp tiền', () => {
+    assert.ok(CREDIT_IN_TYPES.includes('topup'));
+    assert.ok(CREDIT_IN_TYPES.includes('manual_topup'));
+    assert.ok(CREDIT_IN_TYPES.includes('bonus'));
+    assert.ok(!CREDIT_IN_TYPES.includes('spend'), 'tiêu credit không làm tăng mức tích luỹ');
+});
+
+test('redactLockedItem cắt thân bài và tệp, giữ phần giới thiệu', () => {
+    const locked = redactLockedItem({
+        slug: 'case-abc',
+        title: { vi: 'Case ABC', en: '' },
+        summary: { vi: 'Tóm tắt', en: '' },
+        coverImage: 'https://cdn/x.jpg',
+        content: { vi: '<p>bí mật</p>', en: '<p>secret</p>' },
+        sections: [{ kind: 'richText', html: '<p>bí mật</p>' }],
+        attachments: [{ name: 'boq.xlsx', url: 'https://b2/boq.xlsx' }],
+        metrics: [{ label: 'reach', value: '31.7K' }]
+    });
+
+    assert.deepEqual(locked.content, { vi: '', en: '' });
+    assert.deepEqual(locked.sections, []);
+    assert.deepEqual(locked.attachments, []);
+    assert.equal(locked.locked, true);
+    // Phần dùng để mời đọc thì giữ nguyên
+    assert.equal(locked.title.vi, 'Case ABC');
+    assert.equal(locked.summary.vi, 'Tóm tắt');
+    assert.equal(locked.coverImage, 'https://cdn/x.jpg');
+    assert.equal(locked.metrics.length, 1);
 });
