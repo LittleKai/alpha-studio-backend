@@ -25,7 +25,7 @@ import {
     viewerKey,
     VIEW_COOLDOWN_MS
 } from '../server/routes/eventLibrary.js';
-import { PRO_MIN_LIFETIME_CREDITS } from '../server/models/EventLibraryItem.js';
+import { PRO_MIN_LIFETIME_CREDITS, BUDGET_TIERS } from '../server/models/EventLibraryItem.js';
 
 const OWNER_ID = 'owner-object-id';
 const MEMBER = { _id: OWNER_ID, role: 'user', name: 'Thanh Tân' };
@@ -122,11 +122,15 @@ test('formatBudget rút gọn theo triệu/tỷ', () => {
 
 test('budgetTierOf khớp đúng các mốc trong bộ lọc', () => {
     assert.equal(budgetTierOf(0), '');
-    assert.equal(budgetTierOf(199_000_000), 'under_200m');
-    assert.equal(budgetTierOf(200_000_000), '200m_1b');
-    assert.equal(budgetTierOf(1_000_000_000), '1b_5b');
-    assert.equal(budgetTierOf(5_000_000_000), '5b_20b');
-    assert.equal(budgetTierOf(20_000_000_000), 'over_20b');
+    assert.equal(budgetTierOf(49_000_000), 'under_50m');
+    assert.equal(budgetTierOf(50_000_000), '50m_200m');
+    assert.equal(budgetTierOf(200_000_000), '200m_500m');
+    assert.equal(budgetTierOf(500_000_000), '500m_2b');
+    assert.equal(budgetTierOf(2_000_000_000), 'over_2b');
+    // Mọi bậc trả về phải nằm trong enum của model
+    for (const amount of [10_000_000, 120_000_000, 300_000_000, 900_000_000, 9_000_000_000]) {
+        assert.ok(BUDGET_TIERS.includes(budgetTierOf(amount)), `thiếu bậc cho ${amount}`);
+    }
 });
 
 // ─── đăng từ Workflow ──────────────────────────────────────────────────────
@@ -157,7 +161,7 @@ test('dự án Workflow mặc định thành case study riêng tư của ngườ
     assert.equal(item.summary.vi, 'Chuỗi activation 3 trung tâm thương mại');
     assert.equal(item.content.vi, '<p>Chi tiết triển khai</p>');
     assert.equal(item.coverImage, 'https://cdn.example/avatar.png');
-    assert.equal(item.budgetTier, '1b_5b');
+    assert.equal(item.budgetTier, 'over_2b');
     assert.equal(item.verification, 'unverified');
     assert.deepEqual(item.origin, { kind: 'workflow_project', refId: 'project-id' });
 });
@@ -492,6 +496,23 @@ test('shouldCountView dọn khoá hết hạn khi store phình to', () => {
     assert.equal(shouldCountView('u1:case-abc', t0 + VIEW_COOLDOWN_MS, store), true);
     assert.equal(store.size, 1);
     assert.equal(store.has('u1:case-abc'), true);
+});
+
+test('shouldCountView cắt bớt khoá cũ nhất khi chưa khoá nào hết hạn', () => {
+    const store = new Map();
+    const t0 = 1_000_000;
+    // Toàn khoá còn trong thời gian nguội → vòng dọn theo hạn không xoá được gì
+    for (let i = 0; i < 5001; i++) store.set(`fresh-${i}`, t0);
+
+    assert.equal(shouldCountView('u1:case-abc', t0 + 1, store), true);
+    assert.equal(store.size, 5000);
+    // Khoá vừa ghi phải còn, khoá cũ nhất bị bỏ
+    assert.equal(store.has('u1:case-abc'), true);
+    assert.equal(store.has('fresh-0'), false);
+});
+
+test('thời gian nguội của bộ đếm view là 6 giờ', () => {
+    assert.equal(VIEW_COOLDOWN_MS, 6 * 60 * 60 * 1000);
 });
 
 test('viewerKey đọc x-forwarded-for vì app không bật trust proxy', () => {

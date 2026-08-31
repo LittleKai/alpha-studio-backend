@@ -89,7 +89,7 @@ const items = [
         industries: ['fmcg', 'retail_mall'],
         objectives: ['brand_awareness', 'sales_activation'],
         kpis: ['attendance_reach', 'engagement', 'leads_database'],
-        budgetTier: '1b_5b',
+        budgetTier: 'over_2b',
         depth: 'deep',
         tags: ['case-mau', 'trung-thu', 'mall', 'activation', 'sampling'],
         metrics: [
@@ -192,7 +192,7 @@ const items = [
         industries: ['automotive'],
         objectives: ['product_launch', 'brand_awareness'],
         kpis: ['attendance_reach', 'leads_database'],
-        budgetTier: '5b_20b',
+        budgetTier: 'over_2b',
         depth: 'benchmark',
         tags: ['case-mau', 'roadshow', 'automotive', 'test-drive'],
         metrics: [
@@ -289,7 +289,7 @@ const items = [
         industries: ['technology'],
         objectives: ['brand_awareness', 'sales_activation'],
         kpis: ['leads_database', 'sales_conversion'],
-        budgetTier: '200m_1b',
+        budgetTier: '500m_2b',
         depth: 'deep',
         tags: ['case-mau', 'booth', 'b2b', 'expo'],
         metrics: [
@@ -384,7 +384,7 @@ const items = [
         industries: ['finance'],
         objectives: ['customer_loyalty', 'internal_corporate'],
         kpis: ['attendance_reach', 'brand_recall'],
-        budgetTier: '1b_5b',
+        budgetTier: 'over_2b',
         depth: 'basic',
         tags: ['case-mau', 'hoi-nghi', 'san-khau', 'finance'],
         metrics: [
@@ -469,7 +469,7 @@ const items = [
         industries: ['technology'],
         objectives: ['product_launch', 'brand_awareness'],
         kpis: ['attendance_reach', 'engagement', 'leads_database'],
-        budgetTier: '200m_1b',
+        budgetTier: '500m_2b',
         depth: 'deep',
         tags: ['case-mau', 'hybrid', 'livestream', 'saas', 'product-launch'],
         metrics: [
@@ -565,7 +565,7 @@ const items = [
         industries: ['beauty', 'retail_mall'],
         objectives: ['sales_activation', 'customer_loyalty'],
         kpis: ['engagement', 'sales_conversion'],
-        budgetTier: 'under_200m',
+        budgetTier: '50m_200m',
         depth: 'basic',
         tags: ['case-mau', 'sampling', 'beauty', 'retail'],
         metrics: [

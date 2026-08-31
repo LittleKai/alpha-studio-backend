@@ -200,7 +200,7 @@ export function buildSort(sort) {
 // Trước đây mỗi lần GET chi tiết là +1 view, nên F5 vài lần hay mở đi mở lại
 // một mục là số nhảy liên tục. Mỗi người xem chỉ được tính một lượt cho mỗi
 // mục trong VIEW_COOLDOWN_MS.
-export const VIEW_COOLDOWN_MS = 10 * 60 * 1000;
+export const VIEW_COOLDOWN_MS = 6 * 60 * 60 * 1000;
 const VIEW_STORE_MAX = 5000;
 
 const recentViews = new Map();
@@ -228,6 +228,12 @@ export function shouldCountView(key, now = Date.now(), store = recentViews) {
         for (const [k, ts] of store) {
             if (now - ts >= VIEW_COOLDOWN_MS) store.delete(k);
         }
+        // Cửa sổ nguội dài (6 giờ) nên có thể chẳng khoá nào đủ cũ để dọn — khi
+        // đó bỏ bớt khoá cũ nhất (Map giữ đúng thứ tự chèn) để store không phình.
+        for (const k of store.keys()) {
+            if (store.size <= VIEW_STORE_MAX) break;
+            store.delete(k);
+        }
     }
     return true;
 }
@@ -244,11 +250,11 @@ export function formatBudget(amount) {
 export function budgetTierOf(amount) {
     const n = Number(amount) || 0;
     if (n <= 0) return '';
-    if (n < 200_000_000) return 'under_200m';
-    if (n < 1_000_000_000) return '200m_1b';
-    if (n < 5_000_000_000) return '1b_5b';
-    if (n < 20_000_000_000) return '5b_20b';
-    return 'over_20b';
+    if (n < 50_000_000) return 'under_50m';
+    if (n < 200_000_000) return '50m_200m';
+    if (n < 500_000_000) return '200m_500m';
+    if (n < 2_000_000_000) return '500m_2b';
+    return 'over_2b';
 }
 
 /**
