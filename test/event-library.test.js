@@ -20,7 +20,10 @@ import {
     MAX_REVIEW_COMMENT,
     hasProAccess,
     redactLockedItem,
-    CREDIT_IN_TYPES
+    CREDIT_IN_TYPES,
+    shouldCountView,
+    viewerKey,
+    VIEW_COOLDOWN_MS
 } from '../server/routes/eventLibrary.js';
 import { PRO_MIN_LIFETIME_CREDITS } from '../server/models/EventLibraryItem.js';
 
@@ -454,4 +457,44 @@ test('redactLockedItem cắt thân bài và tệp, giữ phần giới thiệu',
     assert.equal(locked.summary.vi, 'Tóm tắt');
     assert.equal(locked.coverImage, 'https://cdn/x.jpg');
     assert.equal(locked.metrics.length, 1);
+});
+
+// ─── đếm lượt xem có thời gian nguội ───────────────────────────────────────
+
+test('viewerKey phân biệt theo user, rơi về IP khi chưa đăng nhập', () => {
+    assert.equal(viewerKey({ user: MEMBER, ip: '1.2.3.4' }, 'case-abc'), `${OWNER_ID}:case-abc`);
+    assert.equal(viewerKey({ ip: '1.2.3.4' }, 'case-abc'), '1.2.3.4:case-abc');
+    assert.equal(viewerKey({}, 'case-abc'), 'unknown:case-abc');
+    // Cùng người xem nhưng khác mục thì khác khoá
+    assert.notEqual(viewerKey({ ip: '1.2.3.4' }, 'case-abc'), viewerKey({ ip: '1.2.3.4' }, 'case-xyz'));
+});
+
+test('shouldCountView chỉ tính một lượt trong thời gian nguội', () => {
+    const store = new Map();
+    const t0 = 1_000_000;
+
+    assert.equal(shouldCountView('u1:case-abc', t0, store), true);
+    // F5 liên tục không cộng thêm
+    assert.equal(shouldCountView('u1:case-abc', t0 + 1, store), false);
+    assert.equal(shouldCountView('u1:case-abc', t0 + VIEW_COOLDOWN_MS - 1, store), false);
+    // Hết thời gian nguội thì tính lại
+    assert.equal(shouldCountView('u1:case-abc', t0 + VIEW_COOLDOWN_MS, store), true);
+    // Người xem khác không bị chặn theo người trước
+    assert.equal(shouldCountView('u2:case-abc', t0 + VIEW_COOLDOWN_MS, store), true);
+});
+
+test('shouldCountView dọn khoá hết hạn khi store phình to', () => {
+    const store = new Map();
+    const t0 = 1_000_000;
+    for (let i = 0; i < 5001; i++) store.set(`old-${i}`, t0);
+
+    // Lượt mới sau thời gian nguội → dọn sạch khoá cũ đã hết hạn
+    assert.equal(shouldCountView('u1:case-abc', t0 + VIEW_COOLDOWN_MS, store), true);
+    assert.equal(store.size, 1);
+    assert.equal(store.has('u1:case-abc'), true);
+});
+
+test('viewerKey đọc x-forwarded-for vì app không bật trust proxy', () => {
+    const req = { headers: { 'x-forwarded-for': '203.0.113.9, 10.0.0.1' }, ip: '10.0.0.1' };
+    assert.equal(viewerKey(req, 'case-abc'), '203.0.113.9:case-abc');
 });

@@ -103,6 +103,10 @@ const userSchema = new mongoose.Schema({
         type: Date,
         default: null
     },
+    lastActiveAt: {
+        type: Date,
+        default: null
+    },
     balance: {
         type: Number,
         default: 0,
@@ -128,6 +132,8 @@ const userSchema = new mongoose.Schema({
 }, {
     timestamps: true
 });
+
+userSchema.index({ lastActiveAt: -1 });
 
 userSchema.plugin(noInlineMediaPlugin);
 

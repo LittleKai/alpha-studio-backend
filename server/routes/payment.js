@@ -6,6 +6,7 @@ import WebhookLog from '../models/WebhookLog.js';
 import { fulfillCrmBillingOrder } from '../utils/crmBilling.js';
 import { authMiddleware, adminOnly } from '../middleware/auth.js';
 import { sanitizeWebhook } from '../utils/webhookSanitizer.js';
+import { purgeExpiredPendingTransactions } from '../utils/transactionCleanup.js';
 
 const router = express.Router();
 
@@ -496,6 +497,7 @@ router.delete('/cancel/:transactionId', authMiddleware, async (req, res) => {
  */
 router.get('/history', authMiddleware, async (req, res) => {
     try {
+        await purgeExpiredPendingTransactions().catch(() => {});
         const { page = 1, limit = 20, status } = req.query;
         const query = { userId: req.user._id };
 
@@ -589,6 +591,7 @@ router.post('/confirm/:transactionId', authMiddleware, async (req, res) => {
  */
 router.get('/pending', authMiddleware, async (req, res) => {
     try {
+        await purgeExpiredPendingTransactions().catch(() => {});
         const transactions = await Transaction.find({
             userId: req.user._id,
             status: 'pending'
@@ -732,6 +735,7 @@ router.post('/verify', authMiddleware, adminOnly, async (req, res) => {
  */
 router.get('/admin/transactions', authMiddleware, adminOnly, async (req, res) => {
     try {
+        await purgeExpiredPendingTransactions().catch(() => {});
         const { page = 1, limit = 50, status, userId } = req.query;
         const query = {};
 

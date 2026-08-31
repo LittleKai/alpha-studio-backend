@@ -196,6 +196,42 @@ export function buildSort(sort) {
     return SORTS[sort] || SORTS.recent;
 }
 
+// ─── Đếm lượt xem có thời gian nguội ───────────────────────────────────────
+// Trước đây mỗi lần GET chi tiết là +1 view, nên F5 vài lần hay mở đi mở lại
+// một mục là số nhảy liên tục. Mỗi người xem chỉ được tính một lượt cho mỗi
+// mục trong VIEW_COOLDOWN_MS.
+export const VIEW_COOLDOWN_MS = 10 * 60 * 1000;
+const VIEW_STORE_MAX = 5000;
+
+const recentViews = new Map();
+
+/**
+ * Khoá định danh người xem: user đã đăng nhập thì theo id, còn lại theo IP.
+ * App không bật `trust proxy` nên `req.ip` trên Fly.io là IP của proxy — phải
+ * đọc `x-forwarded-for` trước, nếu không mọi khách vãng lai dùng chung một khoá.
+ */
+export function viewerKey(req, slug) {
+    if (req.user?._id) return `${String(req.user._id)}:${slug}`;
+    const forwarded = String(req.headers?.['x-forwarded-for'] || '').split(',')[0].trim();
+    return `${forwarded || req.ip || 'unknown'}:${slug}`;
+}
+
+/**
+ * `true` nếu lượt xem này được tính. Ghi luôn mốc thời gian vào store, nên chỉ
+ * gọi một lần cho mỗi request.
+ */
+export function shouldCountView(key, now = Date.now(), store = recentViews) {
+    const last = store.get(key);
+    if (last !== undefined && now - last < VIEW_COOLDOWN_MS) return false;
+    store.set(key, now);
+    if (store.size > VIEW_STORE_MAX) {
+        for (const [k, ts] of store) {
+            if (now - ts >= VIEW_COOLDOWN_MS) store.delete(k);
+        }
+    }
+    return true;
+}
+
 /** Định dạng số tiền VND thành chuỗi ngắn để hiển thị trên card. */
 export function formatBudget(amount) {
     const n = Number(amount) || 0;
@@ -517,11 +553,13 @@ router.get('/', optionalAuth, async (req, res) => {
 // @access  Public — item riêng tư chỉ chủ sở hữu và admin xem được
 router.get('/:slug', optionalAuth, async (req, res) => {
     try {
-        const item = await EventLibraryItem.findOneAndUpdate(
-            { $and: [buildVisibilityFilter(req.user), { slug: req.params.slug }] },
-            { $inc: { 'stats.views': 1 } },
-            { new: true }
-        )
+        const filter = { $and: [buildVisibilityFilter(req.user), { slug: req.params.slug }] };
+        // Chỉ +1 view khi người xem này chưa xem mục trong thời gian nguội
+        const countView = shouldCountView(viewerKey(req, req.params.slug));
+        const query = countView
+            ? EventLibraryItem.findOneAndUpdate(filter, { $inc: { 'stats.views': 1 } }, { new: true })
+            : EventLibraryItem.findOne(filter);
+        const item = await query
             .populate('ratings.user', 'name avatar')
             .lean();
 

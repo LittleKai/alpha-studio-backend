@@ -58,6 +58,13 @@ export const authMiddleware = async (req, res, next) => {
         }
 
         req.user = user;
+
+        // Throttled update of lastActiveAt (at most once every 5 minutes to minimize DB write load)
+        const now = new Date();
+        if (!user.lastActiveAt || (now.getTime() - new Date(user.lastActiveAt).getTime() > 5 * 60 * 1000)) {
+            User.updateOne({ _id: user._id }, { $set: { lastActiveAt: now } }).exec().catch(() => {});
+        }
+
         next();
     } catch (error) {
         if (error.name === 'JsonWebTokenError') {

@@ -135,8 +135,9 @@ router.post('/login', authLimiter, async (req, res) => {
             });
         }
 
-        // Update last login without triggering password re-hash
-        await User.updateOne({ _id: user._id }, { lastLogin: new Date() });
+        // Update last login and last active without triggering password re-hash
+        const loginTime = new Date();
+        await User.updateOne({ _id: user._id }, { lastLogin: loginTime, lastActiveAt: loginTime });
 
         // Generate token
         const token = generateToken(user._id);

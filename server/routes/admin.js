@@ -16,6 +16,7 @@ import InteriorTemplate from '../models/InteriorTemplate.js';
 import { authMiddleware, adminOnly } from '../middleware/auth.js';
 import { listAllFiles, deleteFile as deleteB2File } from '../utils/b2Storage.js';
 import { validateTemplateStructure, extractDsl } from '../utils/templateValidator.js';
+import { purgeExpiredPendingTransactions } from '../utils/transactionCleanup.js';
 
 const router = express.Router();
 
@@ -25,11 +26,19 @@ router.use(adminOnly);
 
 /**
  * GET /api/admin/users
- * Get all users with pagination and search
+ * Get all users with pagination, search, filters, sorting, and stats
  */
 router.get('/users', async (req, res) => {
     try {
-        const { page = 1, limit = 20, search = '', role } = req.query;
+        const {
+            page = 1,
+            limit = 20,
+            search = '',
+            role,
+            isActive,
+            sortBy = 'createdAt',
+            sortOrder = 'desc'
+        } = req.query;
         const skip = (parseInt(page) - 1) * parseInt(limit);
 
         const query = {};
@@ -45,18 +54,64 @@ router.get('/users', async (req, res) => {
             query.role = role;
         }
 
-        const [users, total] = await Promise.all([
+        if (isActive !== undefined && isActive !== '' && isActive !== 'all') {
+            query.isActive = isActive === 'true';
+        }
+
+        const sort = {};
+        const direction = sortOrder === 'asc' ? 1 : -1;
+        if (sortBy === 'lastActiveAt' || sortBy === 'lastActive') {
+            sort.lastActiveAt = direction;
+            sort.lastLogin = direction;
+            sort.updatedAt = direction;
+        } else if (sortBy === 'lastLogin') {
+            sort.lastLogin = direction;
+        } else if (sortBy === 'balance') {
+            sort.balance = direction;
+        } else if (sortBy === 'name') {
+            sort.name = direction;
+        } else {
+            sort.createdAt = direction;
+        }
+
+        const [users, total, statsAggregation] = await Promise.all([
             User.find(query)
                 .select('-password')
-                .sort({ createdAt: -1 })
+                .sort(sort)
                 .skip(skip)
                 .limit(parseInt(limit)),
-            User.countDocuments(query)
+            User.countDocuments(query),
+            User.aggregate([
+                {
+                    $group: {
+                        _id: null,
+                        total: { $sum: 1 },
+                        student: { $sum: { $cond: [{ $eq: ['$role', 'student'] }, 1, 0] } },
+                        partner: { $sum: { $cond: [{ $eq: ['$role', 'partner'] }, 1, 0] } },
+                        mod: { $sum: { $cond: [{ $eq: ['$role', 'mod'] }, 1, 0] } },
+                        admin: { $sum: { $cond: [{ $eq: ['$role', 'admin'] }, 1, 0] } },
+                        active: { $sum: { $cond: [{ $ne: ['$isActive', false] }, 1, 0] } },
+                        deactivated: { $sum: { $cond: [{ $eq: ['$isActive', false] }, 1, 0] } }
+                    }
+                }
+            ])
         ]);
+
+        const rawStats = statsAggregation[0] || {};
+        const stats = {
+            total: rawStats.total || 0,
+            student: rawStats.student || 0,
+            partner: rawStats.partner || 0,
+            mod: rawStats.mod || 0,
+            admin: rawStats.admin || 0,
+            active: rawStats.active || 0,
+            deactivated: rawStats.deactivated || 0
+        };
 
         res.json({
             success: true,
             data: users,
+            stats,
             pagination: {
                 total,
                 page: parseInt(page),
@@ -212,6 +267,7 @@ router.post('/users/:id/topup', async (req, res) => {
  */
 router.get('/transactions', async (req, res) => {
     try {
+        await purgeExpiredPendingTransactions().catch(() => {});
         const {
             page = 1,
             limit = 50,
@@ -285,30 +341,16 @@ router.get('/transactions', async (req, res) => {
 
 /**
  * POST /api/admin/transactions/check-timeout
- * Check and update timeout transactions (confirmed > 5 minutes without webhook match)
+ * Check and purge expired pending transactions (> 30 minutes)
  */
 router.post('/transactions/check-timeout', async (req, res) => {
     try {
-        const fiveMinutesAgo = new Date(Date.now() - 5 * 60 * 1000);
-
-        // Find transactions that were confirmed but not matched within 5 minutes
-        const result = await Transaction.updateMany(
-            {
-                status: 'pending',
-                confirmedAt: { $ne: null, $lt: fiveMinutesAgo }
-            },
-            {
-                $set: {
-                    status: 'timeout',
-                    failedReason: 'No webhook received within 5 minutes after confirmation'
-                }
-            }
-        );
+        const result = await purgeExpiredPendingTransactions();
 
         res.json({
             success: true,
-            message: `Updated ${result.modifiedCount} transactions to timeout`,
-            data: { modifiedCount: result.modifiedCount }
+            message: `Đã tự động xóa ${result.deletedCount || 0} giao dịch pending quá hạn (> 30 phút)`,
+            data: { deletedCount: result.deletedCount || 0 }
         });
     } catch (error) {
         console.error('Admin check timeout error:', error);
@@ -629,6 +671,7 @@ router.post('/users/:id/reset-password', async (req, res) => {
  */
 router.get('/stats', async (req, res) => {
     try {
+        await purgeExpiredPendingTransactions().catch(() => {});
         const today = new Date();
         today.setHours(0, 0, 0, 0);
 

@@ -58,6 +58,7 @@ import StudioGeneration from './models/StudioGeneration.js';
 import { buildEndedSessionUpdate } from './retention/terminalUpdates.js';
 import { localStorageMount } from './storage/localStorageMount.js';
 import { buildAllowedOrigins, buildCorsOptions } from './config/cors.js';
+import { purgeExpiredPendingTransactions } from './utils/transactionCleanup.js';
 
 // Load env variables
 dotenv.config();
@@ -250,6 +251,19 @@ cron.schedule('*/30 * * * *', async () => {
         }
     } catch (error) {
         console.error('[Cron] Studio cleanup error:', error);
+    }
+});
+
+// Cron: auto-delete pending transactions older than 30 minutes (runs every 5 minutes)
+cron.schedule('*/5 * * * *', async () => {
+    if (!isDatabaseReady()) return;
+    try {
+        const result = await purgeExpiredPendingTransactions();
+        if (result.deletedCount > 0) {
+            console.log(`[Cron] Auto-deleted ${result.deletedCount} pending transactions older than 30m`);
+        }
+    } catch (error) {
+        console.error('[Cron] Cleanup pending transactions error:', error);
     }
 });
 
