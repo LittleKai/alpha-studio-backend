@@ -13,6 +13,8 @@ import StudioGeneration from '../models/StudioGeneration.js';
 import InteriorAnalysis from '../models/InteriorAnalysis.js';
 import InteriorRender from '../models/InteriorRender.js';
 import InteriorTemplate from '../models/InteriorTemplate.js';
+import ToolDownload from '../models/ToolDownload.js';
+import { KNOWN_TOOLS, getOrCreateToolDownload } from './toolDownloads.js';
 import { authMiddleware, adminOnly } from '../middleware/auth.js';
 import { listAllFiles, deleteFile as deleteB2File } from '../utils/b2Storage.js';
 import { validateTemplateStructure, extractDsl } from '../utils/templateValidator.js';
@@ -1153,6 +1155,201 @@ router.post('/interior-templates/:id/deprecate', async (req, res) => {
     } catch (error) {
         console.error('Admin interior-template deprecate error:', error);
         return res.status(500).json({ success: false, message: 'Lỗi cập nhật template.' });
+    }
+});
+
+// ─── Tool Downloads Management ───────────────────────────────────────────────
+
+/**
+ * GET /api/admin/tool-downloads
+ * Get download statistics for all tools
+ */
+router.get('/tool-downloads', async (_req, res) => {
+    try {
+        for (const [toolId, toolName] of Object.entries(KNOWN_TOOLS)) {
+            const existing = await ToolDownload.findOne({ toolId });
+            if (!existing) {
+                await ToolDownload.create({
+                    toolId,
+                    toolName,
+                    totalDownloads: 0,
+                    platforms: { windows: 0, android: 0, mac: 0, linux: 0, other: 0 },
+                    versions: new Map(),
+                    lastDownloadedAt: null,
+                    recentDownloads: [],
+                });
+            }
+        }
+
+        const allTools = await ToolDownload.find({}).sort({ totalDownloads: -1 });
+
+        let totalDownloads = 0;
+        let windowsDownloads = 0;
+        let androidDownloads = 0;
+        let otherDownloads = 0;
+        let topTool = null;
+        let maxCount = -1;
+
+        const recentActivities = [];
+
+        const toolsData = allTools.map((t) => {
+            const toolTotal = t.totalDownloads || 0;
+            const win = t.platforms?.windows || 0;
+            const apk = t.platforms?.android || 0;
+            const mac = t.platforms?.mac || 0;
+            const linux = t.platforms?.linux || 0;
+            const other = t.platforms?.other || 0;
+
+            totalDownloads += toolTotal;
+            windowsDownloads += win;
+            androidDownloads += apk;
+            otherDownloads += (mac + linux + other);
+
+            if (toolTotal > maxCount && toolTotal > 0) {
+                maxCount = toolTotal;
+                topTool = { toolId: t.toolId, toolName: t.toolName, count: toolTotal };
+            }
+
+            if (Array.isArray(t.recentDownloads)) {
+                for (const r of t.recentDownloads) {
+                    recentActivities.push({
+                        toolId: t.toolId,
+                        toolName: t.toolName,
+                        platform: r.platform,
+                        version: r.version,
+                        downloadedAt: r.downloadedAt,
+                    });
+                }
+            }
+
+            const versionsObj = {};
+            if (t.versions instanceof Map) {
+                for (const [k, v] of t.versions.entries()) {
+                    versionsObj[k] = v;
+                }
+            } else if (t.versions && typeof t.versions === 'object') {
+                Object.assign(versionsObj, t.versions);
+            }
+
+            return {
+                toolId: t.toolId,
+                toolName: t.toolName,
+                totalDownloads: toolTotal,
+                platforms: {
+                    windows: win,
+                    android: apk,
+                    mac,
+                    linux,
+                    other,
+                },
+                versions: versionsObj,
+                lastDownloadedAt: t.lastDownloadedAt,
+                updatedAt: t.updatedAt,
+            };
+        });
+
+        recentActivities.sort((a, b) => new Date(b.downloadedAt).getTime() - new Date(a.downloadedAt).getTime());
+
+        return res.json({
+            success: true,
+            data: {
+                summary: {
+                    totalDownloads,
+                    windowsDownloads,
+                    androidDownloads,
+                    otherDownloads,
+                    topTool,
+                },
+                tools: toolsData,
+                recentActivities: recentActivities.slice(0, 30),
+            },
+        });
+    } catch (error) {
+        console.error('Admin get tool downloads error:', error);
+        return res.status(500).json({ success: false, message: 'Lỗi server khi lấy thống kê tải tool' });
+    }
+});
+
+/**
+ * PUT /api/admin/tool-downloads/:toolId
+ * Update/calibrate download counts for a tool
+ */
+router.put('/tool-downloads/:toolId', async (req, res) => {
+    try {
+        const toolId = String(req.params.toolId || '').toLowerCase().trim();
+        const { totalDownloads, platforms, toolName } = req.body || {};
+
+        const doc = await getOrCreateToolDownload(toolId);
+
+        if (toolName && typeof toolName === 'string') {
+            doc.toolName = toolName.trim();
+        }
+
+        if (typeof totalDownloads === 'number' && totalDownloads >= 0) {
+            doc.totalDownloads = totalDownloads;
+        }
+
+        if (platforms && typeof platforms === 'object') {
+            const VALID_PLATFORMS = ['windows', 'android', 'mac', 'linux', 'other'];
+            for (const p of VALID_PLATFORMS) {
+                if (typeof platforms[p] === 'number' && platforms[p] >= 0) {
+                    doc.platforms[p] = platforms[p];
+                }
+            }
+            if (typeof totalDownloads !== 'number') {
+                doc.totalDownloads = Object.values(doc.platforms).reduce((acc, val) => acc + (val || 0), 0);
+            }
+        }
+
+        await doc.save();
+
+        return res.json({
+            success: true,
+            message: `Đã cập nhật số lượt tải cho ${doc.toolName}`,
+            data: {
+                toolId: doc.toolId,
+                toolName: doc.toolName,
+                totalDownloads: doc.totalDownloads,
+                platforms: doc.platforms,
+                lastDownloadedAt: doc.lastDownloadedAt,
+                updatedAt: doc.updatedAt,
+            },
+        });
+    } catch (error) {
+        console.error('Admin update tool download count error:', error);
+        return res.status(500).json({ success: false, message: 'Lỗi server khi cập nhật lượt tải' });
+    }
+});
+
+/**
+ * POST /api/admin/tool-downloads/:toolId/reset
+ * Reset download counts for a tool
+ */
+router.post('/tool-downloads/:toolId/reset', async (req, res) => {
+    try {
+        const toolId = String(req.params.toolId || '').toLowerCase().trim();
+        const doc = await getOrCreateToolDownload(toolId);
+
+        doc.totalDownloads = 0;
+        doc.platforms = { windows: 0, android: 0, mac: 0, linux: 0, other: 0 };
+        doc.versions = new Map();
+        doc.recentDownloads = [];
+        await doc.save();
+
+        return res.json({
+            success: true,
+            message: `Đã đặt lại số lượt tải cho ${doc.toolName} về 0`,
+            data: {
+                toolId: doc.toolId,
+                toolName: doc.toolName,
+                totalDownloads: 0,
+                platforms: doc.platforms,
+                lastDownloadedAt: doc.lastDownloadedAt,
+            },
+        });
+    } catch (error) {
+        console.error('Admin reset tool download count error:', error);
+        return res.status(500).json({ success: false, message: 'Lỗi server khi đặt lại lượt tải' });
     }
 });
 
