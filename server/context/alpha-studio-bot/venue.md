@@ -64,8 +64,8 @@ Nền tảng được xây dựng nhằm giúp học viên làm chủ các kỹ 
   - **Bảo mật tuyệt đối**: Dữ liệu tin nhắn được lưu trữ an toàn ngay trên máy tính của bạn, bảo vệ quyền riêng tư của khách hàng.
   - **Ứng dụng đi kèm**: Bản cài đặt trên máy tính Windows và ứng dụng di động Android giúp kết nối tài khoản dễ dàng qua mã QR.
 - **Chính sách gói cước**:
-  - **Dùng thử**: Đăng ký mới nhận ngay **2 tháng (60 ngày) dùng thử miễn phí** kèm 100 lượt yêu cầu AI.
-  - **Gói gia hạn duy trì**: **200.000đ/tháng** (hoặc 2.100 credits) bao gồm 100 lượt AI mỗi tháng.
+  - **Dùng thử**: Đăng ký mới nhận ngay **1 tháng (30 ngày) dùng thử miễn phí** kèm 100 lượt yêu cầu AI.
+  - **Gói gia hạn duy trì**: **100.000đ/tháng** (hoặc 1.050 credits) bao gồm 100 lượt AI mỗi tháng.
   - **Gói nạp thêm lượt AI vĩnh viễn (không hết hạn)**: Gói +200 lượt (100.000đ / 1.000 credits), gói +1.000 lượt (500.000đ / 5.000 credits), gói +2.000 lượt (1.000.000đ / 10.000 credits).
   - Quản lý gói cước và gia hạn nhanh tại: `/studio/crm/subscription`.
 
