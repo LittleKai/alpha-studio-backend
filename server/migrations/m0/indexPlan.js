@@ -96,7 +96,13 @@ export const REQUIRED_INDEXES = Object.freeze([
     { collection: 'crmmessages', key: { createdAt: 1 }, options: { expireAfterSeconds: RETENTION_MS.crmHistory / 1000 } },
     { collection: 'cloudsessions', key: { purgeAt: 1 }, options: { expireAfterSeconds: 0 } },
     { collection: 'crmagentcommands', key: { purgeAt: 1 }, options: { expireAfterSeconds: 0 } },
-    { collection: 'crmpairingsessions', key: { expiresAt: 1 }, options: { expireAfterSeconds: 0 } }
+    { collection: 'crmpairingsessions', key: { expiresAt: 1 }, options: { expireAfterSeconds: 0 } },
+    { collection: 'pagevisits', key: { createdAt: 1 }, options: { expireAfterSeconds: RETENTION_MS.analytics / 1000 } },
+    { collection: 'pagevisits', key: { createdAt: -1 }, options: {} },
+    { collection: 'pagevisits', key: { path: 1, createdAt: -1 }, options: {} },
+    { collection: 'pagevisits', key: { sessionId: 1, createdAt: 1 }, options: {} },
+    { collection: 'pagevisits', key: { visitorId: 1 }, options: {} },
+    { collection: 'pagevisits', key: { channel: 1 }, options: {} }
 ]);
 
 export const APPROVED_INDEX_DROPS = Object.freeze([

@@ -46,6 +46,7 @@ import crmRoutes from './routes/crm.js';
 import channelWebhookRoutes from './routes/channelWebhooks.js';
 import webchatPublicRoutes from './routes/webchatPublic.js';
 import toolDownloadRoutes from './routes/toolDownloads.js';
+import analyticsRoutes from './routes/analytics.js';
 import { configureBucketCors } from './utils/b2Storage.js';
 import { seedInteriorTemplateAssets } from './utils/interiorTemplateAssets.js';
 import { runSubscriptionMaintenance } from './jobs/crmSubscriptionJobs.js';
@@ -137,6 +138,7 @@ app.use('/api/crm', channelWebhookRoutes);
 app.use('/api/skills', skillRoutes);
 app.use('/api/event-library', eventLibraryRoutes);
 app.use('/api/tools', toolDownloadRoutes);
+app.use('/api/analytics', analyticsRoutes);
 
 // Sitemap (no /api prefix — served at root)
 app.use('/sitemap.xml', sitemapRoutes);

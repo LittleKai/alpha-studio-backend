@@ -1,4 +1,6 @@
-*Latest Session: **Cập nhật giá gói Alpha CRM hàng tháng xuống 100.000đ (1.050 Credits) và thời gian dùng thử 1 tháng (30 ngày).** `server/utils/crmCatalog.js` cập nhật `CRM_PLANS.crm_monthly` với `priceVnd: 100000`, `priceCredits: 1050` và `CRM_TRIAL.durationDays: 30`. Cập nhật unit test `server/utils/crmCatalog.test.js` và `server/utils/crmTrial.test.js` (tính đúng `periodEnd` 30 ngày và audit log). Cập nhật ngữ cảnh chatbot AI tại `server/context/alpha-studio-bot/venue.md` và `tools/openclaw-server/workspaces/alpha-studio/venue.md`. `npm test` 212/212 pass.*
+*Latest Session: **Thêm hệ thống theo dõi truy cập web (`/api/analytics`) cho tab Phân Tích trong Admin.** Model `PageVisit` lưu từng lượt xem trang dưới dạng sự kiện thô, tự xoá sau 90 ngày bằng TTL index. `POST /analytics/track` là endpoint công khai (rate limit 60 req/phút/IP, lọc bot theo User-Agent, không lưu IP); `GET /analytics/overview?days=7|30|90` và `GET /analytics/realtime` yêu cầu adminOnly. Toàn bộ báo cáo được tổng hợp lúc đọc trong một `$facet` duy nhất — chuỗi theo ngày, trang xem nhiều/trang vào đầu, kênh truy cập, tên miền giới thiệu, chiến dịch UTM, thiết bị/trình duyệt/HĐH, phân bố theo giờ và theo thứ — nhóm theo ngày `Asia/Ho_Chi_Minh`. Lưu lượng Google Ads nhận diện qua `gclid` hoặc `utm_medium=cpc` → kênh `paid-search`. Test mới `test/analytics.test.js` (9 test) phủ `isBotUserAgent`, `parseUserAgent`, `hostFromUrl`, `isSelfHost`, `classifyChannel`, `normalizePath`, cộng 2 test chặn regression về index. ⚠️ **Bẫy đã gặp:** runtime nối DB với `autoIndex: false`, nên `schema.index()` trong model **không** tạo index nào — lần chạy thử đầu tiên collection `pagevisits` chỉ có `_id_`, TTL không tồn tại và dữ liệu sẽ không bao giờ tự xoá. Đã khai 6 index vào `REQUIRED_INDEXES` (`migrations/m0/indexPlan.js`) + thêm `analytics: 90 ngày` vào `retention/policy.js`, rồi chạy `npm run db:m0:audit -- --apply-indexes` để tạo thật. Đã chạy thử local end-to-end (backend + Vite dev): beacon ghi nhận đúng, bot bị bỏ qua, thiếu trường trả 400, `/overview` và `/realtime` trả số liệu khớp, không token trả 401. Dữ liệu test đã xoá sạch khỏi Atlas. `npm test` 221/221 pass.*
+
+*Previous session: **Cập nhật giá gói Alpha CRM hàng tháng xuống 100.000đ (1.050 Credits) và thời gian dùng thử 1 tháng (30 ngày).** `server/utils/crmCatalog.js` cập nhật `CRM_PLANS.crm_monthly` với `priceVnd: 100000`, `priceCredits: 1050` và `CRM_TRIAL.durationDays: 30`. Cập nhật unit test `server/utils/crmCatalog.test.js` và `server/utils/crmTrial.test.js` (tính đúng `periodEnd` 30 ngày và audit log). Cập nhật ngữ cảnh chatbot AI tại `server/context/alpha-studio-bot/venue.md` và `tools/openclaw-server/workspaces/alpha-studio/venue.md`. `npm test` 212/212 pass.*
 
 *Previous session: **Thời gian nguội của bộ đếm lượt xem thư viện tăng từ 10 phút lên 6 giờ.** `VIEW_COOLDOWN_MS` trong `routes/eventLibrary.js` = `6 * 60 * 60 * 1000`. Cửa sổ dài hơn làm lộ một lỗ ở `shouldCountView`: vòng dọn cũ chỉ xoá khoá **đã hết hạn**, mà với 6 giờ thì có thể chẳng khoá nào đủ cũ → store vượt `VIEW_STORE_MAX` (5000) và phình mãi. Thêm vòng thứ hai bỏ khoá cũ nhất (Map giữ đúng thứ tự chèn) cho tới khi về đúng hạn mức. 2 test mới trong `test/event-library.test.js` (cắt khoá cũ nhất khi chưa khoá nào hết hạn; ghim giá trị hằng = 6 giờ). `npm test` 209/209.*
 
@@ -83,6 +85,7 @@ alpha-studio-backend/
 │   │   ├── WorkflowDocument.js    # Workflow documents (file metadata, status, comments)
 │   │   ├── EventLibraryItem.js    # Thư viện sự kiện — 7 itemType, ownership platform|user, visibility public|private, accessLevel public|pro
 │   │   ├── FeaturedStudent.js     # Featured students (userId ref, order, label, hired)
+│   │   ├── PageVisit.js           # Raw web pageview events for the admin traffic dashboard (TTL 90 days)
 │   │   └── ChatMessage.js         # AI consultation chat history (userId, role, content) — display only; OpenClaw maintains session memory via x-openclaw-session-key
 │   ├── middleware/
 │   │   └── auth.js                # JWT auth + adminOnly + modOnly middleware
@@ -103,6 +106,7 @@ alpha-studio-backend/
 │       ├── workflow.js           # Workflow API (CRUD projects + documents, auth required)
 │       ├── eventLibrary.js       # Event library API (list/detail/stats, user CRUD, publish from Workflow, cổng pro theo credit tích luỹ)
 │       ├── featuredStudents.js   # Featured students API (public GET, admin CRUD + reorder)
+│       ├── analytics.js          # Web traffic API — public /track beacon + admin /overview, /realtime
 │       └── chat.js               # AI consultation API (auth required) — GET /history, POST /send, DELETE /history; forwards to OpenClaw via OPENCLAW_URL
 │   └── utils/
 │       └── b2Storage.js          # B2 S3 client + generatePresignedUploadUrl + deleteFile + listAllFiles (paginated)
@@ -277,6 +281,10 @@ alpha-studio-backend/
 │   │   ├── POST   /documents         # Create document record (auth)
 │   │   ├── PUT    /documents/:id     # Update document (auth, creator/admin)
 │   │   └── DELETE /documents/:id     # Delete document (auth, creator/admin)
+├── /analytics
+│   ├── POST   /track            # Public pageview beacon (rate-limited 60/min/IP, bot UA filtered)
+│   ├── GET    /overview         # Traffic report ?days=7|30|90 (auth + adminOnly)
+│   └── GET    /realtime         # Visitors in the last 5 minutes (auth + adminOnly)
 ├── /chat (auth required)
 │   ├── GET    /history          # User's chat history (?limit=50, max 200, oldest→newest)
 │   ├── POST   /send             # Send single message → save user msg + forward to OpenClaw + save reply
@@ -337,6 +345,7 @@ alpha-studio-backend/
 
 | Feature | Status | Files Involved | Notes |
 |---------|--------|----------------|-------|
+| Web Traffic Analytics | ✅ Complete | models/PageVisit.js, routes/analytics.js, migrations/m0/indexPlan.js, retention/policy.js, test/analytics.test.js | First-party pageview tracking for the admin dashboard. `POST /analytics/track` is public (rate-limited 60/min/IP, bot user agents dropped) and stores one raw event per view; events self-delete after 90 days via a TTL index declared in `REQUIRED_INDEXES` (the runtime uses `autoIndex: false`, so schema indexes alone are never created — run `npm run db:m0:audit -- --apply-indexes`). `GET /analytics/overview?days=` aggregates on read in a single `$facet` pass (daily series, top/entry pages, channels, referrers, UTM campaigns, devices/browsers/OS, hour + weekday), grouped by `Asia/Ho_Chi_Minh` days. Google Ads traffic is detected from `gclid` or `utm_medium=cpc` and classified as `paid-search`. |
 | User Registration | ✅ Complete | routes/auth.js | Email + password validation |
 | User Login | ✅ Complete | routes/auth.js | JWT token generation |
 | User Logout | ✅ Complete | routes/auth.js | Cookie clearing |

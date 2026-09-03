@@ -4,6 +4,7 @@ export const RETENTION_MS = Object.freeze({
     queue: 7 * DAY_MS,
     technicalLog: 30 * DAY_MS,
     webhook: 90 * DAY_MS,
+    analytics: 90 * DAY_MS,
     crmHistory: 365 * DAY_MS,
     cloudSession: 365 * DAY_MS,
     chatHistory: 365 * DAY_MS
