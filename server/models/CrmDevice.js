@@ -106,6 +106,20 @@ const crmDeviceSchema = new mongoose.Schema({
     replacedAt: {
         type: Date,
         default: null
+    },
+    // Tín hiệu ổn định của backend cục bộ trên máy khách, do heartbeat gửi lên.
+    // uptimeSec tụt về gần 0 giữa hai nhịp = tiến trình vừa khởi động lại.
+    uptimeSec: {
+        type: Number,
+        default: 0
+    },
+    // Số liệu vòng đời do supervisor Flutter nắm (backend không tự đếm được số
+    // lần restart của chính nó — mỗi lần restart là một tiến trình mới).
+    supervisor: {
+        restartCount: { type: Number, default: 0 },
+        lastExitCode: { type: Number, default: null },
+        lastError: { type: String, default: '' },
+        reportedAt: { type: Date, default: null }
     }
 }, {
     timestamps: true

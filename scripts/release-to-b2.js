@@ -9,6 +9,7 @@ import http from 'http';
 import { S3Client, PutObjectCommand, GetObjectCommand, ListObjectsV2Command, DeleteObjectsCommand } from '@aws-sdk/client-s3';
 import dotenv from 'dotenv';
 import readline from 'readline';
+import { createHash } from 'crypto';
 
 // Resolve directory paths in ES Modules
 const __filename = fileURLToPath(import.meta.url);
@@ -18,6 +19,22 @@ const BACKEND_DIR = path.resolve(__dirname, '..');
 const WORKSPACE_ROOT = path.resolve(BACKEND_DIR, '..');
 const CRM_DIR = path.resolve(WORKSPACE_ROOT, 'tools/alpha-crm');
 const ZALO_BOT_SERVICE_DIR = path.resolve(CRM_DIR, 'integration/zalo-bot-service');
+
+/**
+ * Runtime Node ĐƯỢC GHIM cho bản phát hành Windows.
+ *
+ * Trước đây script copy thẳng `process.execPath` — tức là bản Node tình cờ có
+ * trên máy build lúc đó. Hệ quả: hai bản phát hành cách nhau một tháng có thể
+ * chạy hai runtime khác nhau (máy build hiện tại là v23.10.0 — bản lẻ, không
+ * phải LTS, đã hết vòng đời hỗ trợ), và một lỗi chỉ xuất hiện ở một trong hai
+ * thì không truy được.
+ *
+ * Đổi phiên bản ở đây thì PHẢI đổi cả ABI (`process.versions.modules` của bản
+ * đó) — addon native better-sqlite3 được tải theo đúng ABI này.
+ */
+const PINNED_NODE_VERSION = 'v22.23.2'; // Node 22 "Jod" LTS
+const PINNED_NODE_ABI = 127;
+const RUNTIME_CACHE_DIR = path.join(CRM_DIR, 'build', '.runtime-cache');
 
 // Load environment variables from backend .env
 dotenv.config({ path: path.join(BACKEND_DIR, '.env') });
@@ -198,6 +215,131 @@ function waitForHealth(port, timeoutMs) {
 }
 
 /**
+ * Gọi /local/health để ÉP mở SQLite và chạy truy vấn thật trên addon native.
+ * Trả true chỉ khi backend báo DB mở được.
+ */
+function probeLocalDb(port) {
+    return new Promise((resolve) => {
+        const req = http.get(
+            { host: '127.0.0.1', port, path: '/local/health', timeout: 10000 },
+            (res) => {
+                let body = '';
+                res.on('data', (c) => { body += c; });
+                res.on('end', () => {
+                    try {
+                        const json = JSON.parse(body);
+                        resolve(res.statusCode === 200 && json?.db?.ok === true);
+                    } catch {
+                        resolve(false);
+                    }
+                });
+            }
+        );
+        req.on('error', () => resolve(false));
+        req.on('timeout', () => { req.destroy(); resolve(false); });
+    });
+}
+
+async function downloadToFile(url, destPath) {
+    const response = await fetch(url, { redirect: 'follow' });
+    if (!response.ok) {
+        throw new Error(`[runtime] Download failed (${response.status}) for ${url}`);
+    }
+    fs.mkdirSync(path.dirname(destPath), { recursive: true });
+    fs.writeFileSync(destPath, Buffer.from(await response.arrayBuffer()));
+}
+
+/**
+ * Tải node.exe của phiên bản được ghim, xác minh SHA256 theo SHASUMS256.txt của
+ * nodejs.org, và cache lại. Binary này được phát tán tới máy khách nên phải
+ * kiểm tra toàn vẹn, không chỉ "tải về được là dùng".
+ */
+async function ensurePinnedNodeExe() {
+    const cached = path.join(RUNTIME_CACHE_DIR, PINNED_NODE_VERSION, 'node.exe');
+    if (fs.existsSync(cached)) {
+        console.log(`[runtime] Using cached Node ${PINNED_NODE_VERSION} runtime.`);
+        return cached;
+    }
+
+    const base = `https://nodejs.org/dist/${PINNED_NODE_VERSION}`;
+    console.log(`[runtime] Downloading pinned Node runtime ${PINNED_NODE_VERSION} (win-x64)...`);
+    await downloadToFile(`${base}/win-x64/node.exe`, cached);
+
+    const sumsResponse = await fetch(`${base}/SHASUMS256.txt`, { redirect: 'follow' });
+    if (!sumsResponse.ok) {
+        fs.rmSync(cached, { force: true });
+        throw new Error(`[runtime] Could not fetch SHASUMS256.txt for ${PINNED_NODE_VERSION}.`);
+    }
+    const sums = await sumsResponse.text();
+    const expected = sums
+        .split('\n')
+        .map((line) => line.trim().split(/\s+/))
+        .find((parts) => parts[1] === 'win-x64/node.exe')?.[0];
+    if (!expected) {
+        fs.rmSync(cached, { force: true });
+        throw new Error(`[runtime] No win-x64/node.exe checksum listed for ${PINNED_NODE_VERSION}.`);
+    }
+
+    const actual = createHash('sha256').update(fs.readFileSync(cached)).digest('hex');
+    if (actual !== expected) {
+        fs.rmSync(cached, { force: true });
+        throw new Error(
+            `[runtime] SHA256 mismatch for node.exe ${PINNED_NODE_VERSION}: expected ${expected}, got ${actual}.`
+        );
+    }
+    console.log(`[runtime] Node ${PINNED_NODE_VERSION} verified (sha256 ok).`);
+    return cached;
+}
+
+/**
+ * Tải bản dựng sẵn better-sqlite3 khớp ABI của runtime được ghim.
+ *
+ * KHÔNG đụng vào node_modules của máy dev: ở đó addon được dựng theo Node đang
+ * cài để `npm test` chạy được, còn bản đóng gói phải khớp Node được ghim. Trộn
+ * hai thứ này là ZIP nhận addon lệch ABI và backend chết ngay lần mở DB đầu.
+ */
+async function ensureMatchingSqliteAddon() {
+    const pkg = JSON.parse(
+        fs.readFileSync(path.join(ZALO_BOT_SERVICE_DIR, 'node_modules/better-sqlite3/package.json'), 'utf8')
+    );
+    const cached = path.join(
+        RUNTIME_CACHE_DIR,
+        `better-sqlite3-v${pkg.version}-node-v${PINNED_NODE_ABI}`,
+        'better_sqlite3.node'
+    );
+    if (fs.existsSync(cached)) {
+        console.log(`[runtime] Using cached better-sqlite3 addon for ABI ${PINNED_NODE_ABI}.`);
+        return cached;
+    }
+
+    const assetName = `better-sqlite3-v${pkg.version}-node-v${PINNED_NODE_ABI}-win32-x64.tar.gz`;
+    const url = `https://github.com/WiseLibs/better-sqlite3/releases/download/v${pkg.version}/${assetName}`;
+    const workDir = path.dirname(cached);
+    const tarPath = path.join(workDir, assetName);
+
+    console.log(`[runtime] Downloading ${assetName}...`);
+    try {
+        await downloadToFile(url, tarPath);
+    } catch (err) {
+        throw new Error(
+            `${err.message}\n[runtime] better-sqlite3 v${pkg.version} has no prebuilt binary for Node ABI ` +
+            `${PINNED_NODE_ABI} (${PINNED_NODE_VERSION}). Either pin a Node version whose ABI it publishes, ` +
+            `or upgrade better-sqlite3 in ${ZALO_BOT_SERVICE_DIR}.`
+        );
+    }
+
+    execSync(`tar -xzf "${tarPath}" -C "${workDir}"`, { stdio: 'inherit' });
+    const extracted = path.join(workDir, 'build', 'Release', 'better_sqlite3.node');
+    if (!fs.existsSync(extracted)) {
+        throw new Error(`[runtime] Prebuilt archive did not contain build/Release/better_sqlite3.node.`);
+    }
+    fs.copyFileSync(extracted, cached);
+    fs.rmSync(tarPath, { force: true });
+    fs.rmSync(path.join(workDir, 'build'), { recursive: true, force: true });
+    return cached;
+}
+
+/**
  * Hardening guard: asserts the bundle + native addon are present and boots the staged
  * backend on a throwaway port to confirm it serves /health before we zip & upload.
  * Throws (aborting the release) if anything is wrong.
@@ -242,8 +384,15 @@ async function verifyStagedBackend(serviceReleaseDir) {
     });
 
     let healthy = false;
+    let dbOk = false;
     try {
         healthy = await waitForHealth(SMOKE_PORT, 15000);
+        // /health KHÔNG mở SQLite (store khởi tạo lười), nên nó một mình không
+        // phát hiện được addon native lệch ABI — ZIP hỏng vẫn qua cửa. Gọi thêm
+        // /local/health để ép mở DB và chạy truy vấn thật.
+        if (healthy) {
+            dbOk = await probeLocalDb(SMOKE_PORT);
+        }
     } finally {
         try {
             if (process.platform === 'win32') {
@@ -265,10 +414,17 @@ async function verifyStagedBackend(serviceReleaseDir) {
             'Inspect the staged dist/ and node_modules under ' + serviceReleaseDir + '.'
         );
     }
-    console.log('[verify] Staged backend responded healthy on /health. OK.');
+    if (!dbOk) {
+        throw new Error(
+            '[verify] Staged backend booted but could not open its SQLite database — release aborted. ' +
+            `Almost always a better-sqlite3 addon built for a different Node ABI than the pinned ` +
+            `runtime (${PINNED_NODE_VERSION}, ABI ${PINNED_NODE_ABI}). Delete ${RUNTIME_CACHE_DIR} and retry.`
+        );
+    }
+    console.log('[verify] Staged backend responded healthy on /health and opened SQLite. OK.');
 }
 
-function stageZaloBackendForWindows(winReleaseDir) {
+async function stageZaloBackendForWindows(winReleaseDir) {
     const serviceReleaseDir = path.join(winReleaseDir, 'zalo-bot-service');
 
     if (process.platform !== 'win32') {
@@ -317,8 +473,15 @@ function stageZaloBackendForWindows(winReleaseDir) {
     console.log(`Staged ${stagedDeps.size} native backend dependencies: ${[...stagedDeps].join(', ')}`);
 
 
+    // Runtime ĐƯỢC GHIM, không phải node.exe của máy build. Kèm addon native
+    // khớp ABI của chính runtime đó (node_modules máy dev giữ nguyên cho dev/test).
     const nodeRuntimePath = path.join(serviceReleaseDir, 'node.exe');
-    fs.copyFileSync(process.execPath, nodeRuntimePath);
+    fs.copyFileSync(await ensurePinnedNodeExe(), nodeRuntimePath);
+    fs.copyFileSync(
+        await ensureMatchingSqliteAddon(),
+        path.join(serviceReleaseDir, 'node_modules/better-sqlite3/build/Release/better_sqlite3.node')
+    );
+    console.log(`Staged pinned Node ${PINNED_NODE_VERSION} + ABI ${PINNED_NODE_ABI} better-sqlite3 addon.`);
 
     const launcherPath = path.join(winReleaseDir, 'zalo-bot-service.cmd');
     fs.writeFileSync(
@@ -546,7 +709,7 @@ async function main() {
             fs.unlinkSync(zipDestPath);
         }
         try {
-            stageZaloBackendForWindows(winReleaseDir);
+            await stageZaloBackendForWindows(winReleaseDir);
             console.log('Local Zalo backend staged beside the Windows app.');
             await verifyStagedBackend(path.join(winReleaseDir, 'zalo-bot-service'));
 
@@ -555,6 +718,18 @@ async function main() {
             console.log(`Running: ${zipCmd} (in ${winReleaseDir})`);
             execSync(zipCmd, { cwd: winReleaseDir, stdio: 'inherit' });
             console.log(`✅ Windows release successfully zipped to: ${zipDestPath}`);
+
+            // Giữ sourcemap của bundle CẠNH file zip, KHÔNG đóng vào zip: bundle
+            // được minify nên stack trace từ hiện trường (server.cjs:1:284719)
+            // chỉ giải mã ngược được khi còn map của đúng bản phát hành đó.
+            const mapSrc = path.join(ZALO_BOT_SERVICE_DIR, 'dist', 'server.cjs.map');
+            if (fs.existsSync(mapSrc)) {
+                const mapDest = path.join(path.dirname(zipDestPath), `alpha-crm-windows-v${versionStr}-server.cjs.map`);
+                fs.copyFileSync(mapSrc, mapDest);
+                console.log(`Sourcemap kept for crash triage: ${mapDest}`);
+            } else {
+                console.warn('[release] server.cjs.map missing — field stack traces will not be decodable.');
+            }
         } catch (err) {
             console.error('❌ Error zipping Windows release:', err.message);
             process.exit(1);

@@ -1599,11 +1599,38 @@ router.get('/events/subscribe', sseAuthMiddleware, requireActiveSubscription, as
 // ==========================================
 
 
+/**
+ * Chuẩn hoá số liệu supervisor gửi kèm heartbeat. Trả về null khi payload không
+ * dùng được, để route giữ nguyên giá trị cũ thay vì ghi đè bằng số 0 giả.
+ */
+export function normalizeSupervisorStats(input) {
+    if (!input || typeof input !== 'object') return null;
+
+    const restartCount = Number(input.restartCount);
+    if (!Number.isFinite(restartCount) || restartCount < 0) return null;
+
+    // Number(null) === 0, nên phải loại null/'' TRƯỚC khi ép kiểu — nếu không,
+    // một máy chưa từng crash sẽ bị ghi nhận là "đã thoát với mã 0".
+    const rawExitCode = input.lastExitCode;
+    const lastExitCode =
+        rawExitCode === null || rawExitCode === undefined || rawExitCode === ''
+            ? Number.NaN
+            : Number(rawExitCode);
+    const reportedAt = new Date(input.reportedAt);
+
+    return {
+        restartCount: Math.floor(restartCount),
+        lastExitCode: Number.isFinite(lastExitCode) ? Math.floor(lastExitCode) : null,
+        lastError: String(input.lastError || '').slice(0, 500),
+        reportedAt: Number.isNaN(reportedAt.getTime()) ? new Date() : reportedAt
+    };
+}
+
 // POST /api/crm/agent/heartbeat
 router.post('/agent/heartbeat', agentAuthMiddleware, async (req, res) => {
     try {
         const device = req.crmDevice;
-        const { status, appVersion, agentVersion, lastError, zaloAccounts, queueDepth } = req.body;
+        const { status, appVersion, agentVersion, lastError, zaloAccounts, queueDepth, uptimeSec, supervisor } = req.body;
 
         const now = new Date();
         const previousAgentStatus = device.agentStatus;
@@ -1628,6 +1655,10 @@ router.post('/agent/heartbeat', agentAuthMiddleware, async (req, res) => {
                 .filter((account) => account.accountId);
         }
         if (Number.isFinite(Number(queueDepth))) device.queueDepth = Number(queueDepth);
+        if (Number.isFinite(Number(uptimeSec))) device.uptimeSec = Math.max(0, Math.floor(Number(uptimeSec)));
+
+        const supervisorStats = normalizeSupervisorStats(supervisor);
+        if (supervisorStats) device.supervisor = supervisorStats;
 
         await device.save();
 
