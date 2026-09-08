@@ -13,11 +13,13 @@ primary_region = "sin"
 [http_service]
   internal_port = 3001
   force_https = true
-  auto_stop_machines = "stop"
+  # "suspend" chụp lại RAM thay vì tắt hẳn: máy tỉnh lại trong ~vài trăm ms,
+  # không phải boot lại Node + dựng lại pool Mongo như "stop".
+  auto_stop_machines = "suspend"
   auto_start_machines = true
   # 0 = free (cold start ~2-3s khi idle)
   # 1 = luôn chạy (~$3/tháng, không cold start)
-  min_machines_running = 0
+  min_machines_running = 1
 
   [http_service.concurrency]
     type = "connections"

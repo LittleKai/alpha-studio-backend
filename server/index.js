@@ -351,17 +351,33 @@ function registerShutdownHandlers(server) {
     process.once('SIGTERM', () => handleSignal('SIGTERM'));
 }
 
-export async function startServer() {
-    await connectDB();
-    if (process.env.INTERIOR_TEMPLATE_AUTO_SEED !== 'false') {
+// Hai việc này từng chạy TRƯỚC app.listen() và là phần lớn thời gian cold start
+// trên Fly: seed interior gửi ~57 updateOne TUẦN TỰ lên Atlas, còn
+// configureBucketCors gọi 3 round trip sang Backblaze B2 ở US. Cả hai đều
+// idempotent và chỉ đổi kết quả sau một lần deploy có thay file seed / đổi
+// FRONTEND_URL, nên chạy nền sau khi đã nhận request được là đủ.
+async function runStartupSideEffects({ seed }) {
+    if (seed) {
         try {
             await seedInteriorTemplateAssets({ logger: console });
         } catch (error) {
             console.warn('[interior:seed] startup seed failed:', error.message);
-            if (process.env.INTERIOR_TEMPLATE_SEED_STRICT === 'true') throw error;
         }
     }
     await configureBucketCors();
+}
+
+export async function startServer() {
+    await connectDB();
+
+    // INTERIOR_TEMPLATE_SEED_STRICT là cờ opt-in để boot HỎNG khi seed lỗi —
+    // muốn vậy thì phải chờ seed xong trước khi mở cổng, không đẩy ra nền được.
+    const strictSeed = process.env.INTERIOR_TEMPLATE_SEED_STRICT === 'true'
+        && process.env.INTERIOR_TEMPLATE_AUTO_SEED !== 'false';
+    if (strictSeed) {
+        await seedInteriorTemplateAssets({ logger: console });
+    }
+
     startCronJobs();
 
     const server = app.listen(PORT, () => {
@@ -373,6 +389,12 @@ export async function startServer() {
 
     server.setTimeout(15 * 60 * 1000);
     registerShutdownHandlers(server);
+
+    // Không await: cổng đã mở, phần còn lại chạy nền.
+    runStartupSideEffects({
+        seed: !strictSeed && process.env.INTERIOR_TEMPLATE_AUTO_SEED !== 'false'
+    }).catch((error) => console.warn('[startup] side effects failed:', error.message));
+
     return server;
 }
 
