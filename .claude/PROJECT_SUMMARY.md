@@ -1,623 +1,79 @@
-*Latest Session: **Cắt cold start trên Fly.io: mở cổng trước, việc phụ chạy nền.** `startServer()` trước đây chặn `app.listen()` sau `connectDB()` → `seedInteriorTemplateAssets()` (**57 `updateOne` TUẦN TỰ** lên Atlas: 15 file `server/assets/interior/templates/` + 42 file `server/assets/interior/workshop/`) → `configureBucketCors()` (**3 round trip** sang Backblaze B2 ở US). Cả hai đều idempotent và chỉ đổi kết quả sau deploy có thay file seed / đổi `FRONTEND_URL`, nên đã chuyển vào `runStartupSideEffects()` chạy **sau** `app.listen()`, không `await`. Ngoại lệ giữ nguyên: cờ opt-in `INTERIOR_TEMPLATE_SEED_STRICT=true` vẫn seed **trước** khi mở cổng (vì mục đích của cờ là làm boot hỏng khi seed lỗi) và khi đó không seed lại ở nền. `fly.toml`: `min_machines_running` 0 → **1** và `auto_stop_machines` `"stop"` → **`"suspend"`**. Verify: `npm test` **226/226 pass**, import `server/index.js` với `NODE_ENV=test` sạch.*
+# PROJECT SUMMARY - Alpha Studio Backend
 
-*Previous session: **Thêm hệ thống theo dõi truy cập web (`/api/analytics`) cho tab Phân Tích trong Admin.** Model `PageVisit` lưu từng lượt xem trang dưới dạng sự kiện thô, tự xoá sau 90 ngày bằng TTL index. `POST /analytics/track` là endpoint công khai (rate limit 60 req/phút/IP, lọc bot theo User-Agent, không lưu IP); `GET /analytics/overview?days=7|30|90` và `GET /analytics/realtime` yêu cầu adminOnly. Toàn bộ báo cáo được tổng hợp lúc đọc trong một `$facet` duy nhất — chuỗi theo ngày, trang xem nhiều/trang vào đầu, kênh truy cập, tên miền giới thiệu, chiến dịch UTM, thiết bị/trình duyệt/HĐH, phân bố theo giờ và theo thứ — nhóm theo ngày `Asia/Ho_Chi_Minh`. Lưu lượng Google Ads nhận diện qua `gclid` hoặc `utm_medium=cpc` → kênh `paid-search`. Test mới `test/analytics.test.js` (9 test) phủ `isBotUserAgent`, `parseUserAgent`, `hostFromUrl`, `isSelfHost`, `classifyChannel`, `normalizePath`, cộng 2 test chặn regression về index. ⚠️ **Bẫy đã gặp:** runtime nối DB với `autoIndex: false`, nên `schema.index()` trong model **không** tạo index nào — lần chạy thử đầu tiên collection `pagevisits` chỉ có `_id_`, TTL không tồn tại và dữ liệu sẽ không bao giờ tự xoá. Đã khai 6 index vào `REQUIRED_INDEXES` (`migrations/m0/indexPlan.js`) + thêm `analytics: 90 ngày` vào `retention/policy.js`, rồi chạy `npm run db:m0:audit -- --apply-indexes` để tạo thật. Đã chạy thử local end-to-end (backend + Vite dev): beacon ghi nhận đúng, bot bị bỏ qua, thiếu trường trả 400, `/overview` và `/realtime` trả số liệu khớp, không token trả 401. Dữ liệu test đã xoá sạch khỏi Atlas. `npm test` 221/221 pass.*
+**Last Updated:** 2026-09-16 · **Session:** 1
 
-*Previous session: **Cập nhật giá gói Alpha CRM hàng tháng xuống 100.000đ (1.050 Credits) và thời gian dùng thử 1 tháng (30 ngày).** `server/utils/crmCatalog.js` cập nhật `CRM_PLANS.crm_monthly` với `priceVnd: 100000`, `priceCredits: 1050` và `CRM_TRIAL.durationDays: 30`. Cập nhật unit test `server/utils/crmCatalog.test.js` và `server/utils/crmTrial.test.js` (tính đúng `periodEnd` 30 ngày và audit log). Cập nhật ngữ cảnh chatbot AI tại `server/context/alpha-studio-bot/venue.md` và `tools/openclaw-server/workspaces/alpha-studio/venue.md`. `npm test` 212/212 pass.*
+> Trang thai hien tai, khong phai changelog. Sau moi task: cap nhat ngay/session; doi bang trang thai va TODO; cap nhat `DATABASE.md` khi schema doi. Bug quan trong vao `IMPORTANT_FIXED_BUGS.md`. Ban v1 nam trong `archive/PROJECT_SUMMARY_v1.md` va khong duoc dung lam huong dan hien tai.
 
-*Previous session: **Thời gian nguội của bộ đếm lượt xem thư viện tăng từ 10 phút lên 6 giờ.** `VIEW_COOLDOWN_MS` trong `routes/eventLibrary.js` = `6 * 60 * 60 * 1000`. Cửa sổ dài hơn làm lộ một lỗ ở `shouldCountView`: vòng dọn cũ chỉ xoá khoá **đã hết hạn**, mà với 6 giờ thì có thể chẳng khoá nào đủ cũ → store vượt `VIEW_STORE_MAX` (5000) và phình mãi. Thêm vòng thứ hai bỏ khoá cũ nhất (Map giữ đúng thứ tự chèn) cho tới khi về đúng hạn mức. 2 test mới trong `test/event-library.test.js` (cắt khoá cũ nhất khi chưa khoá nào hết hạn; ghim giá trị hằng = 6 giờ). `npm test` 209/209.*
+## 1. Tong quan
 
-*Previous session: **Admin sửa/xoá được skill trong Thư viện Kỹ Năng AI.** `routes/skills.js` thêm `PUT /api/skills/:slug` và `DELETE /api/skills/:slug`, cả hai qua `authMiddleware` + `adminOnly`. Cổng lọc dữ liệu là `sanitizeSkillInput()` — export ra để test: whitelist field nội dung (`name`, `headline{,_vi}`, `short_description{,_vi}`, `tier`, `category`, `difficulty`, `install_type`, `estimated_time_saving`, `author`, `install_command`, `source_repo_url`, `url`, `source`, `github_stars`, `works_with`, `tags`, `sections.*`), **cố ý không cho sửa `slug`/`_id`** vì slug là URL công khai của skill; `tier`/`difficulty` phải khớp enum của `models/Skill.js`; `sections.*` làm phẳng thành dotted path (`sections.overview_vi`) nên partial update không ghi đè các nhánh không gửi; mảng chuỗi bị cắt trắng + khử trùng lặp; body rỗng trả 400 thay vì `$set: {}`. Cả hai route gọi `invalidateFilterCountsCache()` — sửa tier/category/difficulty hoặc xoá skill làm lệch bộ đếm sidebar vốn cache 5 phút. Test mới `test/skills-admin.test.js` (15 case, hàm thuần, không cần DB). `npm test` 200/200. Form sửa nằm bên FE trong bộ đăng `/workflow?view=skills` — backend không có UI riêng. Bổ sung: `GET /api/event-library/:slug` không còn +1 view mỗi lần gọi — `shouldCountView`/`viewerKey` (export cho test) giữ thời gian nguội 10 phút cho mỗi người xem trên mỗi mục, `viewerKey` lấy IP từ `x-forwarded-for` vì app không bật `trust proxy`. 4 case mới trong `test/event-library.test.js`; `npm test` 207/207.*
+- **Loai:** Node.js ESM, Express 5, Mongoose/MongoDB API.
+- **Artifact:** service production/Fly.io app.
+- **Bang chung xong:** `npm test`, `npm run check`, health/endpoint smoke voi env local/test.
+- **Contract:** JSON `{ success, message, data }`; JWT auth; CORS multi-origin.
+- **Storage:** MongoDB Atlas, Cloudinary, Backblaze B2.
 
-*Previous session: **Orphan checker đọc được ảnh TinyMCE trong mô tả dự án + endpoint DELETE tự đối chiếu lại trước khi xoá.** `GET /api/admin/storage/orphaned` trước đây không quét `WorkflowProject.description`: ảnh chèn bằng TinyMCE đi thẳng lên B2 (prefix `project-descriptions/`) nhưng URL chỉ nằm trong chuỗi HTML, không có field B2 nào trỏ tới — checker xếp chúng vào **orphaned** và `DELETE` xoá thật. `routes/admin.js` thêm `extractB2KeysFromHtml(html)` quét **mọi** URL trong chuỗi (link tải, `background-image:url()`, `srcset` đều là tham chiếu thật), giải mã `&amp;`, khử trùng lặp. Phần dựng `usedKeys` được tách khỏi handler GET thành `collectReferencedKeys()` — **nguồn duy nhất** dùng chung cho cả hai endpoint, vì tách đôi logic là kiểu gì cũng lệch. `DELETE /storage/orphaned` trước đây xoá thẳng key client gửi lên (chỉ chặn `APP_RELEASE_PREFIXES`); nay gọi `getReferencedKeys()` rồi trả **409** qua `blockedDeleteReason()` nếu key vẫn được tham chiếu — bịt cửa sổ đua "danh sách admin đã cũ". Kết quả quét được cache `DELETE_GUARD_TTL_MS = 10s` vì trang admin xoá hàng loạt bằng vòng lặp tuần tự (200 file = 1600 lượt quét nếu không cache); GET luôn tính mới. Export thêm: `extractB2Key`, `extractB2KeysFromHtml`, `collectReferencedKeys`, `getReferencedKeys`, `blockedDeleteReason`, `DELETE_GUARD_TTL_MS`. Test mới `test/storage-orphan-html.test.js` (16 test) viết TRƯỚC khi sửa và đã tái hiện lỗi. Verify: `npm test` **185/185 pass**, `npm run check` sạch.*
+## 2. Trang thai
 
-*Previous session: **Orphan checker đọc được ảnh TinyMCE nhúng trong mô tả dự án — vá lỗ hổng xoá nhầm dữ liệu.** `GET /api/admin/storage/orphaned` trước đây không quét `WorkflowProject.description`: ảnh chèn bằng TinyMCE trong mô tả dự án đi thẳng lên B2 (prefix `project-descriptions/`) nhưng URL chỉ tồn tại trong chuỗi HTML, không có field B2 nào trỏ tới — nên checker xếp chúng vào **orphaned** và `DELETE /storage/orphaned` sẽ xoá ảnh đang được dùng. `routes/admin.js` thêm `extractB2KeysFromHtml(html)` (export) quét **mọi** URL trong chuỗi chứ không riêng `<img src>` — link tải, `background-image:url()`, `srcset` đều là tham chiếu thật, bỏ sót là mất dữ liệu — giải mã `&amp;` do TinyMCE escape và khử trùng lặp; `extractB2Key()` cũng được export để test. Route nạp `WorkflowProject.find({ description: /https?:/// })` rồi đổ key vào `usedKeys`, quy kết `source: 'project-description'` với `uploader` = tên dự án. Test mới `test/storage-orphan-html.test.js` (10 test) viết TRƯỚC khi sửa và đã tái hiện lỗi. Verify: `npm test` **179/179 pass**, `npm run check` sạch.*
+| Hang muc | Trang thai | File chinh | Ghi chu |
+|---|---|---|---|
+| Auth, users, roles | ✅ | `server/routes/auth.js`, `server/middleware/auth.js` | JWT 7 ngay |
+| Content/course/job/partner/prompt | ✅ | `server/routes/`, `server/models/` | Noi dung `vi` bat buoc, `en` optional |
+| Workflow, event library, AI skills | ✅ | `server/routes/workflow.js`, `eventLibrary.js`, `skills.js` | API cho frontend |
+| Cloud Desktop + agents | ✅ | `server/routes/cloud.js`, models HostMachine/CloudSession | Contract cheo host/flow |
+| CRM + analytics | ✅ | `server/routes/crm.js`, `analytics.js` | Co rate limit va test |
+| B2 orphan/retention/migrations | ✅ | `server/routes/admin.js`, `server/retention/`, `server/migrations/` | DELETE doi chieu lai reference |
+| Automated tests | ✅ | `test/*.test.js`, `server/**/*.test.*` | Node test runner |
 
-*Previous session: **Prompt có tệp đính kèm trên B2 — chỉ admin/mod gắn được.** `models/Prompt.js` thêm `attachments[{ name, url (required), fileKey, size, mime }]` — tách hẳn khỏi `exampleImages` (ảnh nhỏ, thực tế đi **Cloudinary** chứ không phải B2 như CLAUDE.md từng ghi; đã sửa lại doc). `routes/prompts.js` thêm hai helper thuần export được: `canManageAttachments(user)` (admin|mod) và `sanitizeAttachments(list)` (ép 5 field, bỏ mục thiếu `url`, trim url, cắt ở `MAX_ATTACHMENTS = 10`). `POST /` gắn `attachments` **chỉ khi** người gửi là admin/mod, ngược lại lưu mảng rỗng; `PUT /:id` chỉ ghi đè `attachments` khi người sửa là admin/mod — tác giả thường sửa prompt của mình không gỡ được tệp đã duyệt. Lý do khoá quyền: `POST /api/prompts` mở cho **mọi tài khoản đăng nhập**, nên cho tất cả upload là mở cửa cho người lạ đổ file vào bucket B2. Orphan checker `GET /api/admin/storage/orphaned` quét thêm `Prompt.attachments[].fileKey/url` (projection `'exampleImages attachments author'` + populate `author`) và quy kết `source: 'prompt'` / `uploader` = tên tác giả, giống cách khối `event-library` làm — không có bước này thì file hiện `source: null` trong bảng quản trị. Test mới `test/prompt-attachments.test.js` (7 case cho phân quyền + chuẩn hoá); `npm test` 169/169. **Verify end-to-end trong trình duyệt** (đăng nhập admin, dev server thật): form hiện khối "Tệp đính kèm — Chỉ quản trị viên và điều hành viên" → upload `.txt` lên B2 (`prompts/1788102688425-…`) → lưu → `GET /api/prompts/:slug` trả `attachments[]` đủ `fileKey`/`size`/`mime` → modal chi tiết hiện khối tệp → tải trực tiếp từ B2 trả HTTP 200 đúng 37 byte → orphan checker báo **referenced** với `source: 'prompt'`; sau khi xoá prompt thì chính file đó chuyển sang **orphaned** đúng như thiết kế. Dữ liệu test đã xoá sạch (prompt + file B2). **Chưa verify bằng tài khoản non-admin** — phân quyền chỉ được phủ bởi unit test `canManageAttachments`. **Còn thiếu:** collection `prompts` chưa từng có mục riêng trong `.claude/DATABASE.md` — chưa bổ sung trong session này.*
+## 3. Gia dinh dang giu
 
-*Previous session: **Mục thư viện sự kiện có thêm cấp quyền `pro` — khoá thân bài theo credit TÍCH LUỸ.** `EventLibraryItem` thêm `accessLevel: 'public'|'pro'` (default `public`, indexed) cùng hằng `ACCESS_LEVELS` và `PRO_MIN_LIFETIME_CREDITS = 200`. **Chỉ admin đặt được**: `POST /` bỏ qua `accessLevel` nếu người gửi không phải admin, `PUT /:id` tách `accessLevel` ra khỏi phần `updatable` và chỉ gán khi `role === 'admin'`. Điều kiện mở: `lifetimeCreditsOf(userId)` = tổng `Transaction.credits` với `status: 'completed'` và `type ∈ CREDIT_IN_TYPES = ['topup','manual_topup','bonus']` — **credit admin cấp tay tính như credit nạp tiền**; `spend`/`refund` không nằm trong đó vì tiêu rồi vẫn coi là đã từng sở hữu. `hasProAccess(item, user, lifetimeCredits)` lấy `max(lifetime, user.balance)` để tài khoản cũ có credit nhưng thiếu bản ghi `Transaction` không bị khoá oan; admin và chủ sở hữu luôn qua. **Cắt nội dung ở server, không ẩn bằng CSS**: `redactLockedItem()` xoá `content`/`sections`/`attachments` và gắn `locked: true`. Áp ở 3 chỗ: `GET /:slug` (kèm `access: {level, unlocked, requiredCredits, lifetimeCredits}` trong response), `GET /` qua `applyProGate()` — nếu không, link B2 trong `attachments` của card là cửa sau vào nội dung — và `POST /:slug/use` trả 403 khi chưa mở khoá. `applyProGate` chỉ truy vấn tổng credit khi danh sách thực sự có mục `pro`, và đúng một lần cho cả trang. 7 test mới cho `hasProAccess`/`redactLockedItem`/`CREDIT_IN_TYPES`; `npm test` 162/162.*
-
-*Previous session: **Tương tác của mục thư viện: like + review (sao kèm nhận xét trong cùng một phiếu) — không có khối bình luận riêng.** `EventLibraryItem` thêm `likes[]`/`likesCount` và `ratings[]` (mỗi phần tử `{user, score 1–5, comment, timestamps}`) cùng `rating{average,count}`. `POST /:slug/like` bật/tắt; `POST /:slug/rate` nhận `{score, comment}` — mỗi người đúng **một** phiếu, chấm lại thì ghi đè cả điểm lẫn nhận xét (`upsertRating` cắt nhận xét ở `MAX_REVIEW_COMMENT = 1000`). `GET /:slug` **không trả `likes`/`ratings`** (vừa lộ danh sách người dùng vừa phình) mà trả `me: { liked, score, comment }` cho riêng người đang xem, cộng `reviews[]` — 30 phiếu có nhận xét mới nhất, populate `ratings.user` để lấy tên/avatar; `INDEX_FIELDS` cũng loại hai mảng này. **Không tái sử dụng `/api/comments`**: `Comment.targetType` giữ nguyên `['prompt']`, không có target `library`, và `commentsCount` đã gỡ khỏi schema (force-unset trên 26 bản ghi cũ qua raw driver — Mongoose strict mode nuốt `$unset` cho field không còn trong schema, báo `modifiedCount` nhưng không xoá gì). Backfill 27 mục cũ thiếu field mặc định. Test cho `toggleLike`/`upsertRating`/`summarizeRatings`; `npm test` 155/155.*
-
-*Previous session: **Cập nhật toàn diện bộ thông tin ngữ cảnh cho Trợ lý AI Chatbot (`venue.md`).** Đồng bộ và làm mới toàn bộ dữ liệu kiến thức cho chatbot tư vấn hỗ trợ trên web tại cả `server/context/alpha-studio-bot/venue.md` và `tools/openclaw-server/workspaces/alpha-studio/venue.md`. Nội dung cập nhật bao gồm: (1) **Thư viện Tri Thức Sự Kiện** (`/studio/event-library`) thay thế hoàn toàn Kho tài nguyên cũ, 7 loại hình nội dung, 8 loại khối soạn thảo, cơ chế xuất bản từ Workflow; (2) **Thư viện Kỹ Năng AI** (`/studio/skills`); (3) **VietYaku** (`/studio/vietyaku`) dịch Nhật/Trung sang Việt cho Windows và Android; (4) **VocabFlip** (`/studio/vocab`) thuật toán FSRS, tra từ điển StarDict offline 0ms, luyện viết chữ Hán/Kanji 16.2K ký tự `animCJK`, AI Flashcard generator; (5) **Alpha CRM** (`/studio/crm`) tiếp thị đa kênh (Zalo, FB, TikTok, IG, WhatsApp, Telegram, Webchat), chính sách dùng thử 2 tháng & gói gia hạn 2.100 credits/200K, bảo mật dữ liệu cục bộ & tóm tắt nhóm AI transient; (6) **AI Interior Design** (`/studio/interior-design`) hỗ trợ đa dạng bố cục `runs[]` (L/U/Island/Galley/song song), thư viện 197 components, bo góc `roundedBox`, trụ tròn `cylinder`, phân tích phác thảo & render AI, chế độ xác nhận 2 bước; (7) Cập nhật hệ sinh thái Khóa học, Share Prompts, Ví VietQR Casso tự động và Cloud Desktop.*
-
-*Previous session: **Tiếng Anh không còn bắt buộc cho nội dung đăng lên web.** Gỡ `required` khỏi nhánh `en` trong `models/Article.js` (`title.en`), `models/Course.js` (`title.en` của khoá học, của module và của lesson), `models/Job.js` và `models/Prompt.js` (`title.en`) — tất cả chuyển thành `default: ''`. Bốn route `POST` đổi điều kiện `!title?.vi || !title?.en` thành `!title?.vi`, thông báo lỗi còn "Cần tiêu đề tiếng Việt" / "Vietnamese title is required": `routes/articles.js`, `routes/courses.js`, `routes/jobs.js`, `routes/prompts.js`. Route `PUT` chỉ gán field nên không cần sửa; sinh slug vốn đã fallback (`title.en || title.vi` ở Course/Prompt, `title.vi` ở Article) nên không ảnh hưởng. Frontend chịu trách nhiệm hiển thị bản VI khi EN trống — backend **không** tự nhân bản giá trị, để phân biệt "chưa dịch" với "đã dịch". Test mới `test/optional-english-content.test.js` (8 case, dùng `validateSync()` nên không cần DB): mỗi model phải hợp lệ khi thiếu `title.en` và phải báo lỗi khi thiếu `title.vi`. `npm test` 148/148. **Sửa kèm một lỗi hạ tầng phát hiện khi test end-to-end:** `server/index.js` gọi `dotenv.config()` ở dòng 57, nhưng ESM chạy hết import trước mọi câu lệnh cấp module, nên `middleware/auth.js` đọc `process.env.JWT_SECRET` ở pha import và luôn thấy `undefined` — mỗi lần nodemon restart sinh secret mới và đá mọi người đang đăng nhập ra với `Invalid token.`, dù `.env` có JWT_SECRET hợp lệ. Sửa bằng `import 'dotenv/config';` làm import đầu tiên. Chỉ ảnh hưởng dev (Fly.io cấp env trước khi module nạp). Ghi lại ở `.claude/IMPORTANT_FIXED_BUGS.md` — cùng loại bẫy với `utils/b2Storage.js` và `routes/vietyaku.js`. **Dữ liệu mẫu:** `scripts/seed-event-library-skills.mjs` (6 skill nghiệp vụ sự kiện) và `scripts/seed-event-library-cases.mjs` (6 case study) — cùng quy ước dry-run / `--apply` / `clean`, slug cố định nên idempotent, case liên kết sang skill qua khối `linkedItems`. Cả hai để `verification: 'unverified'` vì là nội dung biên tập chưa qua rà soát; bộ case dùng **khách hàng ẩn danh và số liệu minh hoạ**, có khối cảnh báo đặt đầu bài — không gắn kết quả bịa cho thương hiệu có thật. Thêm `seed-event-library-prompts.mjs` (6 prompt, nội dung prompt bọc `<pre>` trong khối richText) và `seed-event-library-templates.mjs` (6 template). **Template seed KHÔNG có `attachments`** — không có file thật để upload và bịa URL B2 sẽ tạo link 404, nên cấu trúc template viết thẳng vào thân bài dạng bảng/checklist; card do đó không hiện nút "Tải về" (đúng thiết kế). Cả 4 bộ đều liên kết chéo qua `linkedItems`, tổng 24 mục platform. Cả 24 mục có **ảnh bìa** sinh bằng skill `delegate --type=image` của `D:Dev.lib_pjhybrid-ai-skills` (Gemini image qua Antigravity, không dùng API key Gemini trực tiếp) rồi đẩy lên Cloudinary folder `event-library`; URL hardcode trong hằng `COVER` của từng script seed, ảnh master đã xoá sau khi lên Cloudinary, chỉ giữ `deliverables/event-library-covers/README.md` chứa bảng prompt để sinh lại khi cần. Bốn loại dùng bốn ngôn ngữ hình ảnh khác nhau để phân biệt trên lưới: skill = hậu trường/nghề, case study = phóng sự có đám đông, prompt = tĩnh vật trừu tượng không người, template = flat-lay biểu mẫu nền sáng.*
-
-*Previous session: Thân bài của `EventLibraryItem` chuyển từ một khối `content` TinyMCE duy nhất sang **`sections[]` — danh sách khối có thứ tự** với 8 `kind` (`richText`, `keyValue`, `metrics`, `bulletGroups`, `steps`, `quote`, `gallery`, `linkedItems`), cộng `gallery[]` ảnh phụ. Tất cả gộp trong một sub-schema thay vì 8 sub-schema để mảng giữ được thứ tự người đăng sắp; mỗi khối chỉ dùng field thuộc `kind` của nó và `sanitizeSections()` cắt sạch phần thừa, bỏ `kind` lạ, chặn payload phình (30 khối / 50 phần tử mỗi khối). Chữ trong khối là **một ngôn ngữ** — chỉ `title`/`summary`/`content` ở cấp mục còn song ngữ. `GET /` bỏ luôn `sections` khỏi projection (`-content -sections`) nên danh sách không kéo thân bài. **Kho tài nguyên cũ đã bị gỡ hẳn**: `models/Resource.js` và `routes/resources.js` xoá, `/api/resources` không còn, `comments.js` bỏ target `resource`, orphan checker trong `admin.js` bỏ khối Resource và bù lại phần quy kết người upload vào khối `EventLibraryItem` (`source: 'event-library'`). `scripts/migrate-resources-to-library.mjs` (dry-run mặc định, `--apply` để ghi, idempotent qua `origin.refId`) đã chạy: 2 bản ghi chuyển sang thư viện, giữ nguyên URL/key B2 nên file không thành mồ côi. 5 test mới cho `sanitizeSections`; `npm test` 140/140.*
-
-*Previous session: Added the **Event Knowledge Library** (`models/EventLibraryItem.js`, `routes/eventLibrary.js` mounted at `/api/event-library`, `test/event-library.test.js`) — one collection holding all 7 content types (`itemType`) from two sources: `ownership: platform` (editorial/crawled, admin-only, always public) and `ownership: user` (published from Workflow, `visibility: private|public`, scoped to `owner`). Every read goes through `buildVisibilityFilter(user)`; `POST /publish/project/:id` and `POST /publish/document/:id` convert a `WorkflowProject`/`WorkflowDocument` into a per-account item and are gated by `canPublishProject`/`canPublishDocument`. `routes/admin.js` orphan checker now also scans `EventLibraryItem.attachments[].fileKey/url`. 22 new unit tests; `npm test` 135/135.*
-
-*Previous session: **`cdn.giaiphapsangtao.com` no longer resolves** (NXDOMAIN from both Google and Cloudflare public resolvers), which silently broke every desktop-app download link — VocabFlip and Alpha CRM included; they only looked healthy because their routes were serving metadata cached in `SystemSetting` from before the host disappeared. Switched the platform to the direct B2 host `https://f004.backblazeb2.com/file/alpha-studio`: `CDN_BASE_URL` updated on Fly.io, and the hardcoded host removed from `routes/vietyaku.js`, `routes/vocab.js`, and `routes/crm.js`. `routes/vietyaku.js` now derives its base from `CDN_BASE_URL` lazily inside the handler (reading `process.env` at module level would capture `undefined` — `dotenv.config()` runs after ES module imports, same constraint as `utils/b2Storage.js`) and cache-busts the manifest fetch, since `version.json` is overwritten in place on every release. The three `version.json` manifests on B2 were rewritten to the new host, verified with HEAD requests. Note `routes/vocab.js` and `routes/crm.js` still hardcode the (now correct) host rather than reading `CDN_BASE_URL` — worth unifying. Stored URLs in Mongo carried the dead host too, which also defeated `extractB2Key()` (its `CDN_BASE_URL` prefix no longer matched, and its `.backblazeb2.com/file/{bucket}/` fallback never did) — so presigned downloads for course videos and lesson documents were broken, not just the direct links. `scripts/migrate-b2-host.mjs` (`npm run db:migrate-b2-host`, dry-run by default, `--apply` to write, idempotent) rewrites the host across every B2 URL field; it has been run: 3 documents / 3 URLs (1 WorkflowDocument, 2 Course lesson videos). Its field inventory mirrors the orphan checker in `routes/admin.js` — keep the two in sync.*
-
-*Previous session: Updated `routes/vietyaku.js` (`parseVietYakuManifest`) to parse `androidAsset` (`androidApkUrl` and `androidSize`), with unit tests in `test/vietyaku-release.test.js`.*
-
-*Previous session: Built and released Alpha CRM v0.1.4 (Build 27) to Backblaze B2 CDN via `scripts/release-to-b2.js`. Updated Windows bundling to use native `tar` for fast reliable zipping (`alpha-crm-windows.zip`), built Android release (`alpha-crm-v0.1.4.apk`), and updated `crm-app/version.json`.*
-
-*Previous session: Added `routes/vietyaku.js` — `GET /api/vietyaku/releases/latest` reads the VietYaku `version.json` manifest from B2, caches it in `SystemSetting`, and falls back three ways (covered by `test/vietyaku-release.test.js`). Also protected desktop app release prefixes (`vocabflip-app/`, `vietyaku-app/`) from the B2 orphan checker in `routes/admin.js`.*
-
-*Previous session: Updated CRM monthly subscription (`crm_monthly`) in `server/utils/crmCatalog.js` to 200,000 VND (2,100 Credits) and 100 included AI requests. Updated unit tests (`test/crmCatalog.test.js`, `test/crmBilling.test.js`).*
-
-*Previous session: Increased CRM trial duration from 14 to 60 days (2 months) in `CRM_TRIAL` (`server/utils/crmCatalog.js`), `server/utils/crmTrial.js`, and updated unit tests (`test/crmTrial.test.js`, `test/crmCatalog.test.js`).*
-
-*Previous session: Added `landingVideoQuality` (`'high'` | `'standard'`) to `PUBLIC_KEYS` and system settings routes (`server/routes/settings.js`). Validates allowed qualities and exposes `landingVideoQuality` via both `GET /api/settings/public` (default `'high'`) and `GET /api/settings`, saved via `POST /api/settings`.*
-
-*Previous session: Security audit & hardening — `JWT_SECRET`/`ENCRYPTION_KEY` giờ bắt buộc ở production (không còn fallback hardcode, dev/test dùng key ngẫu nhiên ephemeral), toàn bộ npm vulnerabilities đã vá (nodemailer 9, mongoose, fast-xml-parser, path-to-regexp, ws...), `callOpenClaw` hỗ trợ gửi `x-api-token` (env `OPENCLAW_API_TOKEN`) khi OpenClaw api-server bật auth.*
-
-## 1. Project Overview
-- **Name:** Alpha Studio Backend
-- **Type:** REST API Backend for AI Academy Platform
-- **Tech Stack:**
-  - Node.js 18+ (ES Modules)
-  - Express.js 5.x
-  - MongoDB Atlas (Cloud Database)
-  - Mongoose 8.x (ODM)
-  - JWT (jsonwebtoken) + bcrypt
-- **Deployment:** Fly.io (https://alpha-studio-backend.fly.dev)
-- **Frontend:** Separate repository - [alpha-studio](../alpha-studio) (https://alphastudio.vercel.app)
-
----
-
-## 2. Current Architecture
-
-### File Structure
-```
-alpha-studio-backend/
-├── server/
-│   ├── index.js                   # Express server entry point
-│   ├── db/
-│   │   ├── connection.js          # MongoDB connection
-│   │   ├── init-collections.js    # Database initialization
-│   │   ├── test-connection.js     # Connection test script
-│   │   └── migrate-passwords.js   # Password hashing migration
-│   ├── models/
-│   │   ├── User.js                # User model with bcrypt + balance field
-│   │   ├── Course.js              # Course model with multilingual support + lesson videoUrl/documents
-│   │   ├── Enrollment.js          # Course enrollment with progress tracking
-│   │   ├── Review.js              # Course reviews with ratings
-│   │   ├── Job.js                 # Job listings with multilingual support
-│   │   ├── Partner.js             # Partner profiles with skills array
-│   │   ├── Transaction.js         # Payment transactions (topup, spend, etc.)
-│   │   ├── WebhookLog.js          # Casso webhook logging
-│   │   ├── Prompt.js              # Shared prompts with multiple contents, ratings
-│   │   ├── Comment.js             # Comments for prompts
-│   │   ├── Article.js             # Articles for About & Services pages (bilingual)
-│   │   ├── HostMachine.js         # Cloud host machine registry
-│   │   ├── CloudSession.js        # Cloud desktop sessions
-│   │   ├── InteriorAiLog.js       # Raw AI request/response per Interior /chat call (TTL 30 days)
-│   │   ├── WorkflowProject.js     # Workflow projects (team, tasks, chatHistory, expenseLog)
-│   │   ├── WorkflowDocument.js    # Workflow documents (file metadata, status, comments)
-│   │   ├── EventLibraryItem.js    # Thư viện sự kiện — 7 itemType, ownership platform|user, visibility public|private, accessLevel public|pro
-│   │   ├── FeaturedStudent.js     # Featured students (userId ref, order, label, hired)
-│   │   ├── PageVisit.js           # Raw web pageview events for the admin traffic dashboard (TTL 90 days)
-│   │   └── ChatMessage.js         # AI consultation chat history (userId, role, content) — display only; OpenClaw maintains session memory via x-openclaw-session-key
-│   ├── middleware/
-│   │   └── auth.js                # JWT auth + adminOnly + modOnly middleware
-│   └── routes/
-│       ├── auth.js                # Auth API routes
-│       ├── courses.js             # Course CRUD + publish/archive routes
-│       ├── jobs.js                # Job CRUD + publish/close routes
-│       ├── partners.js            # Partner CRUD + publish/unpublish routes
-│       ├── payment.js             # Payment API (create, confirm, cancel, webhook)
-│       ├── admin.js               # Admin API (users, transactions, webhook management)
-│       ├── prompts.js             # Prompts API (CRUD, like, bookmark, rate, download)
-│       ├── comments.js            # Comments API for prompts
-│       ├── enrollments.js         # Course enrollment API (enroll, progress, check)
-│       ├── reviews.js             # Course reviews API (CRUD, like, helpful, rating distribution)
-│       ├── articles.js            # Articles API (CRUD, publish/unpublish, public + admin)
-│       ├── cloud.js              # Cloud desktop API (connect, disconnect, admin machines/sessions, heartbeat)
-│       ├── upload.js             # B2 presigned URL endpoint (POST /presign, DELETE /file)
-│       ├── workflow.js           # Workflow API (CRUD projects + documents, auth required)
-│       ├── eventLibrary.js       # Event library API (list/detail/stats, user CRUD, publish from Workflow, cổng pro theo credit tích luỹ)
-│       ├── featuredStudents.js   # Featured students API (public GET, admin CRUD + reorder)
-│       ├── analytics.js          # Web traffic API — public /track beacon + admin /overview, /realtime
-│       └── chat.js               # AI consultation API (auth required) — GET /history, POST /send, DELETE /history; forwards to OpenClaw via OPENCLAW_URL
-│   └── utils/
-│       └── b2Storage.js          # B2 S3 client + generatePresignedUploadUrl + deleteFile + listAllFiles (paginated)
-
-├── .claude/                       # Documentation
-│   ├── PROJECT_SUMMARY.md
-│   ├── CONVENTIONS.md
-│   ├── DATABASE.md
-│   ├── INSTRUCTIONS_FOR_CLAUDE.md
-│   └── history/
-├── package.json
-├── .env.example
-├── .gitignore
-└── README.md
-```
-
-### API Routes
-```
-/api
-├── /auth
-│   ├── POST /register    # User registration
-│   ├── POST /login       # User login
-│   ├── POST /logout      # Logout (clears cookie)
-│   ├── GET  /me          # Get current user (auth required)
-│   ├── PUT  /profile     # Update profile (auth required)
-│   └── PUT  /password    # Change password (auth required)
-├── /event-library
-│   ├── GET    /            # List (public; adds the caller's own private items when signed in)
-│   ├── GET    /stats       # Totals for the hero stat strip
-│   ├── GET    /:slug       # Detail + related (increments stats.views)
-│   ├── POST   /:slug/use   # Increments stats.uses (download / "use now" button)
-│   ├── POST   /            # Create (auth; ownership=platform is admin-only)
-│   ├── PUT    /:id         # Update (owner or admin)
-│   ├── DELETE /:id         # Delete (owner or admin)
-│   ├── POST   /publish/project/:projectId    # WorkflowProject → case study (creator/team/admin)
-│   └── POST   /publish/document/:documentId  # WorkflowDocument → template (uploader/admin)
-├── /courses (admin only)
-│   ├── GET    /           # List courses (pagination, filters, search)
-│   ├── GET    /stats      # Course statistics
-│   ├── GET    /:id        # Get single course
-│   ├── POST   /           # Create course
-│   ├── PUT    /:id        # Update course
-│   ├── DELETE /:id        # Delete course
-│   ├── PATCH  /:id/publish    # Publish course
-│   ├── PATCH  /:id/unpublish  # Unpublish course
-│   └── PATCH  /:id/archive    # Archive course
-├── /jobs (admin for write, public for read)
-│   ├── GET    /           # List jobs (pagination, filters, search)
-│   ├── GET    /stats      # Job statistics
-│   ├── GET    /:id        # Get single job
-│   ├── POST   /           # Create job (admin)
-│   ├── PUT    /:id        # Update job (admin)
-│   ├── DELETE /:id        # Delete job (admin)
-│   ├── PATCH  /:id/publish    # Publish job (admin)
-│   └── PATCH  /:id/close      # Close job (admin)
-├── /partners (admin for write, public for read)
-│   ├── GET    /           # List partners (pagination, filters, search)
-│   ├── GET    /stats      # Partner statistics
-│   ├── GET    /:id        # Get single partner
-│   ├── POST   /           # Create partner (admin)
-│   ├── PUT    /:id        # Update partner (admin)
-│   ├── DELETE /:id        # Delete partner (admin)
-│   ├── PATCH  /:id/publish    # Publish partner (admin)
-│   └── PATCH  /:id/unpublish  # Unpublish partner (admin)
-├── /payment
-│   ├── GET    /pricing           # Get credit packages (public)
-│   ├── GET    /bank-info         # Get bank info (public)
-│   ├── POST   /create            # Create payment request (auth)
-│   ├── POST   /confirm/:id       # Confirm payment (auth)
-│   ├── DELETE /cancel/:id        # Cancel payment (auth)
-│   ├── GET    /history           # Get payment history (auth)
-│   ├── GET    /pending           # Get pending payments (auth)
-│   ├── GET    /status/:id        # Check payment status (auth)
-│   ├── POST   /webhook           # Casso webhook (no auth)
-│   ├── POST   /verify            # Admin verify payment (admin)
-│   └── GET    /admin/transactions # Admin get all transactions (admin)
-├── /admin (admin only)
-│   ├── GET    /users             # List users with search
-│   ├── GET    /users/:id         # Get user details + stats
-│   ├── GET    /users/:id/transactions  # Get user transactions
-│   ├── POST   /users/:id/topup   # Manual top-up
-│   ├── GET    /transactions      # List all transactions
-│   ├── POST   /transactions/check-timeout  # Check timeout transactions
-│   ├── GET    /webhook-logs      # List webhook logs
-│   ├── GET    /webhook-logs/:id  # Get webhook log detail
-│   ├── POST   /webhook-logs/:id/reprocess  # Reprocess webhook
-│   ├── POST   /webhook-logs/:id/assign-user  # Assign user to webhook
-│   ├── POST   /webhook-logs/:id/ignore  # Ignore webhook
-│   ├── GET    /stats             # Dashboard statistics
-│   ├── GET    /storage/orphaned  # List B2 files not referenced in MongoDB (super admin only)
-│   └── DELETE /storage/orphaned  # Delete orphaned B2 file by key (super admin only)
-├── /prompts
-│   ├── GET    /                  # List prompts (pagination, filters, search)
-│   ├── GET    /featured          # Get featured prompts
-│   ├── GET    /my/created        # Get user's created prompts (auth)
-│   ├── GET    /my/bookmarked     # Get user's bookmarked prompts (auth)
-│   ├── GET    /:slug             # Get single prompt by slug
-│   ├── POST   /                  # Create prompt (auth)
-│   ├── PUT    /:id               # Update prompt (auth, owner)
-│   ├── DELETE /:id               # Delete prompt (auth, owner)
-│   ├── POST   /:id/like          # Toggle like (auth)
-│   ├── POST   /:id/bookmark      # Toggle bookmark (auth)
-│   ├── POST   /:id/download      # Track download (auth)
-│   ├── POST   /:id/rate          # Rate 1-5 stars (auth)
-│   ├── PATCH  /:id/hide          # Hide content (mod/admin)
-│   ├── PATCH  /:id/unhide        # Restore content (mod/admin)
-│   └── PATCH  /:id/feature       # Toggle featured (admin)
-├── /comments
-│   ├── GET    /                  # Get comments for target (prompt/resource)
-│   ├── POST   /                  # Create comment (auth)
-│   ├── PUT    /:id               # Update comment (auth, owner)
-│   ├── DELETE /:id               # Delete comment (auth, owner/mod)
-│   └── POST   /:id/like          # Toggle like on comment (auth)
-├── /enrollments (auth required)
-│   ├── GET    /my-courses        # Get user's enrolled courses
-│   ├── GET    /check/:courseId   # Check enrollment status
-│   ├── POST   /:courseId         # Enroll in course
-│   ├── GET    /:courseId/progress    # Get enrollment progress
-│   ├── PUT    /:courseId/progress    # Update lesson progress
-│   └── DELETE /:courseId         # Unenroll from course
-├── /reviews
-│   ├── GET    /course/:courseId  # Get reviews for course (with rating distribution)
-│   ├── GET    /my-review/:courseId   # Get user's review (auth)
-│   ├── POST   /:courseId         # Create review (auth)
-│   ├── PUT    /:reviewId         # Update review (auth, owner)
-│   ├── DELETE /:reviewId         # Delete review (auth, owner/admin)
-│   ├── POST   /:reviewId/helpful # Toggle helpful mark (auth)
-│   └── POST   /:reviewId/reply   # Admin reply to review (admin)
-├── /articles (public read, mod/admin write)
-│   ├── GET    /             # List published articles (filter: category, search, pagination)
-│   ├── GET    /admin/list   # List all articles inc. drafts (mod/admin)
-│   ├── POST   /             # Create article (mod/admin)
-│   ├── PUT    /:id          # Update article (mod/admin)
-│   ├── DELETE /:id          # Delete article (mod/admin)
-│   ├── PATCH  /:id/publish  # Publish article (mod/admin)
-│   ├── PATCH  /:id/unpublish # Unpublish article (mod/admin)
-│   └── GET    /:slug        # Get single article by slug (public)
-├── /cloud
-│   ├── POST   /connect           # Connect to cloud desktop (auth)
-│   ├── POST   /disconnect        # Disconnect from cloud desktop (auth)
-│   ├── GET    /session           # Get active session (auth)
-│   ├── POST   /heartbeat         # Agent heartbeat (secret-based)
-│   ├── GET    /admin/machines    # List machines (admin)
-│   ├── POST   /admin/machines    # Register machine (admin)
-│   ├── PUT    /admin/machines/:id    # Update machine (admin)
-│   ├── PATCH  /admin/machines/:id/toggle  # Toggle machine (admin)
-│   ├── GET    /admin/sessions    # List sessions (admin)
-│   └── POST   /admin/sessions/:id/force-end  # Force end session (admin)
-├── /upload
-│   ├── POST   /presign           # Generate B2 presigned upload URL (auth)
-│   └── DELETE /file              # Delete file from B2 (admin)
-├── /interior
-│   ├── GET    /projects                    # List user's interior projects (auth)
-│   ├── POST   /projects                    # Create project (auth)
-│   ├── GET    /projects/:id                # Get project (auth, owner)
-│   ├── PATCH  /projects/:id                # Rename project (auth, owner)
-│   ├── DELETE /projects/:id                # Soft delete project (auth, owner)
-│   ├── POST   /projects/:id/chat           # AI chat — proposal or apply stage (auth, charges credit)
-│   ├── POST   /projects/:id/rollback       # Move currentVersionIndex to target version (auth, owner)
-│   ├── POST   /analyze-image               # Image → design model JSON (auth + quota)
-│   ├── POST   /generate-render             # 3D view + style prompt → Gemini image render with fallback (auth + quota)
-│   ├── POST   /workshop/components/delete  # Local/dev Workshop source JSON delete + bundle regen (localhost only)
-│   └── GET    /admin/logs                  # List InteriorAiLog (auth + adminOnly); filters projectId/userId/stage/status
-├── /workflow
-│   │   ├── GET    /projects          # List user's projects (auth)
-│   │   ├── POST   /projects          # Create project (auth)
-│   │   ├── PUT    /projects/:id      # Update project (auth, creator/admin)
-│   │   ├── DELETE /projects/:id      # Delete project + docs (auth, creator/admin)
-│   │   ├── GET    /users/search      # Search users by name (auth)
-│   │   ├── GET    /users/:id         # Get user public profile (auth)
-│   │   ├── GET    /documents         # List user's docs, ?projectId=xxx (auth)
-│   │   ├── POST   /documents         # Create document record (auth)
-│   │   ├── PUT    /documents/:id     # Update document (auth, creator/admin)
-│   │   └── DELETE /documents/:id     # Delete document (auth, creator/admin)
-├── /analytics
-│   ├── POST   /track            # Public pageview beacon (rate-limited 60/min/IP, bot UA filtered)
-│   ├── GET    /overview         # Traffic report ?days=7|30|90 (auth + adminOnly)
-│   └── GET    /realtime         # Visitors in the last 5 minutes (auth + adminOnly)
-├── /chat (auth required)
-│   ├── GET    /history          # User's chat history (?limit=50, max 200, oldest→newest)
-│   ├── POST   /send             # Send single message → save user msg + forward to OpenClaw + save reply
-│   └── DELETE /history          # Clear user's chat history (DB only; OpenClaw session memory persists)
-└── /health               # Health check endpoint
-```
-
----
-
-## 3. Key Decisions & Patterns
-
-### Authentication System
-- **Password Security:** bcrypt with 12 salt rounds
-- **Token:** JWT with 7-day expiration
-- **Storage:** httpOnly cookie + Authorization header support
-- **Middleware:** `authMiddleware` for protected routes
-
-### Database Architecture (MongoDB Atlas)
-- **Connection:** MongoDB Atlas Cloud (Cluster0)
-- **Database Name:** `alpha-studio`
-- **Collections:** 13 collections
-  - `users` - User accounts with hashed passwords + balance
-  - `courses` - Course information
-  - `students` - Student profiles
-  - `partners` - Partner profiles
-  - `projects` - User projects
-  - `studio_sessions` - AI studio session history
-  - `transformations` - Available transformations
-  - `api_usage` - API usage tracking
-  - `transactions` - Payment transactions (topup, spend, refund, manual_topup, bonus)
-  - `webhooklogs` - Casso webhook logs for debugging/reprocessing
-  - `prompts` - Shared prompts with multiple contents, ratings, engagement
-  - `eventlibraryitems` - Thư viện tri thức sự kiện (7 itemType, sections[], platform/user, accessLevel public/pro)
-  - `comments` - Comments for prompts
-- **Documentation:** See DATABASE.md for detailed schema
-
-### CORS Configuration
-- Development: localhost:3000, localhost:5173, 127.0.0.1:5173
-- Production defaults: `https://giaiphapsangtao.com`, `https://www.giaiphapsangtao.com`, `https://alphastudio.vercel.app`
-- Extra production/staging origins: `FRONTEND_URL`, `FRONTEND_URL_PROD`, `FRONTEND_URLS`, or `CORS_ORIGINS`
-- Supports credentials for cookie-based auth
-- Methods: GET, POST, PUT, PATCH, DELETE, OPTIONS
-
-### Admin Authorization
-- **adminOnly middleware:** Checks `user.role === 'admin'`
-- **Protected routes:** All /api/courses/* endpoints
-- Returns 403 Forbidden for non-admin users
-
-### Error Handling
-- Centralized error middleware
-- User-friendly error messages
-- Duplicate key detection (MongoDB code 11000)
-- Mongoose validation error handling
-
----
-
-## 4. Active Features & Status
-
-| Feature | Status | Files Involved | Notes |
-|---------|--------|----------------|-------|
-| Web Traffic Analytics | ✅ Complete | models/PageVisit.js, routes/analytics.js, migrations/m0/indexPlan.js, retention/policy.js, test/analytics.test.js | First-party pageview tracking for the admin dashboard. `POST /analytics/track` is public (rate-limited 60/min/IP, bot user agents dropped) and stores one raw event per view; events self-delete after 90 days via a TTL index declared in `REQUIRED_INDEXES` (the runtime uses `autoIndex: false`, so schema indexes alone are never created — run `npm run db:m0:audit -- --apply-indexes`). `GET /analytics/overview?days=` aggregates on read in a single `$facet` pass (daily series, top/entry pages, channels, referrers, UTM campaigns, devices/browsers/OS, hour + weekday), grouped by `Asia/Ho_Chi_Minh` days. Google Ads traffic is detected from `gclid` or `utm_medium=cpc` and classified as `paid-search`. |
-| User Registration | ✅ Complete | routes/auth.js | Email + password validation |
-| User Login | ✅ Complete | routes/auth.js | JWT token generation |
-| User Logout | ✅ Complete | routes/auth.js | Cookie clearing |
-| Get Current User | ✅ Complete | routes/auth.js | Protected route |
-| Update Profile | ✅ Complete | routes/auth.js | Name update |
-| Change Password | ✅ Complete | routes/auth.js | Old password verification |
-| VietYaku release metadata | ✅ Complete | routes/vietyaku.js, models/SystemSetting.js, test/vietyaku-release.test.js | `GET /api/vietyaku/releases/latest` (public). Fetches the `vietyaku-app/version.json` manifest that VietYaku's build-and-release skill uploads to B2, normalises it via `parseVietYakuManifest`, and caches the result in `SystemSetting` key `vietyaku_latest_release`. Three-tier fallback: B2 → cached setting → hardcoded v1.1.0 URL. Same shape as the VocabFlip endpoint. A new VietYaku release needs **no backend deploy**. |
-| B2 app-release prefixes protected | ✅ Complete | routes/admin.js | `APP_RELEASE_PREFIXES = ['vocabflip-app/', 'vietyaku-app/']` — desktop app releases have no MongoDB record, so `GET /storage/orphaned` counts them as referenced and `DELETE /storage/orphaned` refuses them. Without this they would be listed as orphans and deleting them would 404 the `/studio` download links. |
-| Event Knowledge Library | ✅ Complete | models/EventLibraryItem.js, routes/eventLibrary.js, test/event-library.test.js | One collection, 7 `itemType` (case_study/prompt/workflow/skill/template/report/playbook) and two sources. `ownership: "platform"` = editorial/crawled content of the site: admin-only to create, always `visibility: "public"`, no `owner`. `ownership: "user"` = published by an account: `owner` set, `visibility` private (default) or public. **Every read path composes `buildVisibilityFilter(user)`** — guests see platform + public community items, a signed-in user additionally sees their own private items, admin sees everything. Filters (`category`, `industries`, `objectives`, `kpis`, `budgetTier`, `verification`, `depth`) are whitelisted through `parseCsv` and search input is regex-escaped. Publishing from Workflow (`mapProjectToLibraryItem` / `mapDocumentToLibraryItem`) always forces `ownership: user`, `owner: req.user._id` and `verification: unverified` so a poster cannot promote their own item to site content; `origin.{kind,refId}` blocks publishing the same project/document twice (409). **Tương tác:** `likes[]`/`likesCount` + `ratings[]` (`{user, score, comment}`, mỗi người một phiếu) → `POST /:slug/like`, `POST /:slug/rate`; nhận xét nằm trong chính phiếu chấm, không dùng `/api/comments`. `GET /:slug` trả `me:{liked,score,comment}` + `reviews[]` (30 phiếu có nhận xét mới nhất) thay vì lộ hai mảng gốc. 24 mục platform seed sẵn qua `scripts/seed-event-library-{skills,cases,prompts,templates}.mjs`. **Cổng `pro`:** `accessLevel: 'public'|'pro'` — chỉ admin đặt được; mục `pro` chỉ mở `content`/`sections`/`attachments` cho tài khoản đã tích luỹ ≥ `PRO_MIN_LIFETIME_CREDITS` (200) credit (`lifetimeCreditsOf` cộng `Transaction` completed loại `topup|manual_topup|bonus`, hoặc `balance` hiện tại nếu lớn hơn), cộng admin và chủ sở hữu. `redactLockedItem()` cắt ở server và áp ở cả `GET /`, `GET /:slug` lẫn `POST /:slug/use` (403) — cắt ở list là bắt buộc, nếu không link B2 trong `attachments` thành cửa sau. **Đếm lượt xem có thời gian nguội:** trước đây mỗi `GET /:slug` là `$inc stats.views`, nên F5 vài lần là số nhảy liên tục. `shouldCountView(viewerKey(req, slug))` chỉ tính một lượt cho mỗi người xem / mỗi mục trong `VIEW_COOLDOWN_MS` (**6 giờ**), store `Map` trong RAM giới hạn 5000 khoá — dọn khoá hết hạn trước, cửa sổ 6 giờ dài nên nếu chưa khoá nào đủ cũ thì bỏ tiếp khoá cũ nhất theo thứ tự chèn; không tính thì đọc bằng `findOne` thay vì `findOneAndUpdate`. `viewerKey` đọc `x-forwarded-for` trước `req.ip` vì app **không** bật `trust proxy` — nếu không, mọi khách vãng lai trên Fly.io dùng chung một khoá và chặn lượt xem của nhau. **Thang ngân sách hạ xuống** — `BUDGET_TIERS` từ `under_200m…over_20b` thành `under_50m` / `50m_200m` / `200m_500m` / `500m_2b` / `over_2b`, `budgetTierOf()` đổi ngưỡng tương ứng. Giá trị cũ **không còn trong enum** nên phải chạy `scripts/migrate-budget-tiers.mjs` (chạy khô mặc định, `--apply` để ghi; ánh xạ theo điểm giữa bậc cũ) — chưa chạy thì mục cũ hiện nhãn thô và không lưu lại được qua `PUT`. |
-| AI Skills Library | ✅ Complete | models/Skill.js, routes/skills.js, test/skills-admin.test.js | `GET /api/skills` (list + `filterCounts` cache 5 phút), `GET /api/skills/stats`, `GET /api/skills/:slug` — công khai, `Cache-Control: max-age=1800`. **Admin sửa/xoá:** `PUT /api/skills/:slug` và `DELETE /api/skills/:slug` (`authMiddleware` + `adminOnly`). `sanitizeSkillInput()` (exported để test) là whitelist duy nhất: chỉ nhận field nội dung, **`slug` và `_id` cố ý không sửa được** vì slug là URL công khai; `tier`/`difficulty` phải khớp enum của model; `sections.*` được làm phẳng thành dotted path (`sections.overview_vi`) để partial update không xoá các nhánh khác; mảng `works_with`/`tags`/`requirements`/`related_skills` bị cắt trắng + khử trùng lặp. Cả hai route gọi `invalidateFilterCountsCache()` vì tier/category/difficulty đổi làm lệch bộ đếm sidebar. Form sửa nằm ở FE `/workflow?view=skills`. |
-| Health Check | ✅ Complete | index.js | API status endpoint |
-| Password Hashing | ✅ Complete | models/User.js | bcrypt with 12 rounds |
-| JWT Middleware | ✅ Complete | middleware/auth.js | Token verification |
-| Admin Middleware | ✅ Complete | middleware/auth.js | Role-based authorization |
-| CORS Support | ✅ Complete | index.js | Multi-origin + PATCH method |
-| Course CRUD | ✅ Complete | routes/courses.js | Create, Read, Update, Delete |
-| Course Publishing | ✅ Complete | routes/courses.js | Publish, Unpublish, Archive |
-| Course Statistics | ✅ Complete | routes/courses.js | Aggregated stats endpoint |
-| Multilingual Courses | ✅ Complete | models/Course.js | VI/EN title and description |
-| Course Modules/Lessons | ✅ Complete | models/Course.js | Nested schema structure |
-| Job CRUD | ✅ Complete | routes/jobs.js | Create, Read, Update, Delete |
-| Job Publishing | ✅ Complete | routes/jobs.js | Publish, Close |
-| Job Statistics | ✅ Complete | routes/jobs.js | Aggregated stats endpoint |
-| Partner CRUD | ✅ Complete | routes/partners.js | Create, Read, Update, Delete |
-| Partner Publishing | ✅ Complete | routes/partners.js | Publish, Unpublish |
-| Partner Statistics | ✅ Complete | routes/partners.js | Aggregated stats endpoint |
-| Partner Skills | ✅ Complete | models/Partner.js | String array for skills |
-| Stale Index Cleanup | ✅ Complete | db/connection.js | Auto-drops stale indexes on startup |
-| Payment System | ✅ Complete | routes/payment.js, models/Transaction.js | Credit packages, VietQR, Casso webhook |
-| Webhook Logging | ✅ Complete | models/WebhookLog.js | Stores all incoming webhooks for debugging |
-| Admin Management | ✅ Complete | routes/admin.js | Users, transactions, webhook management |
-| Manual Top-up | ✅ Complete | routes/admin.js | Admin can top-up users manually |
-| Webhook Assignment | ✅ Complete | routes/admin.js | Admin can assign unmatched webhooks to users |
-| Transaction Timeout | ✅ Complete | routes/admin.js | Auto-timeout after 5 min without webhook match |
-| Share Prompts API | ✅ Complete | routes/prompts.js, models/Prompt.js | CRUD, like, bookmark, rate, download, featured, moderation |
-| Comments API | ✅ Complete | routes/comments.js, models/Comment.js | Comments for prompts with likes. `targetType` chỉ còn `['prompt']` — target `resource` gỡ cùng Kho tài nguyên, và Thư viện sự kiện **không** dùng API này (nhận xét đi kèm phiếu chấm trong `EventLibraryItem.ratings[]`) |
-| Course Enrollment API | ✅ Complete | routes/enrollments.js, models/Enrollment.js | Enroll with credit deduction for paid courses; Transaction recorded; progress tracking |
-| Course Reviews API | ✅ Complete | routes/reviews.js, models/Review.js | CRUD, rating distribution, helpful votes, admin reply |
-| Lesson Video/Documents | ✅ Complete | models/Course.js | videoUrl and documents array per lesson |
-| Article CMS | ✅ Complete | models/Article.js, routes/articles.js | Bilingual articles for About & Services pages, admin CRUD |
-| Cloud Desktop API | ✅ Complete | models/HostMachine.js, models/CloudSession.js, routes/cloud.js | User connect/disconnect, admin machine/session management, agent heartbeat, cron cleanup |
-| B2 Presigned Upload | ✅ Complete | routes/upload.js, utils/b2Storage.js | Generate presigned PUT URL for browser-direct upload to Backblaze B2; `listAllFiles()` for bucket enumeration |
-| Workflow Projects API | ✅ Complete | models/WorkflowProject.js, routes/workflow.js | CRUD projects with team, tasks, chatHistory, expenseLog — auth required; GET /projects shows all non-completed for users |
-| Workflow Documents API | ✅ Complete | models/WorkflowDocument.js, routes/workflow.js | CRUD document records with status, comments, note — auth required; GET ?projectId returns all project docs to members |
-| Workflow User Profile API | ✅ Complete | routes/workflow.js | GET /users/:id returns public profile (name, avatar, role, email, phone, bio, skills, location, socials) — auth required |
-| Storage Cleanup API | ✅ Complete | routes/admin.js, utils/b2Storage.js | Lists all B2 files; cross-references WorkflowDocument/EventLibraryItem (attachments)/Course (videoUrl+documents)/Prompt (exampleImages + attachments); returns `data` (orphaned) + `referencedFiles` each with `source`, `uploader`, `referenced` — super admin only |
-| Studio Usage Tracking (legacy) | ✅ Complete | models/User.js, routes/studio.js | `studioUsage: {date, count}` on User; GET /studio/usage + POST /studio/use; 3 free uses/day; admin/mod unlimited |
-| Flow Image/Video Generation | ✅ Complete (Phase 2) | models/{FlowServer,StudioGeneration,User}.js, routes/studio.js, routes/cloud.js | `POST /studio/image/generate` (5/day), `POST /studio/video/generate` (1/day), `GET /studio/media/:genId/:idx` (B2 redirect or agent proxy stream), `POST /studio/save/:genId/:idx` (B2 upload), `GET /studio/history`; agent register+heartbeat via `/cloud/flow-heartbeat` + admin CRUD `/cloud/admin/flow-servers`; cron marks flow-server offline >2min |
-| AI Consultation Chat | ✅ Complete | models/ChatMessage.js, routes/chat.js, routes/settings.js, utils/aiProvider.js, server/context/alpha-studio-bot | `POST /chat/send` saves user msg then routes via admin setting `useOpenClawForChat`: OpenClaw (`OPENCLAW_URL`, session memory) by default, or direct gcli (`GCLI_DIRECT_URL`) with bundled Alpha Studio workspace context and up to 3 previous MongoDB chat messages. `GET /chat/history` display history; `DELETE /chat/history` clears DB history. |
-| VocabFlip Integration | ✅ Complete (Phase 15) | models/Vocab.js, routes/vocab.js, scripts/release-vocabflip-to-b2.js | MongoDB-backed public/private deck storage remains in `routes/vocab.js`; release metadata is exposed at `GET /api/vocab/releases/latest` with `vocab_latest_release` override and B2 fallback. Release automation builds VocabFlip APK, Windows ZIP, and Web assets, uploads binaries to `vocabflip-app/releases/`, and updates `vocabflip-app/version.json`. |
-| Interior Design AI API | ✅ Complete | models/InteriorProject.js, routes/interior.js, utils/aiProvider.js, routes/chat.js | Auth-gated `/api/interior` project CRUD, AI chat, version persistence, rollback, manual cabinetModel validation, 1-credit charge per valid AI response, admin/mod bypass. Reuses `useOpenClawForChat` provider toggle shared with `/api/chat/send`. |
-| Interior AI Prompt v2 + 2-step | ✅ Complete | routes/interior.js, models/User.js, models/InteriorProject.js, routes/auth.js, utils/templateValidator.js, utils/interiorCatalogPrompt.js, utils/interiorTemplateAssets.js, utils/interiorModelGeometry.js | (A) Prompt v2: few-shot, domain hints (kích thước/vật liệu chuẩn VN), Phase 10 strict dimension anchor, `/chat` `runs[]` rule for L/U/island/parallel layouts, z-axis wall-depth convention, forced reply format "Quan sát ảnh/Hiểu yêu cầu/Đã áp dụng", lower askForInfo threshold. Phase B builds `/chat`, proposal, and agent catalog sections from `InteriorTemplate` seed/approved DB rows with 5-minute cache, auto-seeds built-ins + workshop components at startup, normalizes workshop face aliases, and uses template-first few-shot examples. Phase C adds renderable palette/token guidance, per-module `style.colors` prompt rules, unknown `$token` validation for import/tplNew, tplNew normalization through the same ingest helper, and updated agent `model.setPalette` support for new palettes. Phase D applies `tpl` dimensions from DB/inline `params.default`, attaches non-blocking geometry warnings (run length, bounds, overlap, upper-vs-lower z), retries `/chat` apply once with a focused repair prompt when warnings exist, and returns warning/repair metadata while saving schema-valid models. Phase E adds detail-density rules to chat/proposal/agent/analyze prompts so modules include visible fronts, handles, countertops/backsplashes, wardrobe rods/shelves, sliding tracks/rollers, and glass shelves. Phase 14 template instructions require `boxes` only for new `tplNew` payloads, while validator accepts legacy `isoBoxes` and rejects SVG view fields. (B) Opt-in `User.preferences.interiorTwoStepConfirm` (set via `PUT /auth/profile`). When ON, `POST /interior/projects/:id/chat` accepts `stage='proposal'\|'apply'`: proposal returns plain-text analysis (1 credit, no version), apply consumes `proposalText` as context (1 credit, creates version). Total 2 credit/lần khi bật. |
-| Interior Image-to-Design (Phase 4+) | ✅ Complete | routes/interior.js (+/analyze-image, +/generate-render), middleware/interiorQuota.js, models/{InteriorAnalysis,InteriorRender,InteriorQuota}.js, routes/admin.js (orphan scan) | `POST /interior/analyze-image` (auth + 5/24h quota): JSON body `{imageUrl, hints, modelOverride}`, sha256 cache (24h TTL), Gemini Flash 3 default → Pro 3.1 escalate, 2-attempt JSON repair loop, returns `{model, suggestedModel, meta}`. Prompt teaches Phase 8 `runs[]` for L/U/island/galley layouts and detail-density rules; validator accepts either legacy `modules[]` or new `runs[]`, not both. `POST /interior/generate-render` validates `modelJson`, stores the iso PNG conditioning image, calls Gemini image generation (`INTERIOR_IMAGE_API_KEY`/`GEMINI_API_KEY` or Admin Gemini key), uploads generated output to B2, persists `InteriorRender`, and falls back to the conditioning URL with `meta.pending=true` if no key/upstream failure occurs. Default project model now uses an opaque solid panel template instead of transparent zone modules. |
-| Interior Assets Bundle (Fly deploy) | ✅ Complete | scripts/sync-interior-assets.mjs, server/assets/interior/{templates,workshop,skills}, utils/interiorTemplateAssets.js, routes/interior.js, package.json | Docker image chỉ COPY `server/`, nên seed/skills đọc từ `tools/` bị thiếu trên Fly. `npm run sync:interior-assets` copy 14 template + manifest, 42 workshop component, 6 agent skill vào `server/assets/interior/`. Runtime ưu tiên `tools/` (dev), fallback assets bundle (deploy). **Chạy lại sync trước mỗi lần deploy nếu template/component/skill thay đổi.** |
-| Interior Run Coordinate Unification | ✅ Complete | utils/interiorModelGeometry.js, routes/interior.js (INTERIOR_RUNS_RULE_VI + few-shot), engine `src/core/model.js`, skills kitchen-l-shape/kitchen-galley | Quy ước thống nhất mọi hướng run: module `x` = vị trí DỌC trục run từ origin, `z` = offset vuông góc từ tường (engine trước đây dùng z làm trục đi cho north/south → nhánh L render ra ngoài model). Occupied-length check giờ chỉ cảnh báo overshoot với model đa run (undershoot hợp lệ vì khối góc thuộc run kia). Few-shot chữ L viết lại: return run `south` origin {0,0} chứa corner, main run east origin {x:100} — verified 0 geometry warnings + in-bounds + no overlaps. |
-| Interior Component Workshop Cleanup | ✅ Complete | routes/interior.js, tools/interior-component-workshop/component-library.js | `POST /api/interior/workshop/components/delete` deletes selected local Workshop `components/<id>.json` files and regenerates `data/template-bundle.js`. It is enabled only in local/dev (or `INTERIOR_WORKSHOP_DELETE_ENABLED=true`) and only accepts loopback requests from no origin, `Origin: null`, localhost, or 127.0.0.1; no Bearer token is required for this local cleanup endpoint. |
-| Interior Workshop File-Origin CORS | ✅ Complete | server/index.js | `Origin: null` from `file://` workshop pages is now treated as an allowed CORS origin instead of logging `CORS blocked origin: null`. Local workshop origins on localhost/127.0.0.1 are also explicitly allowed. |
-| Interior AI Log Viewer | ✅ Complete | models/InteriorAiLog.js, routes/interior.js, scripts/dump-interior-log.mjs | Every `/api/interior/projects/:id/chat` call (both `proposal` and `apply` stages) records raw prompt, ref images, raw AI response, parsed reply, latency, usage, status (`ok`/`parse-failed`/`validation-failed`/`upstream-error`), errorMessage. TTL 30 days. `GET /api/interior/admin/logs?projectId=&userId=&stage=&status=&limit=` accepts EITHER (auth + adminOnly) OR header `x-reviewer-token: $INTERIOR_LOG_REVIEWER_TOKEN` (reviewer bypass for ops/debug). Direct dump: `node scripts/dump-interior-log.mjs <projectId>`. |
-| CRM Windows release packaging | ✅ Complete | scripts/release-to-b2.js | Ships a **pinned Node LTS** runtime (`PINNED_NODE_VERSION` = v22.23.2, `PINNED_NODE_ABI` = 127), downloaded from nodejs.org and SHA256-verified against `SHASUMS256.txt`, cached under `tools/alpha-crm/build/.runtime-cache` — replaces copying `process.execPath` of whatever Node the build machine happened to have. The staged `better-sqlite3` binary is the prebuild matching that ABI, fetched from the package's GitHub release; the dev machine's own `node_modules` is never touched, so local `npm test` keeps working under a different Node. **Bumping the Node pin requires bumping the ABI constant.** `verifyStagedBackend()` now also calls `/local/health` after `/health`: `/health` never opens SQLite (lazy store), so on its own it could not catch an ABI-mismatched native addon and shipped a broken ZIP silently. The esbuild sourcemap (`server.cjs.map`) is copied beside the zip, **never into it**, so minified field stack traces stay decodable without leaking source. |
-| CRM Facebook Messenger Channel (Phase 2) | ✅ Complete | models/CrmChannelIntegration.js, routes/channelWebhooks.js (mounted `/api/crm`), routes/crm.js (`POST /agent/channels/register`) | Cloud owns Meta webhook only: `GET/POST /api/crm/facebook/webhook` verifies `hub.verify_token` (GET) and `X-Hub-Signature-256` against the per-device `CrmChannelIntegration.appSecret` (encrypted at rest, POST), writes a durable `CrmConversation`/`CrmMessage` backup, then creates a `CrmAgentCommand{type:'channel.message.relay', payload:{channel:'facebook_page', event}}` so the desktop agent relays it into its **local SQLite** store (chat data storage requirement — cloud is a durable backup, not the source of truth). `POST /agent/channels/register` (`agentAuthMiddleware`, called automatically by the local bridge's settings-save flow) upserts `CrmChannelIntegration{channel, externalAccountId, appId, verifyToken, appSecret, enabled}` per device — the Facebook page access token itself is never sent to the cloud; outbound sends go straight from the local agent to the Graph API. |
-| CRM TikTok Messaging Channel (Phase 3) | ✅ Complete (placeholder, pending real API verification) | routes/channelWebhooks.js (mounted `/api/crm`) | Mirrors the Facebook Messenger channel exactly: `GET/POST /api/crm/tiktok/webhook` verifies a token handshake (GET) and an `x-tiktok-signature` HMAC-SHA256 against the per-device `CrmChannelIntegration.appSecret` (POST, same encrypted-at-rest storage and `channel:'tiktok'` enum value as Facebook), writes the same durable `CrmConversation`/`CrmMessage` backup, then creates a `CrmAgentCommand{type:'channel.message.relay', payload:{channel:'tiktok', event}}`. Registration reuses the existing channel-agnostic `POST /agent/channels/register` route — no backend changes were needed there. The webhook payload field names (`account_id`, `messages[]`, `sender_id`/`recipient_id`, `x-tiktok-signature` header) are explicitly-commented unverified placeholders mirroring Facebook's shape; re-check them against real TikTok Business Messaging API docs once credentials are available. |
-| CRM Multi-Account Channel Registry | ✅ Complete | routes/crm.js (`GET /api/crm/agent/channels`, `DELETE /api/crm/agent/channels/:id`) | Channel-agnostic list/deregister pair over `CrmChannelIntegration`, both `agentAuthMiddleware` (device-secret, called by the local bridge, not the Flutter app directly). `GET` returns every integration row for `req.crmDevice.userId` (`id`, `channel`, `externalAccountId`, `appId`, `enabled`), letting one user run multiple Facebook Pages/TikTok accounts side by side — each gets its own `CrmChannelIntegration` document keyed by `(userId, channel, externalAccountId)`. `DELETE /:id` removes one integration scoped to `userId` (404 if not owned/found); the local bridge calls this when a Page/account is removed from Facebook/TikTok settings, which also stops that account's webhook traffic from creating new `CrmAgentCommand`s. |
-| CRM Instagram Direct Messaging Channel (Giai đoạn G) | ✅ Complete | models/CrmChannelIntegration.js (`channel` enum + `'instagram'`), routes/channelWebhooks.js (mounted `/api/crm`) | Rides the same real, already-verified Meta Graph API as the Facebook channel (same App/App Secret, same `X-Hub-Signature-256` scheme, same `entry[].messaging[]` shape) — distinguished only by `object:"instagram"` in the webhook payload, unlike TikTok this has no placeholder uncertainty. `GET/POST /api/crm/instagram/webhook` verifies `hub.verify_token` (GET) and `X-Hub-Signature-256` against the per-device `CrmChannelIntegration.appSecret` (POST), writes a durable `CrmConversation`/`CrmMessage` backup, then creates a `CrmAgentCommand{type:'channel.message.relay', payload:{channel:'instagram', event}}`. Registration reuses the existing channel-agnostic `POST /agent/channels/register` route — no backend changes were needed there. |
-| CRM WhatsApp Cloud API Channel (Giai đoạn H) | ✅ Complete | models/CrmChannelIntegration.js (`channel` enum + `'whatsapp'`), routes/channelWebhooks.js (mounted `/api/crm`) | Also rides the Meta Graph API (same App/App Secret, same `X-Hub-Signature-256` scheme), but the webhook payload shape is `entry[].changes[].value.messages[]` (WhatsApp Business Account format) rather than Messenger/IG's `entry[].messaging[]`. `GET/POST /api/crm/whatsapp/webhook` verifies `hub.verify_token` (GET) and `X-Hub-Signature-256` against the per-device `CrmChannelIntegration.appSecret` (POST), writes a durable `CrmConversation`/`CrmMessage` backup, then creates a `CrmAgentCommand{type:'channel.message.relay', payload:{channel:'whatsapp', event}}`. Registration reuses the existing channel-agnostic `POST /agent/channels/register` route. Product decision: the 24h customer-service messaging window is warn-only on the Flutter UI side (`enforce24hWindow` toggle) — the backend and local agent apply no hard block, matching the existing unenforced pattern for Facebook/Instagram/TikTok. |
-| CRM Telegram Bot API Channel (Giai đoạn I) | ✅ Complete | models/CrmChannelIntegration.js (`channel` enum + `'telegram'`, `botToken` field), routes/channelWebhooks.js (mounted `/api/crm`) | No Meta involvement — Telegram webhook payloads are simple `{update_id, message: {...}}` JSON with no HMAC signature scheme; instead Telegram sends an `x-telegram-bot-api-secret-token` header (set at `setWebhook` time) which `POST /api/crm/telegram/webhook/:botId` compares against the stored per-device `verifyToken`. There is no GET verify handshake (unlike the Meta channels) — Telegram has no such concept. Verified requests create a `CrmAgentCommand{type:'channel.message.relay', payload:{channel:'telegram', event}}`. Unlike the Meta channels, webhook registration is not manual: the local bridge calls Telegram's `getMe` (resolve numeric bot id/username) and `setWebhook` (register the callback URL + generated `secret_token`) automatically when a bot's Bot Token is saved. Registration with the cloud reuses the existing channel-agnostic `POST /agent/channels/register` route, sending `botToken`+`verifyToken` (no `appSecret` — Telegram has no equivalent concept). |
-| CRM Webchat Widget Channel (Giai đoạn L) | ✅ Complete | `utils/webchatEventHub.js` (in-process SSE hub), `routes/webchatPublic.js` (mounted at `/api/public/webchat`, CORS-open for arbitrary embedding sites), `server/public/webchat/widget.js` (static file served at `/webchat/widget.js`), `routes/crm.js` (agent relay branch), `models/CrmChannelIntegration.js` (`channel` enum + `'webchat'`) | The only channel with no external provider/OAuth/webhook-signature scheme at all — the browser widget talks directly to this backend. `GET /api/public/webchat/:widgetId/config` returns the widget's display name/welcome message/color for rendering; `GET /:widgetId/messages` returns history by `sessionToken`; `POST /:widgetId/messages` accepts a guest message (IP + session rate-limited, 429 on abuse), writes it via the shared `upsertConversationFromInbound` (same helper used by every other channel) and forwards it to the CRM operator via `CrmAgentCommand{type:'channel.message.relay', payload:{channel:'webchat', event}}`; `GET /:widgetId/events` is an SSE stream (via `webchatEventHub`) that pushes the operator's replies back down to the guest's browser in near-real-time. `routes/crm.js`'s agent-relay branch publishes outbound webchat replies onto `webchatEventHub` (separate from `crmEventHub`, which drives the Flutter Live Chat side). Registration reuses the existing channel-agnostic `POST /agent/channels/register` route. Text-only MVP — no image/file attachment support yet. |
-
----
-
-### Recent CRM Subscription Note
-
-- New user registration (`POST /api/auth/register`) creates a one-time `crm_trial` subscription: 14 days, 100 included AI requests, 0 used, 0 extra, `entitlementType: trial`.
-- `CrmSubscription` has `entitlementType` and `trialStartedAt`; partial unique index `unique_trial_subscription_per_user` prevents a second trial for the same user.
-- CRM checkout/billing fulfillment preserves the historical trial record; upgrading from trial closes that trial and creates a separate `entitlementType: paid` subscription, while paid renewals extend the paid record in place.
-
-### Group AI Summary (structured + incremental, privacy-first)
-
-- **Backend does NOT store group message content.** The `events/message` ingest no longer creates `CrmGroupMessage` (only updates `CrmZaloGroup.lastMessageAt`). The Flutter client reads messages from the operator's **local** store and sends them in the request body; they are used transiently for AI only and never persisted.
-- `POST /crm/groups/:id/summarize` accepts `{ messages:[{senderName,content,sentAt}], scope, goals[], prompt, industry, autoCreateTasks, saveConfig }`. Messages come from `req.body` (sorted, phone-redacted, capped 400); incremental watermark (latest summary `coveredTo`) is applied client-side. `CrmGroupMessage` model still exists but is no longer written (legacy `/groups/:id/messages` + `/checkpoints` now return empty).
-- AI returns structured JSON parsed by `utils/crmGroupSummary.js` (`buildGroupSummaryPromptV2` + `parseGroupSummaryJson`, prose fallback). `CrmGroupSummary` gained `coveredFrom/coveredTo/messageCount`.
-- Opportunities/risks/questions/actionItems become `CrmGroupInsight` upserted by `dedupKey` (`dedupKeyForItem`, normalized diacritics) — already-`done`/`dismissed` items are not recreated, giving skip-done continuity. Follow-up insights → tasks via `POST /crm/tasks` (`relatedType:'insight'`, `insightId`).
-- Per-group wizard config persists on `CrmZaloGroup.summaryConfig` (Mixed) via `PUT /crm/groups/:id/manage`.
-- `GET /crm/tasks` now also `.populate('groupId', 'name accountId groupId')` so care tasks carry the linked Zalo group (name + accountId + groupId) for display and the client's "Mở Live Chat" deep-link.
-- **Summary model is a LOCAL client preference** (stored in Flutter `SystemSettings.summaryAiModel`, no cloud setting/endpoint): the client sends `aiModel` in the summarize body; the route validates via `normalizeSummaryAiModel` (allowed: `gemini-3.1-pro` default, `gemini-2.5-pro`, `gemini-3-flash`) and passes `model` + `quotaUnits` (`getChatbotModelQuotaUnits`: pro-3.1 = 2 units, others = 1).
-- Each summarize writes a `CrmChatbotLog` (`kind:'group_summary'`, `tokenIn`/`tokenOut` from `CrmAiUsage`) so it shows in the chatbot "Nhật ký phản hồi". `CrmChatbotLog` gained `kind`/`tokenIn`/`tokenOut`.
-- `GET /crm/analytics/ai-tokens?from=&to=` aggregates `CrmAiUsage` daily token in/out (prompt/completion) for the overview chart.
-
-### CRM Realtime (SSE) for Mobile/Web clients
-
-- `server/utils/crmEventHub.js`: in-memory per-userId SSE hub (`subscribe(userId,res)`, `publish(userId,eventName,payload)`, 25s ping heartbeat, max 5 connections/user). Single Fly.io instance only — needs Redis pub/sub if scaled horizontally.
-- `GET /crm/events/subscribe` (`authMiddleware`-based `sseAuthMiddleware` that also accepts `?token=` for EventSource/web, `requireActiveSubscription`): sends `hello` (serverTime + active devices) then streams `message.new`, `message.status`, `conversation.updated`, `device.status`, `pairing.completed`.
-- Broadcast points: `POST /agent/events/message` (message.new + conversation.updated), `POST /agent/commands/:id/result` for `zalo.message.send` (message.status, reuses the existing `CrmMessage` status update), `POST /conversations/:id/send`+`/send-attachment` (message.status queued), `POST /pairing/confirm` (pairing.completed).
-- `CrmDevice` heartbeat gained `agentStatus`/`zaloAccounts`/`queueDepth`/`lastHeartbeatAt`, plus stability telemetry `uptimeSec` + `supervisor{restartCount,lastExitCode,lastError,reportedAt}` (normalized by the exported `normalizeSupervisorStats()`); `POST /agent/heartbeat` publishes `device.status` on transition. A 30s `setInterval` in `server/index.js` marks devices offline (and publishes) after 60s without a heartbeat.
-- `POST /agent/commands/next` now long-polls: body `waitMs` (capped 25000ms) holds the request until a command is created for that device (`createAgentCommand()` helper wraps `CrmAgentCommand.create` + wakes the waiter) or the timeout elapses; omitting `waitMs` keeps the old immediate-return behavior.
-- Desktop Windows app is unaffected — it still uses its local bridge SSE, not this cloud channel. This cloud SSE + long-poll pair targets mobile/web clients that have no local bridge (see `tools/alpha-crm/docs/specs/mobile-web-completion-tasklist.md`).
-- **BE-6 (outbound message sync):** `upsertConversationFromInbound` (used by `POST /agent/events/message`) now tells inbound vs outbound apart via `event.senderId === accountId` (the agent always sets this for its own sends) instead of hardcoding `direction: 'inbound'`. Outbound: `unreadCount` is never incremented. No separate `/agent/events/outbound-message` endpoint was added (deviation from the original task doc): reusing the same endpoint with direction auto-detection was simpler and avoided duplicating ~150 lines of conversation-upsert/managed-group logic. `GET /conversations/:id/messages` no longer returns `LOCAL_BRIDGE_REQUIRED`; it returns whatever's synced plus `meta.syncScope` (`'full'` or `'user-full-group-metadata'`).
-- **1:1 full-content sync (option (b), post-review):** the desktop agent reports **full content for 1:1 threads even in local-first mode**, so `upsertConversationFromInbound` stores every full event that reaches it (metadata-only `localFirst:true` events still return early — only **managed groups** stay metadata/preview-only on the cloud). Full-event validation allows empty `content` when `messageType !== 'text'` (media events can have an empty extracted string). The metadata branch's `$inc unreadCount` respects an explicit `unreadCountDelta: 0` (self-sent message) instead of `|| 1`-ing it back to an increment.
-- **Long-poll disconnect hardening:** `/agent/commands/next` registers `req.on('close')` while parked and re-checks `req.destroyed`/`res.writableEnded` before claiming, so a command created while the agent's connection already died stays `queued` for the next poll instead of being marked `sent` into a dead socket (previously stranded until the 1h TTL).
-- **BE-7 (mobile command-authorization review, closes Task 1.3-security):** audited every route that creates a `CrmAgentCommand` (`/conversations/:id/send`, `/send-attachment`, `/messages/:messageId/recall`, `/campaigns/:id/start`, `/campaigns/:id/cancel`) — all require `authMiddleware` + `requireActiveSubscription`, and each independently re-fetches its target (`CrmConversation`/`CrmCampaign`/`CrmDevice`) scoped to `userId: req.user._id` before calling `createAgentCommand()`, which itself trusts the caller's `userId`/`deviceId` with no independent re-check. Cross-user access returns **404** (not 403) so a user can't distinguish "not yours" from "doesn't exist" — a deliberate anti-enumeration choice, not a gap (the tasklist's DoD phrasing said "test 403"; 404 is the stricter, correct behavior here). **Decision: no per-command JWT signature needed** — the agent already authenticates via `x-agent-secret` + `deviceId` (`agentAuthMiddleware`), and every command a device can claim was already scoped to that device's owner at creation time; adding per-command signing would duplicate protection the ownership check already provides. Added `crmMessageSendLimiter` (30 req/min) to `/conversations/:id/send` and `/send-attachment` — the only unthrottled command-creating routes reachable directly from a mobile/web client (campaigns already require human approval + are lower-frequency by nature).
-
-## 4b. State & Data Dependency Graph
-
-```mermaid
-flowchart LR
-    FE["alpha-studio (FE)<br/>Vercel"]
-    CRM["tools/alpha-crm"]
-    ENTRY["server/index.js<br/>Express 5 · ES Modules"]
-    CORS["CORS allowlist<br/>FRONTEND_URL* · CORS_ORIGINS"]
-    AUTH["middleware/auth.js<br/>authMiddleware + adminOnly"]
-    ROUTES["routes/<br/>auth · courses · payment · admin<br/>cloud · workflow · interior · chat · crm"]
-    MODELS["models/ (Mongoose)"]
-    CONN["db/connection.js<br/>pool 0-5"]
-    DB[("MongoDB Atlas 'alpha-studio'")]
-    CRON["node-cron 60s<br/>quét máy offline"]
-    HA["Host Agent<br/>x-agent-secret"]
-    FA["Flow Agent"]
-    B2[("Backblaze B2")]
-    CASSO["Casso webhook<br/>thanh toán"]
-    AI["OpenClaw / GCLI proxy<br/>Gemini SDK fallback"]
-
-    FE --> CORS --> ENTRY --> AUTH --> ROUTES
-    CRM --> CORS
-    ROUTES --> MODELS --> CONN --> DB
-    ROUTES --> HA
-    ROUTES --> FA
-    ROUTES --> B2
-    ROUTES --> AI
-    CASSO -->|"POST webhook"| ROUTES
-    CRON --> MODELS
-    HA -->|"heartbeat 30s"| ROUTES
-```
-
-**Invalidate / consistency rules** — hợp đồng bắt buộc:
-
-| Khi thay đổi / Sau khi | Phải làm kèm | Nếu quên sẽ bị |
+| Gia dinh | Gia tri | Nguon |
 |---|---|---|
-| 🔴 Thêm field lưu **URL/key B2** vào bất kỳ model nào | Thêm logic quét field đó vào `usedKeys` của `GET /api/admin/storage/orphaned` (`routes/admin.js`) **và** cập nhật bảng B2 field trong `CLAUDE.md` root | Orphan checker coi file đang dùng là rác — hoặc để rác tích tụ vĩnh viễn trong bucket |
-| Sửa schema trong `models/` | Cập nhật `DATABASE.md`; cân nhắc script migration trong `db/`; **phải được user yêu cầu rõ ràng** | `DATABASE.md` (nguồn tham chiếu schema duy nhất) lệch với thực tế |
-| Đổi shape response của bất kỳ route nào | Cập nhật service tương ứng trong `alpha-studio/src/services/` + `tools/alpha-crm` | FE parse `undefined`, hiện màn trắng thay vì lỗi rõ ràng |
-| Ghi giao dịch tín dụng (topup/spend/refund/bonus) | Cập nhật `user.balance` **và** tạo bản ghi `transactions` trong cùng luồng | Số dư lệch với lịch sử giao dịch, không đối soát được |
-| Xử lý webhook Casso | Ghi `webhooklogs` **trước** khi xử lý, và idempotent theo mã giao dịch | Casso retry → cộng tiền 2 lần cho cùng một lần chuyển khoản |
-| Ngừng nhận heartbeat từ một máy > 2 phút | Cron 60s đánh dấu `HostMachine` offline **và** kết thúc mọi `CloudSession` active của máy đó | Session "ma" chiếm slot của máy đã chết, user không kết nối được |
-| Thêm origin FE mới (domain / preview URL) | Thêm vào allowlist CORS qua `FRONTEND_URL` / `FRONTEND_URLS` / `CORS_ORIGINS` | FE mới bị chặn CORS — lỗi hiện ra dưới dạng "Failed to fetch" rất khó đoán |
-| Thêm route cần quyền admin | Gắn `adminOnly` **sau** `authMiddleware` (không chỉ kiểm tra role trong handler) | Route lọt quyền — user thường gọi được endpoint quản trị |
-| Thêm route tạo `CrmAgentCommand` hoặc route dễ bị lạm dụng | Re-fetch target scoped `userId: req.user._id` (trả **404**, không phải 403 — chống enumeration) + thêm limiter vào `middleware/crmRateLimit.js` | Truy cập chéo user, hoặc route không giới hạn tần suất bị spam |
+| Env duoc nap truoc module doc env | `import 'dotenv/config'` dau `server/index.js` | bug env-load da xac minh |
+| Production schema index khong tu tao | `autoIndex: false`; index qua migration/audit | DB config + migration plan |
+| Frontend/agent parse response shape hien tai | `{ success, message, data }` | route/service contracts |
+| B2 URL trong HTML la reference that | quet bang `extractB2KeysFromHtml` | storage orphan tests |
 
-> **Pool nhỏ:** `MONGODB_MAX_POOL_SIZE=5`, `MIN=0`. Đừng thêm truy vấn N+1 hay cursor chạy dài trong request path — pool cạn là **toàn bộ** API treo, không riêng endpoint đó.
+## 4. Cau truc
 
----
-
-## 5. Known Issues & TODOs
-
-### High Priority
-- [x] Rate limiting: implemented per-route in `server/middleware/crmRateLimit.js` (pairing, device register, AI chat, CRM message send). Not a global/all-routes limiter — add new limiters there as new abuse-prone routes are added.
-- [ ] Input sanitization could be improved
-- [ ] **Pool Mongo vẫn nguội sau 60s rảnh:** `buildMongoOptions()` mặc định `minPoolSize: 0` + `maxIdleTimeMS: 60000` (chủ ý cho Atlas M0), nên dù máy Fly còn chạy, request đầu sau một phút im vẫn phải bắt tay TCP+TLS+auth lại với Atlas. Khắc phục **không cần sửa code**: đặt env `MONGODB_MIN_POOL_SIZE=2` trên Fly (`fly secrets set`/`[env]`) — biến đã được `buildMongoOptions()` đọc sẵn. Không đổi giá trị mặc định vì `test/database-config.test.js` chốt bộ mặc định M0-friendly cho các môi trường khác.
-- [ ] **gcli model codes (tạm thời):** model `-preview` của gcli hiện không khả dụng. `utils/aiProvider.js` có `GCLI_MODEL_CODE_MAP` dịch tên UI (`gemini-2.5-flash`, `gemini-3-flash`, `gemini-3.5-flash`, `gemini-3.1-pro`) → mã `假流式-agy-*-low` ngay tại `callGcliDirect` (choke point duy nhất cho mọi tool: chat/crm/interior/ai). Khi gọi đến `gemini-3-flash-preview` và `gemini-3.1-pro-preview`, có tỷ lệ 20% sẽ dùng `假流式-agy-gemini-3-flash-low` và `假流式-agy-gemini-3.1-pro-low` (có thể tắt qua `disableLowModelFallback: true` hoặc `enableLowModelFallback: false` trong options gọi API, mặc định luôn bật). Khôi phục: sửa value trong map về mã `-preview`.
-
-### Medium Priority
-- [ ] Forgot password / password reset not implemented
-- [ ] Email verification not implemented
-- [x] ~~No testing framework configured~~ — **sai, đã lỗi thời**: `package.json` có `"test": "node --test \"test/*.test.js\" \"server/**/*.test.js\" \"server/**/*.test.mjs\""` và `test/` đang có suite thật (cors-config, database-lifecycle, retention, mongodb-m0-*, interior-version-archive…). Đây là project **duy nhất** trong workspace có test suite Node — xem Test Policy trong `CLAUDE.md` root.
-- [ ] No ESLint/Prettier configuration
-- [x] ~~File PROJECT_SUMMARY.md bị lặp nội dung~~ — **đã dọn**: xoá bản trùng của "## 3. Key Decisions & Patterns" + "## 4. Active Features & Status" (hai bản Key Decisions giống hệt từng ký tự; bảng Active Features giữ lại bản 63 dòng vốn là superset của bản 42 dòng) cùng mảnh cây API routes bị dán lộn vào giữa bảng. Gộp 2 heading `Quick Commands` trùng. Đánh số section giờ liền mạch: 1 → 2 → 3 → 4 → 4b → 5 → 6 → 7 → 8.
-
-### Low Priority
-- [ ] API documentation (Swagger/OpenAPI)
-- [ ] Request logging to file
-- [ ] Database indexes optimization
-
----
-
-## 6. Important Context for Claude
-
-### When making changes:
-1. Follow naming conventions in CONVENTIONS.md
-2. Use ES Module syntax (import/export)
-3. Handle errors consistently with try/catch
-4. Return consistent JSON response format: `{ success, message, data? }`
-5. Add/update tests in `test/` — chạy `npm test` (`node --test`) trước khi kết thúc task
-
-### Critical Files (read before major changes):
-- `server/models/User.js` - User schema and password hashing + balance field
-- `server/models/Course.js` - Course schema with multilingual fields
-- `server/models/Transaction.js` - Payment transaction schema
-- `server/models/WebhookLog.js` - Webhook log schema
-- `server/middleware/auth.js` - JWT verification + adminOnly middleware
-- `server/routes/auth.js` - All authentication endpoints
-- `server/routes/courses.js` - Course CRUD and management endpoints
-- `server/routes/payment.js` - Payment API and Casso webhook handler
-- `server/routes/admin.js` - Admin management endpoints
-- `server/db/connection.js` - MongoDB connection setup
-- `DATABASE.md` - Complete database schema documentation
-
-### Environment Variables:
-```env
-MONGODB_URI=mongodb+srv://...       # MongoDB connection string
-MONGODB_MAX_POOL_SIZE=5
-MONGODB_MIN_POOL_SIZE=0
-JWT_SECRET=your_secret_key          # JWT signing secret
-PORT=3001                           # Server port (default: 3001)
-NODE_ENV=development                # Environment mode
-FRONTEND_URL=https://...            # Frontend URL for CORS
-CASSO_WEBHOOK_SECRET=your_secret    # Casso webhook verification secret
-# Backblaze B2
-STORAGE_PROVIDER=b2
-B2_ENDPOINT=https://s3.us-west-004.backblazeb2.com
-B2_REGION=us-west-004
-B2_ACCESS_KEY_ID=your_key_id
-B2_SECRET_ACCESS_KEY=your_app_key
-B2_BUCKET_NAME=your_bucket_name
-CDN_BASE_URL=https://f004.backblazeb2.com/file/your_bucket_name
-OPENCLAW_URL=http://localhost:18791/api/chat
-GCLI_DIRECT_URL=http://localhost:18790/v1/chat/completions
-GCLI_DIRECT_MODEL=gemini-2.5-flash
-GEMINI_API_KEY=...                   # Gemini SDK fallback for image generation routes
-INTERIOR_IMAGE_API_KEY=...           # Optional override used by /interior/generate-render
-INTERIOR_IMAGE_MODEL=gemini-2.5-flash-image
+```text
+server/index.js        entrypoint, startup, cron
+server/routes/         HTTP boundaries
+server/models/         Mongoose schemas
+server/middleware/     auth, quota, rate limits
+server/utils/          shared helpers + KIT.md
+server/migrations/     index/data migrations
+server/retention/      retention policy
+test/                  integration/pure logic tests
 ```
 
-### Secrets & Credentials
+## 5. Kien truc va refresh
 
-Backend là nơi giữ **toàn bộ secret thật** của hệ thống (Frontend không được giữ secret nào — mọi biến `VITE_*` đều public). Nơi lưu hợp lệ: `.env` local (gitignored) + biến môi trường trên Fly.io.
+`Client -> route/middleware -> model/service -> MongoDB/storage`; host/flow agents auth bang `x-agent-secret`.
 
-| Secret | Hậu quả nếu lộ |
-|---|---|
-| `MONGODB_URI` | Toàn quyền đọc/ghi database production |
-| `JWT_SECRET` | Ký được token giả cho **bất kỳ** user, kể cả admin. Đổi giá trị = vô hiệu mọi phiên đang đăng nhập |
-| `B2_ACCESS_KEY_ID`, `B2_SECRET_ACCESS_KEY` | Toàn quyền trên bucket lưu trữ (khoá học, tài liệu, video) |
-| `CASSO_WEBHOOK_SECRET` | Giả được webhook thanh toán → tự cộng tín dụng |
-| `GEMINI_API_KEY`, `INTERIOR_IMAGE_API_KEY` | Bị dùng chùa, tính tiền vào tài khoản dự án |
+| Sau khi ghi | Phai refresh/invalidate | Quen thi bi |
+|---|---|---|
+| Doi auth/role | Token/permission response va client state | Quyen cu hoac 401 bat ngo |
+| Doi schema/index | `DATABASE.md` + migration/index audit | Production drift, query cham/TTL mat |
+| Them B2 URL field/HTML source | `collectReferencedKeys()` + test | File dang dung bi xoa nham |
+| Doi cloud/agent contract | Frontend/host/flow caller + test | Session/heartbeat treo |
+| Doi cacheable list/filter | Invalidate cache tai mutation | Counter/list cu |
 
-- **Không** `console.log` các giá trị trên, header `Authorization`, hay body request đăng nhập/webhook — log Fly.io đọc lại được.
-- **Không** trả secret hay stack trace thô về client trong response lỗi; giữ format `{ success: false, message: '...' }`.
-- 🔴 **Tài khoản seed có mật khẩu mặc định được ghi công khai trong file này** (mục "Sample Users": `admin@alphastudio.com` / `student@example.com`). Đây là dữ liệu của `npm run db:init` cho môi trường dev. **Phải xác nhận hai tài khoản này không tồn tại — hoặc đã đổi mật khẩu — trên database production.** Không chạy `db:init` với `MONGODB_URI` production.
+## 6. Phu thuoc ngoai
 
-> Chỉ ghi **tên biến**. Không bao giờ ghi giá trị thật vào file này.
+- MongoDB Atlas, Fly.io, Cloudinary, Backblaze B2, Casso, OpenClaw/GCLI.
+- Secret chi o `.env`/Fly secrets; docs chi ghi ten bien.
 
+## 7. Known Issues & TODOs
 
-## 7. Quick Commands
+### Cao
+- [ ] Input sanitization can duoc audit them tai cac public write route.
+- [ ] Can nhac `MONGODB_MIN_POOL_SIZE=2` tren Fly neu cold database handshake con gay latency.
 
-```bash
-# Development
-npm run dev          # Start with nodemon (auto-reload)
-npm start            # Start production server
+### Trung binh
+- [ ] Forgot-password va email verification chua co.
+- [ ] GCLI preview model codes dang dung low-code fallback; khoi phuc khi upstream on dinh.
 
-# Database
-npm run db:test      # Test MongoDB connection
-npm run db:init      # Initialize database with sample data
-npm run db:migrate-passwords  # Hash existing plain-text passwords
-npm run db:m0:migrate          # Dry-run inline media scan
-npm run db:m0:audit            # Live collection/index audit
-npm run db:m0:rollback -- --manifest <path>  # Dry-run rollback
-```
-
----
-
-## 8. Sample Users
-
-After running `npm run db:init` and `npm run db:migrate-passwords`:
-
-| Email | Password | Role |
-|-------|----------|------|
-| admin@alphastudio.com | admin123456 | admin |
-| student@example.com | student123 | student |
-
----
-
-**NOTE TO CLAUDE CODE:**
-Read this file FIRST before making any changes.
-Update active features status and TODOs after each session.
-
+### Thap
+- [ ] OpenAPI/Swagger chua co.
+- [ ] Chua co ESLint/Prettier config.
 

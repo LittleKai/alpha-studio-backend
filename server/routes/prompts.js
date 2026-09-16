@@ -1,22 +1,9 @@
 import express from 'express';
 import Prompt from '../models/Prompt.js';
 import { authMiddleware, modOnly, adminOnly } from '../middleware/auth.js';
+import { checkIsMod } from '../utils/authRole.js';
 
 const router = express.Router();
-
-// Helper function to check if user is mod/admin from token
-async function checkIsMod(authHeader) {
-    try {
-        const token = authHeader.replace('Bearer ', '');
-        const { verifyToken } = await import('../middleware/auth.js');
-        const decoded = verifyToken(token);
-        const User = (await import('../models/User.js')).default;
-        const user = await User.findById(decoded.userId);
-        return user && (user.role === 'admin' || user.role === 'mod');
-    } catch {
-        return false;
-    }
-}
 
 // Helper function to get user ID from token
 async function getUserId(authHeader) {
