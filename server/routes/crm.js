@@ -4974,26 +4974,32 @@ router.get('/admin/audit-logs', authMiddleware, adminOnly, async (req, res) => {
 // GET /api/crm/releases/latest
 router.get('/releases/latest', async (req, res) => {
     try {
+        const cdn = (process.env.CDN_BASE_URL || 'https://download.giaiphapsangtao.com/file/alpha-studio').replace(/\/+$/, '');
+        const toCdn = (url) => (url && typeof url === 'string') ? url.replace('https://f004.backblazeb2.com/file/alpha-studio', cdn) : url;
+
         const setting = await SystemSetting.findOne({ key: 'crm_latest_release' });
         if (setting && setting.value) {
+            const val = { ...setting.value };
+            if (val.windowsInstallerUrl) val.windowsInstallerUrl = toCdn(val.windowsInstallerUrl);
+            if (val.androidApkUrl) val.androidApkUrl = toCdn(val.androidApkUrl);
             return res.json({
                 success: true,
-                data: setting.value
+                data: val
             });
         }
 
         // Dynamic fallback to Backblaze B2 latest release if not specified in DB
         let b2Data = null;
         try {
-            const response = await fetch('https://f004.backblazeb2.com/file/alpha-studio/crm-app/version.json');
+            const response = await fetch(`${cdn}/crm-app/version.json`);
             if (response.ok) {
                 const release = await response.json();
                 const windowsAsset = release.assets?.find(a => a.name.endsWith('.exe') || a.name.endsWith('.msix') || a.name.endsWith('.zip'));
                 const androidAsset = release.assets?.find(a => a.name.endsWith('.apk'));
                 b2Data = {
                     version: release.tag_name ? (release.tag_name.startsWith('v') ? release.tag_name.substring(1) : release.tag_name) : '1.0.0',
-                    windowsInstallerUrl: windowsAsset ? windowsAsset.browser_download_url : 'https://f004.backblazeb2.com/file/alpha-studio/crm-app/releases/alpha-crm-v1.0.0.exe',
-                    androidApkUrl: androidAsset ? androidAsset.browser_download_url : 'https://f004.backblazeb2.com/file/alpha-studio/crm-app/releases/alpha-crm-v1.0.0.apk',
+                    windowsInstallerUrl: windowsAsset ? toCdn(windowsAsset.browser_download_url) : `${cdn}/crm-app/releases/alpha-crm-v1.0.0.exe`,
+                    androidApkUrl: androidAsset ? toCdn(androidAsset.browser_download_url) : `${cdn}/crm-app/releases/alpha-crm-v1.0.0.apk`,
                     releaseNotes: release.body || 'Bản phát hành chính thức Alpha CRM',
                     sha256: 'mock-sha256-hash-value',
                     publishedAt: release.published_at || new Date().toISOString()
@@ -5006,8 +5012,8 @@ router.get('/releases/latest', async (req, res) => {
         // Return B2 data or the hardcoded default
         const latestRelease = b2Data || {
             version: '1.0.0',
-            windowsInstallerUrl: 'https://f004.backblazeb2.com/file/alpha-studio/crm-app/releases/alpha-crm-v1.0.0.exe',
-            androidApkUrl: 'https://f004.backblazeb2.com/file/alpha-studio/crm-app/releases/alpha-crm-v1.0.0.apk',
+            windowsInstallerUrl: `${cdn}/crm-app/releases/alpha-crm-v1.0.0.exe`,
+            androidApkUrl: `${cdn}/crm-app/releases/alpha-crm-v1.0.0.apk`,
             releaseNotes: 'Bản phát hành chính thức Alpha CRM Production',
             sha256: 'mock-sha256-hash-value',
             publishedAt: new Date().toISOString()
@@ -5019,7 +5025,7 @@ router.get('/releases/latest', async (req, res) => {
         });
     } catch (error) {
         console.error('Error fetching latest CRM release:', error);
-        res.status(500).json({ success: false, message: 'Lá»—i server khi láº¥y thĂ´ng tin báº£n phĂ¡t hĂ nh má»›i nháº¥t.' });
+        res.status(500).json({ success: false, message: 'Lỗi server khi lấy thông tin bản phát hành mới nhất.' });
     }
 });
 

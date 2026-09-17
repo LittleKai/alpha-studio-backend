@@ -122,12 +122,21 @@ function serializeImportLink(link) {
     };
 }
 
+function vocabCdnBase() {
+    return (process.env.CDN_BASE_URL || 'https://download.giaiphapsangtao.com/file/alpha-studio').replace(/\/+$/, '');
+}
+
+function toVocabCdnUrl(url) {
+    if (!url || typeof url !== 'string') return url;
+    return url.replace('https://f004.backblazeb2.com/file/alpha-studio', vocabCdnBase());
+}
+
 // GET /api/vocab/releases/latest
 router.get('/releases/latest', async (_req, res) => {
     try {
         let b2Data = null;
         try {
-            const response = await fetch('https://f004.backblazeb2.com/file/alpha-studio/vocabflip-app/version.json');
+            const response = await fetch(`${vocabCdnBase()}/vocabflip-app/version.json`);
             if (response.ok) {
                 const release = await response.json();
                 const assets = release.assets || [];
@@ -143,11 +152,11 @@ router.get('/releases/latest', async (_req, res) => {
                 b2Data = {
                     version,
                     windowsInstallerUrl: windowsAsset
-                        ? windowsAsset.browser_download_url
-                        : `https://f004.backblazeb2.com/file/alpha-studio/vocabflip-app/releases/vocabflip-windows-v${version}.zip`,
+                        ? toVocabCdnUrl(windowsAsset.browser_download_url)
+                        : `${vocabCdnBase()}/vocabflip-app/releases/vocabflip-windows-v${version}.zip`,
                     androidApkUrl: androidAsset
-                        ? androidAsset.browser_download_url
-                        : `https://f004.backblazeb2.com/file/alpha-studio/vocabflip-app/releases/vocabflip-v${version}.apk`,
+                        ? toVocabCdnUrl(androidAsset.browser_download_url)
+                        : `${vocabCdnBase()}/vocabflip-app/releases/vocabflip-v${version}.apk`,
                     releaseNotes: release.body || 'VocabFlip release build',
                     publishedAt: release.published_at || new Date().toISOString(),
                     windowsSize: windowsAsset?.size,
@@ -172,14 +181,17 @@ router.get('/releases/latest', async (_req, res) => {
         // If CDN fetch fails, fall back to cached settings in DB
         const setting = await SystemSetting.findOne({ key: 'vocab_latest_release' });
         if (setting && setting.value) {
-            return ok(res, setting.value);
+            const val = { ...setting.value };
+            if (val.windowsInstallerUrl) val.windowsInstallerUrl = toVocabCdnUrl(val.windowsInstallerUrl);
+            if (val.androidApkUrl) val.androidApkUrl = toVocabCdnUrl(val.androidApkUrl);
+            return ok(res, val);
         }
 
         // Final fallback if both CDN fetch and DB cache are unavailable
         return ok(res, {
             version: '1.1.6',
-            windowsInstallerUrl: 'https://f004.backblazeb2.com/file/alpha-studio/vocabflip-app/releases/vocabflip-windows-v1.1.6.zip',
-            androidApkUrl: 'https://f004.backblazeb2.com/file/alpha-studio/vocabflip-app/releases/vocabflip-v1.1.6.apk',
+            windowsInstallerUrl: `${vocabCdnBase()}/vocabflip-app/releases/vocabflip-windows-v1.1.6.zip`,
+            androidApkUrl: `${vocabCdnBase()}/vocabflip-app/releases/vocabflip-v1.1.6.apk`,
             releaseNotes: 'VocabFlip release build',
             publishedAt: new Date().toISOString(),
         });

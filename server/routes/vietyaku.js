@@ -11,8 +11,14 @@ const GITHUB_RELEASES_URL = 'https://github.com/LittleKai/VietYaku/releases';
 // Lazy: dotenv.config() in index.js runs before any request but AFTER ES module
 // imports, so reading process.env at module level would capture undefined.
 function baseUrl() {
-    const cdn = (process.env.CDN_BASE_URL || 'https://f004.backblazeb2.com/file/alpha-studio').replace(/\/+$/, '');
+    const cdn = (process.env.CDN_BASE_URL || 'https://download.giaiphapsangtao.com/file/alpha-studio').replace(/\/+$/, '');
     return `${cdn}/vietyaku-app`;
+}
+
+export function toCdnUrl(url) {
+    if (!url || typeof url !== 'string') return url;
+    const cdn = (process.env.CDN_BASE_URL || 'https://download.giaiphapsangtao.com/file/alpha-studio').replace(/\/+$/, '');
+    return url.replace('https://f004.backblazeb2.com/file/alpha-studio', cdn);
 }
 
 function manifestUrl() {
@@ -44,9 +50,9 @@ export function parseVietYakuManifest(manifest) {
 
     return {
         version,
-        windowsZipUrl: windowsAsset?.browser_download_url || windowsZipUrl(version),
+        windowsZipUrl: toCdnUrl(windowsAsset?.browser_download_url) || windowsZipUrl(version),
         windowsSize: windowsAsset?.size,
-        androidApkUrl: androidAsset?.browser_download_url,
+        androidApkUrl: toCdnUrl(androidAsset?.browser_download_url),
         androidSize: androidAsset?.size,
         releaseNotes: manifest?.body || '',
         releaseUrl: manifest?.html_url || GITHUB_RELEASES_URL,
@@ -82,7 +88,10 @@ router.get('/releases/latest', async (_req, res) => {
         // CDN unreachable → serve the last manifest we cached
         const setting = await SystemSetting.findOne({ key: SETTING_KEY });
         if (setting && setting.value) {
-            return res.json({ success: true, message: 'OK', data: setting.value });
+            const val = { ...setting.value };
+            if (val.windowsZipUrl) val.windowsZipUrl = toCdnUrl(val.windowsZipUrl);
+            if (val.androidApkUrl) val.androidApkUrl = toCdnUrl(val.androidApkUrl);
+            return res.json({ success: true, message: 'OK', data: val });
         }
 
         return res.json({

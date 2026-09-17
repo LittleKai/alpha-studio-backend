@@ -4,6 +4,8 @@
 
 > Trang thai hien tai, khong phai changelog. Sau moi task: cap nhat ngay/session; doi bang trang thai va TODO; cap nhat `DATABASE.md` khi schema doi. Bug quan trong vao `IMPORTANT_FIXED_BUGS.md`. Ban v1 nam trong `archive/PROJECT_SUMMARY_v1.md` va khong duoc dung lam huong dan hien tai.
 
+**Giữ gọn (file này nạp mỗi session):** ô `Details`/`Notes` ≤ ~120 ký tự — nói *cái gì*, không kể chi tiết nội bộ. *Cơ chế + vì sao* ⇒ `CONVENTIONS.md`; bẫy ⇒ `IMPORTANT_FIXED_BUGS.md`; chi tiết UI ⇒ không ghi (code + git đã có). Vượt ~6KB ⇒ dọn trước khi thêm.
+
 ## 1. Tong quan
 
 - **Loai:** Node.js ESM, Express 5, Mongoose/MongoDB API.
