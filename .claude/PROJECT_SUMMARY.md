@@ -21,6 +21,7 @@
 | Auth, users, roles | ✅ | `server/routes/auth.js`, `server/middleware/auth.js` | JWT 7 ngay |
 | Content/course/job/partner/prompt | ✅ | `server/routes/`, `server/models/` | Noi dung `vi` bat buoc, `en` optional |
 | Workflow, event library, AI skills | ✅ | `server/routes/workflow.js`, `eventLibrary.js`, `skills.js` | API cho frontend |
+| Phan muc dich vu + bai dich vu co sections | ✅ | `server/routes/serviceCategories.js`, `models/ServiceCategory.js`, `models/contentSection.js`, `utils/contentSections.js` | Article co `serviceCategory` + `sections`; chi 4 kind (`SERVICE_SECTION_KINDS`) |
 | Cloud Desktop + agents | ✅ | `server/routes/cloud.js`, models HostMachine/CloudSession | Contract cheo host/flow |
 | CRM + analytics | ✅ | `server/routes/crm.js`, `analytics.js` | Co rate limit va test |
 | B2 orphan/retention/migrations | ✅ | `server/routes/admin.js`, `server/retention/`, `server/migrations/` | DELETE doi chieu lai reference |

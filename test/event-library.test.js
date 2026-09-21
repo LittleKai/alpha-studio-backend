@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { readFile } from 'node:fs/promises';
 
 import {
     slugifyTitle,
@@ -26,6 +27,8 @@ import {
     VIEW_COOLDOWN_MS
 } from '../server/routes/eventLibrary.js';
 import { PRO_MIN_LIFETIME_CREDITS, BUDGET_TIERS } from '../server/models/EventLibraryItem.js';
+import { SECTION_KINDS } from '../server/models/contentSection.js';
+import { SERVICE_SECTION_KINDS } from '../server/utils/contentSections.js';
 
 const OWNER_ID = 'owner-object-id';
 const MEMBER = { _id: OWNER_ID, role: 'user', name: 'Thanh Tân' };
@@ -336,6 +339,30 @@ test('sanitizeSections chịu được đầu vào không phải mảng', () => 
     assert.deepEqual(sanitizeSections({ kind: 'richText' }), []);
 });
 
+test('sanitizeSections không truyền allowedKinds thì giữ cả 8 kind', () => {
+    const out = sanitizeSections(
+        SECTION_KINDS.map(kind => ({ kind, title: kind }))
+    );
+    assert.deepEqual(out.map(s => s.kind), [...SECTION_KINDS]);
+});
+
+test('sanitizeSections giới hạn theo allowedKinds — bài dịch vụ chỉ có 4 khối', () => {
+    const out = sanitizeSections([
+        { kind: 'richText', html: '<p>Giới thiệu</p>' },
+        { kind: 'metrics', metrics: [{ label: 'Reach', value: '1M', note: '' }] },
+        { kind: 'quote', quote: 'bỏ' },
+        { kind: 'steps', title: 'Quy trình', steps: [{ title: 'Khảo sát', desc: 'Đo hiện trạng' }], images: ['https://cdn.test/x.png'] }
+    ], SERVICE_SECTION_KINDS);
+
+    assert.deepEqual(out.map(s => s.kind), ['richText', 'steps']);
+    // field của kind khác vẫn bị cắt
+    assert.deepEqual(out[1], {
+        kind: 'steps',
+        title: 'Quy trình',
+        steps: [{ title: 'Khảo sát', desc: 'Đo hiện trạng' }]
+    });
+});
+
 // ─── tương tác: like & đánh giá ────────────────────────────────────────────
 
 test('toggleLike bật rồi tắt, không nhân bản', () => {
@@ -518,4 +545,18 @@ test('thời gian nguội của bộ đếm view là 6 giờ', () => {
 test('viewerKey đọc x-forwarded-for vì app không bật trust proxy', () => {
     const req = { headers: { 'x-forwarded-for': '203.0.113.9, 10.0.0.1' }, ip: '10.0.0.1' };
     assert.equal(viewerKey(req, 'case-abc'), '203.0.113.9:case-abc');
+});
+
+// --- Article: whitelist category phải bám enum của model ---------------------
+// Route POST /api/articles từng hard-code ['about','services'] trong khi model
+// cho phép cả 'news', nên tạo bài Tin Tức trả 400. Nay route đọc thẳng
+// `Article.schema.path('category').enumValues`; test này chốt lại nguồn sự thật.
+test('Article.category enum vẫn là nguồn duy nhất cho whitelist của route', async () => {
+    const { default: Article } = await import('../server/models/Article.js');
+    const enumValues = Article.schema.path('category').enumValues;
+    assert.deepEqual([...enumValues].sort(), ['about', 'news', 'services']);
+
+    const routeSrc = await readFile(new URL('../server/routes/articles.js', import.meta.url), 'utf8');
+    assert.match(routeSrc, /enumValues\.includes\(category\)/);
+    assert.doesNotMatch(routeSrc, /\['about',\s*'services'\]/);
 });

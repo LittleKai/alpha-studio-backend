@@ -102,7 +102,13 @@ export const REQUIRED_INDEXES = Object.freeze([
     { collection: 'pagevisits', key: { path: 1, createdAt: -1 }, options: {} },
     { collection: 'pagevisits', key: { sessionId: 1, createdAt: 1 }, options: {} },
     { collection: 'pagevisits', key: { visitorId: 1 }, options: {} },
-    { collection: 'pagevisits', key: { channel: 1 }, options: {} }
+    { collection: 'pagevisits', key: { channel: 1 }, options: {} },
+
+    // Trang /services: lọc bài theo phân mục, và liệt kê phân mục đang hiển thị.
+    // Runtime chạy `autoIndex: false` nên `schema.index()` trong model không tự
+    // tạo được — phải khai ở đây rồi chạy `npm run db:m0:audit -- --apply-indexes`.
+    { collection: 'articles', key: { serviceCategory: 1, status: 1, order: 1 }, options: {} },
+    { collection: 'servicecategories', key: { status: 1, order: 1 }, options: {} }
 ]);
 
 export const APPROVED_INDEX_DROPS = Object.freeze([

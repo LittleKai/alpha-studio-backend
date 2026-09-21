@@ -9,6 +9,7 @@ import WorkflowProject from '../models/WorkflowProject.js';
 import WorkflowDocument from '../models/WorkflowDocument.js';
 import { authMiddleware, verifyToken } from '../middleware/auth.js';
 import User from '../models/User.js';
+import { sanitizeSections } from '../utils/contentSections.js';
 
 const router = express.Router();
 
@@ -99,58 +100,9 @@ export function buildListQuery(params = {}, user = null) {
     return and.length === 1 ? and[0] : { $and: and };
 }
 
-// Số khối tối đa mỗi mục và số phần tử tối đa trong một khối — chặn payload
-// khổng lồ làm phình document (giới hạn 16MB của Mongo).
-const MAX_SECTIONS = 30;
-const MAX_ROWS = 50;
-
-/** Chỉ giữ lại field thuộc về `kind` của khối; bỏ mọi thứ khác. */
-const SECTION_FIELDS = {
-    richText: (s) => ({ html: String(s.html || '') }),
-    keyValue: (s) => ({
-        rows: asArray(s.rows).map(r => ({ label: str(r.label), value: str(r.value) }))
-    }),
-    metrics: (s) => ({
-        metrics: asArray(s.metrics).map(m => ({ label: str(m.label), value: str(m.value), note: str(m.note) }))
-    }),
-    bulletGroups: (s) => ({
-        groups: asArray(s.groups).map(g => ({
-            title: str(g.title),
-            items: asArray(g.items).map(str).filter(Boolean)
-        }))
-    }),
-    steps: (s) => ({
-        steps: asArray(s.steps).map(st => ({ title: str(st.title), desc: str(st.desc) }))
-    }),
-    quote: (s) => ({ quote: str(s.quote), quoteBy: str(s.quoteBy) }),
-    gallery: (s) => ({ images: asArray(s.images).map(str).filter(Boolean) }),
-    linkedItems: (s) => ({
-        links: asArray(s.links).map(l => ({ slug: str(l.slug), label: str(l.label) }))
-    })
-};
-
-function asArray(value) {
-    return Array.isArray(value) ? value.slice(0, MAX_ROWS) : [];
-}
-
-function str(value) {
-    return typeof value === 'string' ? value : (value == null ? '' : String(value));
-}
-
-/**
- * Chuẩn hoá `sections` gửi lên từ trình đăng: bỏ khối có `kind` lạ, cắt field
- * không thuộc kind đó, và giới hạn kích thước.
- */
-export function sanitizeSections(sections) {
-    return (Array.isArray(sections) ? sections : [])
-        .filter(s => s && SECTION_FIELDS[s.kind])
-        .slice(0, MAX_SECTIONS)
-        .map(s => ({
-            kind: s.kind,
-            title: str(s.title),
-            ...SECTION_FIELDS[s.kind](s)
-        }));
-}
+// Làm sạch khối thân bài — dùng chung với /api/articles.
+// Re-export để test import trực tiếp từ route này.
+export { sanitizeSections };
 
 /**
  * Ghi điểm của một người vào mảng `ratings` — mỗi người chỉ có một phiếu, chấm

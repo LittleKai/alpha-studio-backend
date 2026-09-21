@@ -1,5 +1,6 @@
 import mongoose from 'mongoose';
 import { noInlineMediaPlugin } from '../validation/inlineMedia.js';
+import sectionSchema from './contentSection.js';
 
 const articleSchema = new mongoose.Schema({
     title: {
@@ -44,7 +45,18 @@ const articleSchema = new mongoose.Schema({
         type: Boolean,
         default: false
     },
-    tags: [{ type: String }]
+    tags: [{ type: String }],
+
+    // Chỉ dùng cho category 'services' — phân mục hiển thị trên /services
+    serviceCategory: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'ServiceCategory',
+        default: null
+    },
+
+    // Thân bài có cấu trúc (bài dịch vụ). Route chỉ nhận 4 kind giới thiệu —
+    // xem SERVICE_SECTION_KINDS trong utils/contentSections.js
+    sections: { type: [sectionSchema], default: [] }
 }, {
     timestamps: true
 });
@@ -71,6 +83,7 @@ articleSchema.pre('save', function (next) {
 
 // Indexes
 articleSchema.index({ category: 1, status: 1, order: 1 });
+articleSchema.index({ serviceCategory: 1, status: 1, order: 1 });
 articleSchema.index({
     'title.vi': 'text',
     'title.en': 'text',

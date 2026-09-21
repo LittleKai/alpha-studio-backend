@@ -1,6 +1,7 @@
 import express from 'express';
 import Article from '../models/Article.js';
 import { authMiddleware, modOnly } from '../middleware/auth.js';
+import { sanitizeSections, SERVICE_SECTION_KINDS } from '../utils/contentSections.js';
 
 const router = express.Router();
 
@@ -9,11 +10,15 @@ const router = express.Router();
 // GET /api/articles - List articles (public, filtered by category + status=published)
 router.get('/', async (req, res) => {
     try {
-        const { category, page = 1, limit = 20, search } = req.query;
+        const { category, serviceCategory, page = 1, limit = 20, search } = req.query;
         const query = { status: 'published' };
 
         if (category) {
             query.category = category;
+        }
+
+        if (serviceCategory) {
+            query.serviceCategory = serviceCategory;
         }
 
         if (search) {
@@ -25,6 +30,7 @@ router.get('/', async (req, res) => {
         const [data, total] = await Promise.all([
             Article.find(query)
                 .populate('author', 'name avatar')
+                .populate('serviceCategory', 'title slug accent icon')
                 .sort({ order: 1, createdAt: -1 })
                 .skip(skip)
                 .limit(parseInt(limit)),
@@ -53,10 +59,11 @@ router.get('/', async (req, res) => {
 // GET /api/articles/admin/list - List all articles for admin (includes drafts)
 router.get('/admin/list', authMiddleware, modOnly, async (req, res) => {
     try {
-        const { category, status, page = 1, limit = 20, search } = req.query;
+        const { category, serviceCategory, status, page = 1, limit = 20, search } = req.query;
         const query = {};
 
         if (category) query.category = category;
+        if (serviceCategory) query.serviceCategory = serviceCategory;
         if (status) query.status = status;
 
         if (search) {
@@ -72,6 +79,7 @@ router.get('/admin/list', authMiddleware, modOnly, async (req, res) => {
         const [data, total] = await Promise.all([
             Article.find(query)
                 .populate('author', 'name avatar')
+                .populate('serviceCategory', 'title slug accent icon')
                 .sort({ order: 1, createdAt: -1 })
                 .skip(skip)
                 .limit(parseInt(limit)),
@@ -97,13 +105,17 @@ router.get('/admin/list', authMiddleware, modOnly, async (req, res) => {
 // POST /api/articles - Create article
 router.post('/', authMiddleware, modOnly, async (req, res) => {
     try {
-        const { title, excerpt, content, thumbnail, category, tags, order, isFeatured } = req.body;
+        const {
+            title, excerpt, content, thumbnail, category, tags, order, isFeatured,
+            serviceCategory, sections
+        } = req.body;
 
         if (!title?.vi) {
             return res.status(400).json({ success: false, message: 'Cần tiêu đề tiếng Việt' });
         }
 
-        if (!category || !['about', 'services'].includes(category)) {
+        // Lấy từ enum của model để whitelist không lệch khi thêm category mới
+        if (!category || !Article.schema.path('category').enumValues.includes(category)) {
             return res.status(400).json({ success: false, message: 'Category không hợp lệ' });
         }
 
@@ -116,7 +128,9 @@ router.post('/', authMiddleware, modOnly, async (req, res) => {
             tags: tags || [],
             order: order || 0,
             isFeatured: isFeatured || false,
-            author: req.user._id
+            author: req.user._id,
+            serviceCategory: serviceCategory || null,
+            sections: sanitizeSections(sections, SERVICE_SECTION_KINDS)
         });
 
         await article.save();
@@ -138,7 +152,10 @@ router.post('/', authMiddleware, modOnly, async (req, res) => {
 // PUT /api/articles/:id - Update article
 router.put('/:id', authMiddleware, modOnly, async (req, res) => {
     try {
-        const { title, excerpt, content, thumbnail, category, tags, order, isFeatured, status } = req.body;
+        const {
+            title, excerpt, content, thumbnail, category, tags, order, isFeatured, status,
+            serviceCategory, sections
+        } = req.body;
 
         const article = await Article.findById(req.params.id);
         if (!article) {
@@ -154,6 +171,8 @@ router.put('/:id', authMiddleware, modOnly, async (req, res) => {
         if (order !== undefined) article.order = order;
         if (isFeatured !== undefined) article.isFeatured = isFeatured;
         if (status) article.status = status;
+        if (serviceCategory !== undefined) article.serviceCategory = serviceCategory || null;
+        if (sections !== undefined) article.sections = sanitizeSections(sections, SERVICE_SECTION_KINDS);
 
         await article.save();
 
@@ -228,7 +247,9 @@ router.get('/:slug', async (req, res) => {
         const article = await Article.findOne({
             slug: req.params.slug,
             status: 'published'
-        }).populate('author', 'name avatar');
+        })
+            .populate('author', 'name avatar')
+            .populate('serviceCategory', 'title slug accent icon');
 
         if (!article) {
             return res.status(404).json({ success: false, message: 'Không tìm thấy bài viết' });
