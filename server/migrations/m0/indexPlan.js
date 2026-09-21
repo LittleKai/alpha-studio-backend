@@ -108,7 +108,12 @@ export const REQUIRED_INDEXES = Object.freeze([
     // Runtime chạy `autoIndex: false` nên `schema.index()` trong model không tự
     // tạo được — phải khai ở đây rồi chạy `npm run db:m0:audit -- --apply-indexes`.
     { collection: 'articles', key: { serviceCategory: 1, status: 1, order: 1 }, options: {} },
-    { collection: 'servicecategories', key: { status: 1, order: 1 }, options: {} }
+    { collection: 'servicecategories', key: { status: 1, order: 1 }, options: {} },
+
+    // Bình luận cuối bài dịch vụ đọc theo (targetType, targetId, status).
+    // `Comment.schema.index()` không tự tạo được vì runtime chạy autoIndex: false.
+    { collection: 'comments', key: { targetType: 1, targetId: 1, status: 1 }, options: {} },
+    { collection: 'comments', key: { parentComment: 1 }, options: {} }
 ]);
 
 export const APPROVED_INDEX_DROPS = Object.freeze([

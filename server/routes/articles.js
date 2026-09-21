@@ -5,6 +5,24 @@ import { sanitizeSections, SERVICE_SECTION_KINDS } from '../utils/contentSection
 
 const router = express.Router();
 
+// Tệp tham khảo tải về đi kèm bài dịch vụ (.skp, .html…). Chỉ giữ đúng 5 field
+// của `Article.attachments`; ảnh không đi đường này mà nằm trong khối gallery.
+const MAX_ATTACHMENTS = 20;
+const str = (v) => (typeof v === 'string' ? v : v == null ? '' : String(v));
+
+function sanitizeAttachments(list) {
+    return (Array.isArray(list) ? list : [])
+        .filter(a => a && str(a.url).trim())
+        .slice(0, MAX_ATTACHMENTS)
+        .map(a => ({
+            name: str(a.name),
+            url: str(a.url),
+            fileKey: str(a.fileKey),
+            size: str(a.size),
+            mime: str(a.mime)
+        }));
+}
+
 // ==================== PUBLIC ROUTES ====================
 
 // GET /api/articles - List articles (public, filtered by category + status=published)
@@ -107,7 +125,7 @@ router.post('/', authMiddleware, modOnly, async (req, res) => {
     try {
         const {
             title, excerpt, content, thumbnail, category, tags, order, isFeatured,
-            serviceCategory, sections
+            serviceCategory, sections, attachments
         } = req.body;
 
         if (!title?.vi) {
@@ -130,7 +148,8 @@ router.post('/', authMiddleware, modOnly, async (req, res) => {
             isFeatured: isFeatured || false,
             author: req.user._id,
             serviceCategory: serviceCategory || null,
-            sections: sanitizeSections(sections, SERVICE_SECTION_KINDS)
+            sections: sanitizeSections(sections, SERVICE_SECTION_KINDS),
+            attachments: sanitizeAttachments(attachments)
         });
 
         await article.save();
@@ -154,7 +173,7 @@ router.put('/:id', authMiddleware, modOnly, async (req, res) => {
     try {
         const {
             title, excerpt, content, thumbnail, category, tags, order, isFeatured, status,
-            serviceCategory, sections
+            serviceCategory, sections, attachments
         } = req.body;
 
         const article = await Article.findById(req.params.id);
@@ -173,6 +192,7 @@ router.put('/:id', authMiddleware, modOnly, async (req, res) => {
         if (status) article.status = status;
         if (serviceCategory !== undefined) article.serviceCategory = serviceCategory || null;
         if (sections !== undefined) article.sections = sanitizeSections(sections, SERVICE_SECTION_KINDS);
+        if (attachments !== undefined) article.attachments = sanitizeAttachments(attachments);
 
         await article.save();
 

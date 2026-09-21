@@ -1,14 +1,20 @@
 import express from 'express';
 import Comment from '../models/Comment.js';
 import Prompt from '../models/Prompt.js';
+import Article from '../models/Article.js';
 import { authMiddleware, modOnly } from '../middleware/auth.js';
 
 const router = express.Router();
+
+// Loại đối tượng được phép bình luận. Thêm giá trị mới thì khai cả ở đây và
+// trong enum `Comment.targetType`, nếu không document lưu sẽ hỏng validate.
+const TARGET_TYPES = ['prompt', 'article'];
 
 // Helper to get the target model
 const getTargetModel = (targetType) => {
     switch (targetType) {
         case 'prompt': return Prompt;
+        case 'article': return Article;
         default: return null;
     }
 };
@@ -61,14 +67,14 @@ router.get('/replies/:commentId', async (req, res) => {
 });
 
 // @route   GET /api/comments/:targetType/:targetId
-// @desc    Get comments for a target (prompt or resource)
+// @desc    Get comments for a target (prompt hoặc article)
 // @access  Public
 router.get('/:targetType/:targetId', async (req, res) => {
     try {
         const { targetType, targetId } = req.params;
         const { page = 1, limit = 20, sort = '-createdAt' } = req.query;
 
-        if (!['prompt'].includes(targetType)) {
+        if (!TARGET_TYPES.includes(targetType)) {
             return res.status(400).json({
                 success: false,
                 message: 'Invalid target type'
@@ -132,7 +138,7 @@ router.post('/:targetType/:targetId', authMiddleware, async (req, res) => {
         const { targetType, targetId } = req.params;
         const { content, parentComment } = req.body;
 
-        if (!['prompt'].includes(targetType)) {
+        if (!TARGET_TYPES.includes(targetType)) {
             return res.status(400).json({
                 success: false,
                 message: 'Invalid target type'

@@ -56,7 +56,22 @@ const articleSchema = new mongoose.Schema({
 
     // Thân bài có cấu trúc (bài dịch vụ). Route chỉ nhận 4 kind giới thiệu —
     // xem SERVICE_SECTION_KINDS trong utils/contentSections.js
-    sections: { type: [sectionSchema], default: [] }
+    sections: { type: [sectionSchema], default: [] },
+
+    // Tệp tham khảo tải về (.skp, .html, .pdf…). Ảnh KHÔNG nằm ở đây — ảnh đi
+    // Cloudinary trong khối `gallery`. Cùng hình dạng với
+    // `EventLibraryItem.attachments` để orphan checker trong routes/admin.js
+    // đọc được `fileKey`.
+    attachments: {
+        type: [new mongoose.Schema({
+            name: { type: String, default: '' },
+            url: { type: String, default: '' },
+            fileKey: { type: String, default: '' },
+            size: { type: String, default: '' },
+            mime: { type: String, default: '' }
+        }, { _id: false })],
+        default: []
+    }
 }, {
     timestamps: true
 });

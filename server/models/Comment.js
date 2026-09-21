@@ -1,9 +1,12 @@
 import mongoose from 'mongoose';
 
 const commentSchema = new mongoose.Schema({
+    // `refPath` nên giá trị phải trùng đúng tên model: 'Prompt', 'Article'.
+    // Hai giá trị chữ thường cũ ('prompt') vẫn còn trong dữ liệu — route tự
+    // ánh xạ sang model, xem getTargetModel trong routes/comments.js.
     targetType: {
         type: String,
-        enum: ['prompt'],
+        enum: ['prompt', 'article'],
         required: [true, 'Target type is required']
     },
     targetId: {

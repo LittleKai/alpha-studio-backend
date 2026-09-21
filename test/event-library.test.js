@@ -560,3 +560,39 @@ test('Article.category enum vẫn là nguồn duy nhất cho whitelist của rou
     assert.match(routeSrc, /enumValues\.includes\(category\)/);
     assert.doesNotMatch(routeSrc, /\['about',\s*'services'\]/);
 });
+
+// --- Bình luận bài viết -----------------------------------------------------
+// Trang chi tiết dịch vụ dùng lại bộ bình luận của Prompt. Route và enum của
+// model là hai chỗ khác nhau: lệch nhau thì POST qua được validate route rồi
+// chết ở `Comment.save()`. Test chốt cả hai phải liệt kê cùng tập giá trị.
+test('Comment.targetType của model và TARGET_TYPES của route khớp nhau', async () => {
+    const { default: Comment } = await import('../server/models/Comment.js');
+    const enumValues = [...Comment.schema.path('targetType').enumValues].sort();
+    assert.deepEqual(enumValues, ['article', 'prompt']);
+
+    const routeSrc = await readFile(new URL('../server/routes/comments.js', import.meta.url), 'utf8');
+    const listed = routeSrc.match(/const TARGET_TYPES = \[([^\]]+)\]/);
+    assert.ok(listed, 'route phải khai TARGET_TYPES một chỗ duy nhất');
+    const fromRoute = listed[1].split(',').map(s => s.trim().replace(/['"]/g, '')).sort();
+    assert.deepEqual(fromRoute, enumValues);
+
+    // Không còn chỗ nào tự viết lại whitelist bằng tay
+    assert.doesNotMatch(routeSrc, /\['prompt'\]\.includes/);
+    assert.match(routeSrc, /case 'article': return Article;/);
+});
+
+// --- Tệp tham khảo của bài dịch vụ ------------------------------------------
+// `sanitizeAttachments` chặn field lạ lọt vào document và bỏ mục thiếu URL.
+test('sanitizeAttachments chỉ giữ 5 field và bỏ mục không có url', async () => {
+    const routeSrc = await readFile(new URL('../server/routes/articles.js', import.meta.url), 'utf8');
+    assert.match(routeSrc, /function sanitizeAttachments/);
+
+    const { default: Article } = await import('../server/models/Article.js');
+    const doc = new Article({
+        title: { vi: 'x' },
+        category: 'services',
+        attachments: [{ name: 'a.skp', url: 'https://cdn/x/a.skp', fileKey: 'x/a.skp', size: '1.0 MB', mime: 'application/octet-stream' }]
+    });
+    assert.equal(doc.attachments.length, 1);
+    assert.equal(doc.attachments[0].fileKey, 'x/a.skp');
+});
