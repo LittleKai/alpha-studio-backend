@@ -282,4 +282,27 @@ router.get('/:slug', async (req, res) => {
     }
 });
 
+// POST /api/articles/:id/track-download
+// Đếm lượt tải file đính kèm — public, fire-and-forget.
+router.post('/:id/track-download', async (req, res) => {
+    try {
+        const article = await Article.findByIdAndUpdate(
+            req.params.id,
+            { $inc: { downloadCount: 1 } },
+            { new: true }
+        );
+        if (!article) {
+            return res.status(404).json({ success: false, message: 'Article not found' });
+        }
+        return res.json({
+            success: true,
+            message: 'Download tracked',
+            data: { downloadCount: article.downloadCount },
+        });
+    } catch (error) {
+        console.error('Track article download error:', error);
+        return res.status(500).json({ success: false, message: 'Server error' });
+    }
+});
+
 export default router;

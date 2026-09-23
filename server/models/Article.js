@@ -58,6 +58,13 @@ const articleSchema = new mongoose.Schema({
     // xem SERVICE_SECTION_KINDS trong utils/contentSections.js
     sections: { type: [sectionSchema], default: [] },
 
+    // Tổng số lượt tải file đính kèm — tăng mỗi khi người dùng bấm tải file
+    downloadCount: {
+        type: Number,
+        default: 0,
+        min: 0,
+    },
+
     // Tệp tham khảo tải về (.skp, .html, .pdf…). Ảnh KHÔNG nằm ở đây — ảnh đi
     // Cloudinary trong khối `gallery`. Cùng hình dạng với
     // `EventLibraryItem.attachments` để orphan checker trong routes/admin.js

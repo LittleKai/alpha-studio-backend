@@ -69,17 +69,7 @@ router.post('/:toolId/download', async (req, res) => {
         const userAgent = req.headers['user-agent'] || '';
 
         const now = new Date();
-        const doc = await getOrCreateToolDownload(toolId);
-
-        doc.totalDownloads = (doc.totalDownloads || 0) + 1;
-        doc.platforms[platform] = (doc.platforms?.[platform] || 0) + 1;
-        doc.lastDownloadedAt = now;
-
-        if (version) {
-            if (!doc.versions) doc.versions = new Map();
-            const currentVersionCount = doc.versions.get(version) || 0;
-            doc.versions.set(version, currentVersionCount + 1);
-        }
+        const defaultName = KNOWN_TOOLS[toolId] || (toolId.charAt(0).toUpperCase() + toolId.slice(1));
 
         const newDownloadEntry = {
             platform,
@@ -89,13 +79,34 @@ router.post('/:toolId/download', async (req, res) => {
             downloadedAt: now,
         };
 
-        if (!doc.recentDownloads) doc.recentDownloads = [];
-        doc.recentDownloads.unshift(newDownloadEntry);
-        if (doc.recentDownloads.length > 50) {
-            doc.recentDownloads = doc.recentDownloads.slice(0, 50);
-        }
+        const update = {
+            $inc: {
+                totalDownloads: 1,
+                [`platforms.${platform}`]: 1,
+            },
+            $set: { lastDownloadedAt: now },
+            $push: {
+                recentDownloads: {
+                    $each: [newDownloadEntry],
+                    $position: 0,
+                    $slice: 50,
+                },
+            },
+            $setOnInsert: { toolName: defaultName },
+        };
 
-        await doc.save();
+        const doc = await ToolDownload.findOneAndUpdate(
+            { toolId },
+            update,
+            { new: true, upsert: true },
+        );
+
+        // ponytail: version keys may contain dots — Mongoose Map.set() handles
+        // this correctly. Minor race on per-version count only; totals are atomic.
+        if (version) {
+            doc.versions.set(version, (doc.versions.get(version) || 0) + 1);
+            await doc.save();
+        }
 
         return res.json({
             success: true,
