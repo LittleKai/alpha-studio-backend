@@ -22,12 +22,12 @@
 | Content/course/job/partner/prompt | ✅ | `server/routes/`, `server/models/` | Noi dung `vi` bat buoc, `en` optional |
 | Workflow, event library, AI skills | ✅ | `server/routes/workflow.js`, `eventLibrary.js`, `skills.js` | API cho frontend |
 | Phan muc dich vu + bai dich vu co sections | ✅ | `server/routes/serviceCategories.js`, `models/ServiceCategory.js`, `models/contentSection.js`, `utils/contentSections.js` | Article co `serviceCategory`, `sections` (4 kind), `attachments` (tep B2, khong chua anh) |
-| Flower Street article | ✅ | Article data | Published /services case study with 15 WebP Cloudinary images and 3 galleries |
+| Flower Street article | ✅ | Article data | Published /services case study with 20 WebP Cloudinary images, 4 galleries, and a B2 SketchUp attachment |
 | Binh luan bai viet | ✅ | `server/routes/comments.js`, `models/Comment.js` | `targetType` mo rong sang `article`; enum model va `TARGET_TYPES` cua route phai khop |
 | Cloud Desktop + agents | ✅ | `server/routes/cloud.js`, models HostMachine/CloudSession | Contract cheo host/flow |
 | CRM + analytics | ✅ | `server/routes/crm.js`, `analytics.js` | Co rate limit va test |
 | Tool/file download tracking | ✅ | `server/routes/toolDownloads.js`, `server/routes/articles.js` | Beacon-safe public counters; admin summaries read persisted counts |
-| B2 orphan/retention/migrations | ✅ | `server/routes/admin.js`, `server/retention/`, `server/migrations/` | DELETE doi chieu lai reference |
+| B2 orphan/retention/migrations | ✅ | `server/routes/admin.js`, `server/retention/`, `server/migrations/` | DELETE đối chiếu cả Article attachments |
 | Automated tests | ✅ | `test/*.test.js`, `server/**/*.test.*` | Node test runner |
 
 ## 3. Gia dinh dang giu

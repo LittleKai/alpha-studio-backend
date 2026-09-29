@@ -7,6 +7,7 @@ import WebhookLog from '../models/WebhookLog.js';
 import WorkflowDocument from '../models/WorkflowDocument.js';
 import WorkflowProject from '../models/WorkflowProject.js';
 import EventLibraryItem from '../models/EventLibraryItem.js';
+import Article from '../models/Article.js';
 import Course from '../models/Course.js';
 import Prompt from '../models/Prompt.js';
 import StudioGeneration from '../models/StudioGeneration.js';
@@ -880,6 +881,23 @@ export async function collectReferencedKeys() {
                         uploader: item.owner?.name || 'Unknown',
                         uploadedAt: null,
                         source: 'event-library'
+                    });
+                }
+            }
+        }
+
+        // Service article attachments (for example a SketchUp source file)
+        const articles = await Article.find({}, 'attachments title.vi').lean();
+        for (const article of articles) {
+            for (const att of (article.attachments || [])) {
+                const key = att.fileKey || extractB2Key(att.url);
+                if (!key) continue;
+                usedKeys.add(key);
+                if (!docKeyMap.has(key)) {
+                    docKeyMap.set(key, {
+                        uploader: article.title?.vi || 'Service article',
+                        uploadedAt: null,
+                        source: 'service-article'
                     });
                 }
             }
