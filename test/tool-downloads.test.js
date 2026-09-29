@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { normalizePlatform, KNOWN_TOOLS } from '../server/routes/toolDownloads.js';
+import { getDownloadMetadata, normalizePlatform, KNOWN_TOOLS } from '../server/routes/toolDownloads.js';
 
 test('normalizePlatform standardizes various platform identifiers', () => {
     assert.equal(normalizePlatform('windows'), 'windows');
@@ -27,6 +27,17 @@ test('KNOWN_TOOLS dictionary contains expected studio tools', () => {
     assert.equal(KNOWN_TOOLS.vietyaku, 'VietYaku');
     assert.equal(KNOWN_TOOLS.vocabflip, 'VocabFlip');
     assert.equal(KNOWN_TOOLS.crm, 'Alpha CRM');
+});
+
+test('download metadata accepts query params used by sendBeacon', () => {
+    assert.deepEqual(
+        getDownloadMetadata({ query: { platform: 'android', version: '1.2.3' } }),
+        { platform: 'android', version: '1.2.3' },
+    );
+    assert.deepEqual(
+        getDownloadMetadata({ query: { platform: 'android' }, body: { platform: 'windows' } }),
+        { platform: 'windows', version: '' },
+    );
 });
 
 test('calculates summary statistics correctly', () => {

@@ -25,6 +25,14 @@ export function normalizePlatform(platform) {
     return 'other';
 }
 
+export function getDownloadMetadata({ body = {}, query = {} } = {}) {
+    const payload = { ...query, ...body };
+    return {
+        platform: normalizePlatform(payload.platform),
+        version: String(payload.version || '').trim(),
+    };
+}
+
 /**
  * Helper to get or initialize a ToolDownload document
  */
@@ -63,8 +71,7 @@ router.post('/:toolId/download', async (req, res) => {
         }
 
         const toolId = String(rawToolId).toLowerCase().trim();
-        const platform = normalizePlatform(req.body?.platform);
-        const version = String(req.body?.version || '').trim();
+        const { platform, version } = getDownloadMetadata(req);
         const ip = req.headers['x-forwarded-for'] || req.socket?.remoteAddress || '';
         const userAgent = req.headers['user-agent'] || '';
 
