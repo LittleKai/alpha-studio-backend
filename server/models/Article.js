@@ -58,11 +58,13 @@ const articleSchema = new mongoose.Schema({
     // xem SERVICE_SECTION_KINDS trong utils/contentSections.js
     sections: { type: [sectionSchema], default: [] },
 
-    // Tổng số lượt tải file đính kèm — tăng mỗi khi người dùng bấm tải file
+    // Tổng số lượt tải file đính kèm — tăng ở GET /:id/attachments/:index/download.
+    // select: false để API công khai không lộ số; chỉ admin query chọn tường minh.
     downloadCount: {
         type: Number,
         default: 0,
         min: 0,
+        select: false,
     },
 
     // Tệp tham khảo tải về (.skp, .html, .pdf…). Ảnh KHÔNG nằm ở đây — ảnh đi

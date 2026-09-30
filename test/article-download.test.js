@@ -54,3 +54,17 @@ test('GET /:id/attachments/:index/download chỉ phục vụ bài đã published
     assert.equal(res.status, 404);
     assert.deepEqual(captured, { _id: '64b000000000000000000001', status: 'published' });
 });
+
+test('downloadCount bị ẩn khỏi query mặc định, admin phải select tường minh', async () => {
+    const Article = (await import('../server/models/Article.js')).default;
+    assert.equal(Article.schema.path('downloadCount').options.select, false);
+});
+
+test('POST /:id/track-download cũ đã bị xóa', async (t) => {
+    const express = (await import('express')).default;
+    const router = (await import('../server/routes/articles.js')).default;
+    const server = express().use('/api/articles', router).listen(0);
+    t.after(() => server.close());
+    const res = await fetch(`http://127.0.0.1:${server.address().port}/api/articles/64b000000000000000000001/track-download`, { method: 'POST' });
+    assert.equal(res.status, 404);
+});
