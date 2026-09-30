@@ -1,7 +1,10 @@
 import express from 'express';
+import { Readable } from 'stream';
 import Article from '../models/Article.js';
 import { authMiddleware, modOnly } from '../middleware/auth.js';
 import { sanitizeSections, SERVICE_SECTION_KINDS } from '../utils/contentSections.js';
+import { extractB2Key } from './admin.js';
+import { generatePresignedDownloadUrl, attachmentDisposition } from '../utils/b2Storage.js';
 
 const router = express.Router();
 
@@ -256,6 +259,60 @@ router.delete('/:id', authMiddleware, modOnly, async (req, res) => {
         res.json({ success: true, message: 'Xóa bài viết thành công' });
     } catch (error) {
         console.error('Delete article error:', error);
+        res.status(500).json({ success: false, message: 'Lỗi server' });
+    }
+});
+
+// GET /api/articles/:id/attachments/:index/download
+// Tải tệp đính kèm với Content-Disposition: attachment để browser luôn tải về máy,
+// không mở tab mới với các file html, pdf, text...
+router.get('/:id/attachments/:index/download', async (req, res) => {
+    try {
+        const article = await Article.findOne({ _id: req.params.id, status: 'published' });
+        if (!article) {
+            return res.status(404).json({ success: false, message: 'Không tìm thấy bài viết' });
+        }
+
+        const index = parseInt(req.params.index, 10);
+        if (isNaN(index) || index < 0 || !article.attachments?.[index]) {
+            return res.status(404).json({ success: false, message: 'Không tìm thấy tệp đính kèm' });
+        }
+
+        const attachment = article.attachments[index];
+        const filename = attachment.name || 'download';
+        const fileKey = attachment.fileKey || extractB2Key(attachment.url);
+
+        // Tăng lượt tải
+        await Article.findByIdAndUpdate(req.params.id, { $inc: { downloadCount: 1 } });
+
+        if (fileKey) {
+            try {
+                const signedUrl = await generatePresignedDownloadUrl(fileKey, 3600, filename);
+                return res.redirect(signedUrl);
+            } catch (err) {
+                console.warn('Failed to generate presigned download URL for B2 key:', fileKey, err);
+            }
+        }
+
+        // Nếu là URL ngoài hoặc presign lỗi, thử proxy stream kèm header Content-Disposition
+        try {
+            const fileRes = await fetch(attachment.url);
+            if (fileRes.ok) {
+                res.setHeader('Content-Disposition', attachmentDisposition(filename));
+                const contentType = attachment.mime || fileRes.headers.get('content-type');
+                if (contentType) {
+                    res.setHeader('Content-Type', contentType);
+                }
+                const readable = Readable.fromWeb(fileRes.body);
+                return readable.pipe(res);
+            }
+        } catch (fetchErr) {
+            console.warn('Proxy fetch failed for attachment:', attachment.url, fetchErr);
+        }
+
+        return res.redirect(attachment.url);
+    } catch (error) {
+        console.error('Download article attachment error:', error);
         res.status(500).json({ success: false, message: 'Lỗi server' });
     }
 });

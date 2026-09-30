@@ -148,16 +148,30 @@ export async function generatePresignedUploadUrl(key, contentType, expiresIn = 9
 }
 
 /**
+ * Content-Disposition for downloads: ASCII `filename` fallback + RFC 5987 `filename*`
+ * so non-ASCII (Vietnamese) names are not saved as percent-encoded text.
+ */
+export function attachmentDisposition(filename) {
+    const ascii = filename.replace(/[^\x20-\x7e]|["\\]/g, '_');
+    const encoded = encodeURIComponent(filename).replace(/['()*]/g, c => `%${c.charCodeAt(0).toString(16).toUpperCase()}`);
+    return `attachment; filename="${ascii}"; filename*=UTF-8''${encoded}`;
+}
+
+/**
  * Generate a presigned GET URL for downloading/streaming a file from B2
  * @param {string} key - Object key (path in bucket)
  * @param {number} expiresIn - URL expiry in seconds (default 4 hours)
  * @returns {string} presigned URL
  */
-export async function generatePresignedDownloadUrl(key, expiresIn = 14400) {
-    const command = new GetObjectCommand({
+export async function generatePresignedDownloadUrl(key, expiresIn = 14400, filename = null) {
+    const params = {
         Bucket: process.env.B2_BUCKET_NAME,
         Key: key,
-    });
+    };
+    if (filename) {
+        params.ResponseContentDisposition = attachmentDisposition(filename);
+    }
+    const command = new GetObjectCommand(params);
     return getSignedUrl(getS3(), command, { expiresIn });
 }
 

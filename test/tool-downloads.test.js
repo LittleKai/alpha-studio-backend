@@ -81,3 +81,22 @@ test('calculates summary statistics correctly', () => {
     assert.equal(otherDownloads, 0);
     assert.deepEqual(topTool, { toolId: 'vietyaku', toolName: 'VietYaku', count: 150 });
 });
+
+test('POST /:toolId/download counts dotted versions atomically', async (t) => {
+    const express = (await import('express')).default;
+    const ToolDownload = (await import('../server/models/ToolDownload.js')).default;
+    const router = (await import('../server/routes/toolDownloads.js')).default;
+    let captured;
+    t.mock.method(ToolDownload, 'findOneAndUpdate', async (_filter, update) => {
+        captured = update;
+        return { toolId: 'crm', toolName: 'Alpha CRM', totalDownloads: 1, platforms: {}, lastDownloadedAt: null };
+    });
+
+    const server = express().use('/api/tools', router).listen(0);
+    t.after(() => server.close());
+    const res = await fetch(`http://127.0.0.1:${server.address().port}/api/tools/crm/download?platform=windows&version=1.2.3`, { method: 'POST' });
+
+    assert.equal(res.status, 200);
+    assert.equal(captured.$inc['versions.1_2_3'], 1);
+    assert.equal(captured.$inc.totalDownloads, 1);
+});

@@ -33,6 +33,10 @@ export function getDownloadMetadata({ body = {}, query = {} } = {}) {
     };
 }
 
+export function versionKey(version) {
+    return String(version).replace(/[.$]/g, '_');
+}
+
 /**
  * Helper to get or initialize a ToolDownload document
  */
@@ -90,6 +94,8 @@ router.post('/:toolId/download', async (req, res) => {
             $inc: {
                 totalDownloads: 1,
                 [`platforms.${platform}`]: 1,
+                // Mongoose Map keys cannot contain "." or start with "$", so "1.2.3" is stored as "1_2_3".
+                ...(version ? { [`versions.${versionKey(version)}`]: 1 } : {}),
             },
             $set: { lastDownloadedAt: now },
             $push: {
@@ -107,13 +113,6 @@ router.post('/:toolId/download', async (req, res) => {
             update,
             { new: true, upsert: true },
         );
-
-        // ponytail: version keys may contain dots — Mongoose Map.set() handles
-        // this correctly. Minor race on per-version count only; totals are atomic.
-        if (version) {
-            doc.versions.set(version, (doc.versions.get(version) || 0) + 1);
-            await doc.save();
-        }
 
         return res.json({
             success: true,

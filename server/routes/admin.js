@@ -726,9 +726,14 @@ export function extractB2Key(url) {
         return url.slice(base.length);
     }
     const bucket = process.env.B2_BUCKET_NAME;
-    const pattern = `.backblazeb2.com/file/${bucket}/`;
-    const idx = url.indexOf(pattern);
-    if (idx !== -1) return url.slice(idx + pattern.length);
+    if (bucket) {
+        const pattern = `.backblazeb2.com/file/${bucket}/`;
+        const idx = url.indexOf(pattern);
+        if (idx !== -1) return url.slice(idx + pattern.length);
+        const filePattern = `/file/${bucket}/`;
+        const fileIdx = url.indexOf(filePattern);
+        if (fileIdx !== -1) return url.slice(fileIdx + filePattern.length);
+    }
     return null;
 }
 
@@ -1268,6 +1273,12 @@ router.get('/tool-downloads', async (_req, res) => {
 
         recentActivities.sort((a, b) => new Date(b.downloadedAt).getTime() - new Date(a.downloadedAt).getTime());
 
+        // Attachment downloads of /services articles (Article.downloadCount).
+        const serviceArticles = await Article.find({ category: 'services', downloadCount: { $gt: 0 } })
+            .select('title slug status downloadCount')
+            .sort({ downloadCount: -1 })
+            .lean();
+
         return res.json({
             success: true,
             data: {
@@ -1280,6 +1291,16 @@ router.get('/tool-downloads', async (_req, res) => {
                 },
                 tools: toolsData,
                 recentActivities: recentActivities.slice(0, 30),
+                serviceDownloads: {
+                    total: serviceArticles.reduce((sum, a) => sum + (a.downloadCount || 0), 0),
+                    articles: serviceArticles.map(a => ({
+                        _id: a._id,
+                        title: a.title,
+                        slug: a.slug,
+                        status: a.status,
+                        downloadCount: a.downloadCount,
+                    })),
+                },
             },
         });
     } catch (error) {
