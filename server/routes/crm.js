@@ -1,6 +1,6 @@
 import express from 'express';
 import crypto from 'crypto';
-import { authMiddleware, adminOnly, verifyToken } from '../middleware/auth.js';
+import { authMiddleware, adminOnly, getUserFromToken } from '../middleware/auth.js';
 import User from '../models/User.js';
 import Transaction from '../models/Transaction.js';
 import CrmSubscription from '../models/CrmSubscription.js';
@@ -627,8 +627,7 @@ const sseAuthMiddleware = async (req, res, next) => {
     const queryToken = typeof req.query?.token === 'string' ? req.query.token : '';
     if (queryToken && !req.headers.authorization && !req.cookies?.token) {
         try {
-            const decoded = verifyToken(queryToken);
-            const user = await User.findById(decoded.userId).select('-password');
+            const user = await getUserFromToken(queryToken);
             if (user && user.isActive) {
                 req.user = user;
                 return next();
@@ -5030,4 +5029,3 @@ router.get('/releases/latest', async (req, res) => {
 });
 
 export default router;
-

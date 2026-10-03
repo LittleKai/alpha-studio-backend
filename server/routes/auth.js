@@ -1,5 +1,6 @@
 import express from 'express';
 import crypto from 'crypto';
+import bcrypt from 'bcryptjs';
 import rateLimit from 'express-rate-limit';
 import User from '../models/User.js';
 import { generateToken, authMiddleware } from '../middleware/auth.js';
@@ -29,7 +30,7 @@ router.post('/register', authLimiter, async (req, res) => {
         const normalizedEmail = typeof email === 'string' ? email.trim().toLowerCase() : '';
 
         // Validate input
-        if (!normalizedEmail || !password || !name) {
+        if (!normalizedEmail || typeof password !== 'string' || !password || typeof name !== 'string' || !name.trim()) {
             return res.status(400).json({
                 success: false,
                 message: 'Please provide email, password and name'
@@ -56,7 +57,7 @@ router.post('/register', authLimiter, async (req, res) => {
         await createInitialCrmTrialSubscription({ userId: user._id });
 
         // Generate token
-        const token = generateToken(user._id);
+        const token = generateToken(user._id, user.tokenVersion);
 
         res.status(201).json({
             success: true,
@@ -67,7 +68,7 @@ router.post('/register', authLimiter, async (req, res) => {
             }
         });
     } catch (error) {
-        console.error('Register error:', error);
+        console.error('Register error:', error.name, error.code);
 
         // Handle duplicate key error (email already exists)
         if (error.code === 11000) {
@@ -88,7 +89,7 @@ router.post('/register', authLimiter, async (req, res) => {
 
         res.status(500).json({
             success: false,
-            message: error.message || 'Server error during registration'
+            message: 'Server error during registration'
         });
     }
 });
@@ -102,7 +103,7 @@ router.post('/login', authLimiter, async (req, res) => {
         const normalizedEmail = typeof email === 'string' ? email.trim().toLowerCase() : '';
 
         // Validate input
-        if (!normalizedEmail || !password) {
+        if (!normalizedEmail || typeof password !== 'string' || !password) {
             return res.status(400).json({
                 success: false,
                 message: 'Please provide email and password'
@@ -118,17 +119,9 @@ router.post('/login', authLimiter, async (req, res) => {
             });
         }
 
-        // Check if account is active
-        if (user.isActive === false) {
-            return res.status(401).json({
-                success: false,
-                message: 'Account is deactivated. Please contact support.'
-            });
-        }
-
         // Check password
         const isMatch = await user.comparePassword(password);
-        if (!isMatch) {
+        if (!isMatch || !user.isActive) {
             return res.status(401).json({
                 success: false,
                 message: 'Invalid email or password'
@@ -140,7 +133,7 @@ router.post('/login', authLimiter, async (req, res) => {
         await User.updateOne({ _id: user._id }, { lastLogin: loginTime, lastActiveAt: loginTime });
 
         // Generate token
-        const token = generateToken(user._id);
+        const token = generateToken(user._id, user.tokenVersion);
 
         // Set cookie
         res.cookie('token', token, {
@@ -170,12 +163,19 @@ router.post('/login', authLimiter, async (req, res) => {
 // @route   POST /api/auth/logout
 // @desc    Logout user
 // @access  Private
-router.post('/logout', authMiddleware, (req, res) => {
-    res.clearCookie('token');
-    res.json({
-        success: true,
-        message: 'Logged out successfully'
-    });
+router.post('/logout', authMiddleware, async (req, res) => {
+    try {
+        // Account-wide revocation is persisted across replicas and restarts.
+        await User.updateOne({ _id: req.user._id }, { $inc: { tokenVersion: 1 } });
+        res.clearCookie('token');
+        res.json({
+            success: true,
+            message: 'Logged out successfully'
+        });
+    } catch (error) {
+        console.error('Logout error:', error.name);
+        res.status(500).json({ success: false, message: 'Server error during logout' });
+    }
 });
 
 // @route   GET /api/auth/me
@@ -266,9 +266,9 @@ router.put('/profile', authMiddleware, async (req, res) => {
 // @route   POST /api/auth/send-password-code
 // @desc    Send verification code to email for password change
 // @access  Private
-router.post('/send-password-code', authMiddleware, async (req, res) => {
+router.post('/send-password-code', authLimiter, authMiddleware, async (req, res) => {
     try {
-        const user = await User.findById(req.user._id);
+        const user = await User.findById(req.user._id).select('+passwordResetCode +passwordResetExpires');
         if (!user) {
             return res.status(404).json({ success: false, message: 'User not found' });
         }
@@ -314,11 +314,11 @@ router.post('/send-password-code', authMiddleware, async (req, res) => {
 // @route   PUT /api/auth/password
 // @desc    Change password (current password + new password)
 // @access  Private
-router.put('/password', authMiddleware, async (req, res) => {
+router.put('/password', authLimiter, authMiddleware, async (req, res) => {
     try {
         const { currentPassword, newPassword } = req.body;
 
-        if (!currentPassword || !newPassword) {
+        if (typeof currentPassword !== 'string' || !currentPassword || typeof newPassword !== 'string' || !newPassword) {
             return res.status(400).json({
                 success: false,
                 message: 'Please provide current password and new password'
@@ -333,6 +333,9 @@ router.put('/password', authMiddleware, async (req, res) => {
         }
 
         const user = await User.findById(req.user._id);
+        if (!user || !user.isActive) {
+            return res.status(401).json({ success: false, message: 'Invalid token.' });
+        }
 
         // Verify current password
         const isMatch = await user.comparePassword(currentPassword);
@@ -343,9 +346,24 @@ router.put('/password', authMiddleware, async (req, res) => {
             });
         }
 
-        // Change password
-        user.password = newPassword;
-        await user.save();
+        // Compare-and-swap prevents stale/concurrent requests from overwriting a
+        // new password or undoing revocation. Query updates do not run save hooks.
+        const passwordHash = await bcrypt.hash(newPassword, 12);
+        const tokenVersion = req.user.tokenVersion ?? 0;
+        const versions = [{ tokenVersion }];
+        if (tokenVersion === 0) versions.push({ tokenVersion: { $exists: false } });
+        const changed = await User.findOneAndUpdate(
+            { _id: user._id, password: user.password, isActive: true, $or: versions },
+            {
+                $set: { password: passwordHash, passwordResetCode: null, passwordResetExpires: null },
+                $inc: { tokenVersion: 1 }
+            },
+            { new: true, runValidators: true }
+        );
+        if (!changed) {
+            return res.status(401).json({ success: false, message: 'Session changed. Please login again.' });
+        }
+        res.clearCookie('token');
 
         res.json({
             success: true,

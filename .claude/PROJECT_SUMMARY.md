@@ -1,6 +1,6 @@
 # PROJECT SUMMARY - Alpha Studio Backend
 
-**Last Updated:** 2026-09-30 · **Session:** 4
+**Last Updated:** 2026-10-03 · **Session:** 5
 
 > Trang thai hien tai, khong phai changelog. Sau moi task: cap nhat ngay/session; doi bang trang thai va TODO; cap nhat `DATABASE.md` khi schema doi. Bug quan trong vao `IMPORTANT_FIXED_BUGS.md`. Ban v1 nam trong `archive/PROJECT_SUMMARY_v1.md` va khong duoc dung lam huong dan hien tai.
 
@@ -18,7 +18,7 @@
 
 | Hang muc | Trang thai | File chinh | Ghi chu |
 |---|---|---|---|
-| Auth, users, roles | ✅ | `server/routes/auth.js`, `server/middleware/auth.js` | JWT 7 ngay |
+| Auth, users, roles | 🔶 | `server/routes/auth.js`, `server/middleware/auth.js` | JWT version revocation; reset fields hidden; regression tests pending sandbox |
 | Content/course/job/partner/prompt | ✅ | `server/routes/`, `server/models/` | Noi dung `vi` bat buoc, `en` optional |
 | Workflow, event library, AI skills | ✅ | `server/routes/workflow.js`, `eventLibrary.js`, `skills.js` | API cho frontend |
 | Phan muc dich vu + bai dich vu co sections | ✅ | `server/routes/serviceCategories.js`, `models/ServiceCategory.js`, `models/contentSection.js`, `utils/contentSections.js` | Article co `serviceCategory`, `sections` (4 kind), `attachments` (tep B2, khong chua anh) |
@@ -77,9 +77,10 @@ test/                  integration/pure logic tests
 
 ### Trung binh
 - [ ] Forgot-password va email verification chua co.
+- [ ] Auth security patch: run `test/auth-security.test.js`, full suite and endpoint smoke in an isolated sandbox.
+- [ ] Registration remains enumerable while immediate token issuance is retained; requires email-verification flow.
 - [ ] GCLI preview model codes dang dung low-code fallback; khoi phuc khi upstream on dinh.
 
 ### Thap
 - [ ] OpenAPI/Swagger chua co.
 - [ ] Chua co ESLint/Prettier config.
-

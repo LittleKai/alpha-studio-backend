@@ -11,13 +11,21 @@ const JWT_SECRET = process.env.JWT_SECRET || (() => {
 })();
 
 // Generate JWT token
-export const generateToken = (userId) => {
-    return jwt.sign({ userId }, JWT_SECRET, { expiresIn: '7d' });
+export const generateToken = (userId, tokenVersion = 0) => {
+    return jwt.sign({ userId, scope: 'auth', tokenVersion }, JWT_SECRET, { expiresIn: '7d' });
 };
 
-// Verify JWT token
-export const verifyToken = (token) => {
-    return jwt.verify(token, JWT_SECRET);
+// All auth consumers must check account state and revocation, not just signature.
+export const getUserFromToken = async (token) => {
+    const decoded = jwt.verify(token, JWT_SECRET);
+    if (decoded.scope !== 'auth' || !Number.isSafeInteger(decoded.tokenVersion) || decoded.tokenVersion < 0) {
+        throw new jwt.JsonWebTokenError('Invalid auth token');
+    }
+    const user = await User.findById(decoded.userId).select('-password');
+    if (!user || !user.isActive || decoded.tokenVersion !== (user.tokenVersion ?? 0)) {
+        throw new jwt.JsonWebTokenError('Invalid or revoked auth token');
+    }
+    return user;
 };
 
 // Auth middleware - protect routes
@@ -37,25 +45,7 @@ export const authMiddleware = async (req, res, next) => {
             });
         }
 
-        // Verify token
-        const decoded = verifyToken(token);
-
-        // Find user
-        const user = await User.findById(decoded.userId).select('-password');
-
-        if (!user) {
-            return res.status(401).json({
-                success: false,
-                message: 'Invalid token. User not found.'
-            });
-        }
-
-        if (!user.isActive) {
-            return res.status(401).json({
-                success: false,
-                message: 'Account is deactivated.'
-            });
-        }
+        const user = await getUserFromToken(token);
 
         req.user = user;
 
@@ -90,9 +80,9 @@ export const authMiddleware = async (req, res, next) => {
 // <img>/<video> src attributes (Plan 4 fifeUrl direct delivery). The token is
 // bound to { userId, genId, itemIdx } so leaking one URL only exposes that
 // single item, for TTL seconds.
-export const generateMediaToken = (userId, genId, itemIdx, ttlSeconds = 1800) => {
+export const generateMediaToken = (userId, genId, itemIdx, ttlSeconds = 1800, tokenVersion = 0) => {
     return jwt.sign(
-        { userId: String(userId), scope: 'media', genId: String(genId), itemIdx: Number(itemIdx) },
+        { userId: String(userId), scope: 'media', tokenVersion, genId: String(genId), itemIdx: Number(itemIdx) },
         JWT_SECRET,
         { expiresIn: ttlSeconds }
     );
@@ -110,11 +100,13 @@ export const mediaTokenMiddleware = async (req, res, next) => {
             const urlIdx = parseInt(req.params.itemIdx, 10);
             if (
                 decoded?.scope === 'media'
+                && Number.isSafeInteger(decoded.tokenVersion)
+                && decoded.tokenVersion >= 0
                 && decoded.genId === String(req.params.genId)
                 && Number(decoded.itemIdx) === urlIdx
             ) {
                 const user = await User.findById(decoded.userId).select('-password');
-                if (user && user.isActive) {
+                if (user && user.isActive && decoded.tokenVersion === (user.tokenVersion ?? 0)) {
                     req.user = user;
                     return next();
                 }

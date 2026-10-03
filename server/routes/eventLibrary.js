@@ -7,7 +7,7 @@ import EventLibraryItem, {
 import Transaction from '../models/Transaction.js';
 import WorkflowProject from '../models/WorkflowProject.js';
 import WorkflowDocument from '../models/WorkflowDocument.js';
-import { authMiddleware, verifyToken } from '../middleware/auth.js';
+import { authMiddleware, getUserFromToken } from '../middleware/auth.js';
 import User from '../models/User.js';
 import { sanitizeSections } from '../utils/contentSections.js';
 
@@ -376,8 +376,7 @@ async function optionalAuth(req, _res, next) {
     const token = req.headers.authorization?.replace('Bearer ', '') || req.cookies?.token;
     if (token) {
         try {
-            const decoded = verifyToken(token);
-            const user = await User.findById(decoded.userId).select('-password');
+            const user = await getUserFromToken(token);
             if (user?.isActive) req.user = user;
         } catch {
             // Token hỏng/hết hạn — coi như khách, không trả lỗi

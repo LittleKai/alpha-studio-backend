@@ -199,8 +199,8 @@ async function refundQuota(userId, kind, role) {
 // short-lived media token so <img>/<video> can load directly without needing
 // an Authorization header. Backend route accepts either this token or Bearer.
 // Path is relative to the /api base — the frontend prepends VITE_API_URL.
-function buildPreviewUrl(userId, genId, idx) {
-    const token = generateMediaToken(userId, genId, idx);
+function buildPreviewUrl(userId, genId, idx, tokenVersion) {
+    const token = generateMediaToken(userId, genId, idx, 1800, tokenVersion);
     return `/studio/media/${genId}/${idx}?t=${token}`;
 }
 
@@ -215,7 +215,7 @@ function guessMime(ext, fallback = 'application/octet-stream') {
     return EXT_MIME[(ext || '').toLowerCase()] || fallback;
 }
 
-function serializeGeneration(gen) {
+function serializeGeneration(gen, tokenVersion) {
     return {
         id: gen._id,
         type: gen.type,
@@ -226,7 +226,7 @@ function serializeGeneration(gen) {
         hasReferenceImage: gen.hasReferenceImage,
         items: gen.items.map((item, idx) => ({
             index: idx,
-            previewUrl: buildPreviewUrl(gen.userId, gen._id, idx),
+            previewUrl: buildPreviewUrl(gen.userId, gen._id, idx, tokenVersion),
             saved: item.saved,
             b2Url: item.saved ? item.b2Url : null,
             seed: item.seed,
@@ -486,7 +486,7 @@ router.post('/image/generate', authMiddleware, async (req, res) => {
         res.json({
             success: true,
             data: {
-                ...serializeGeneration(gen),
+                ...serializeGeneration(gen, req.user.tokenVersion ?? 0),
                 genId,
                 quota: quota.unlimited ? null : { used: quota.used, limit: quota.limit }
             }
@@ -683,7 +683,7 @@ router.post('/video/generate', authMiddleware, async (req, res) => {
         res.json({
             success: true,
             data: {
-                ...serializeGeneration(gen),
+                ...serializeGeneration(gen, req.user.tokenVersion ?? 0),
                 genId,
                 quota: quota.unlimited ? null : { used: quota.used, limit: quota.limit }
             }
@@ -1029,7 +1029,7 @@ router.get('/history', authMiddleware, async (req, res) => {
             .sort({ createdAt: -1 })
             .limit(limit);
 
-        res.json({ success: true, data: rows.map(serializeGeneration) });
+        res.json({ success: true, data: rows.map(gen => serializeGeneration(gen, req.user.tokenVersion ?? 0)) });
     } catch (error) {
         console.error('Studio history error:', error);
         res.status(500).json({ success: false, message: 'Lỗi server' });

@@ -9,9 +9,9 @@ const router = express.Router();
 async function getUserId(authHeader) {
     try {
         const token = authHeader.replace('Bearer ', '');
-        const { verifyToken } = await import('../middleware/auth.js');
-        const decoded = verifyToken(token);
-        return decoded.userId;
+        const { getUserFromToken } = await import('../middleware/auth.js');
+        const user = await getUserFromToken(token);
+        return String(user._id);
     } catch {
         return null;
     }

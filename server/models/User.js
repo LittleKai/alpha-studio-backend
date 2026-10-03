@@ -99,6 +99,12 @@ const userSchema = new mongoose.Schema({
         type: Boolean,
         default: true
     },
+    // Incremented atomically to invalidate all previously issued auth tokens.
+    tokenVersion: {
+        type: Number,
+        default: 0,
+        min: 0
+    },
     lastLogin: {
         type: Date,
         default: null
@@ -114,11 +120,13 @@ const userSchema = new mongoose.Schema({
     },
     passwordResetCode: {
         type: String,
-        default: null
+        default: null,
+        select: false
     },
     passwordResetExpires: {
         type: Date,
-        default: null
+        default: null,
+        select: false
     },
     studioUsage: {
         date: { type: String, default: '' },  // 'YYYY-MM-DD' UTC
@@ -150,10 +158,13 @@ userSchema.methods.comparePassword = async function(candidatePassword) {
     return await bcrypt.compare(candidatePassword, this.password);
 };
 
-// Remove password from JSON output
+// Never serialize authentication secrets, even if explicitly selected.
 userSchema.methods.toJSON = function() {
     const user = this.toObject();
     delete user.password;
+    delete user.passwordResetCode;
+    delete user.passwordResetExpires;
+    delete user.tokenVersion;
     return user;
 };
 
