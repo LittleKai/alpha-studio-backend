@@ -1,6 +1,6 @@
 # PROJECT SUMMARY - Alpha Studio Backend
 
-**Last Updated:** 2026-10-03 · **Session:** 5
+**Last Updated:** 2026-10-04 · **Session:** 6
 
 > Trang thai hien tai, khong phai changelog. Sau moi task: cap nhat ngay/session; doi bang trang thai va TODO; cap nhat `DATABASE.md` khi schema doi. Bug quan trong vao `IMPORTANT_FIXED_BUGS.md`. Ban v1 nam trong `archive/PROJECT_SUMMARY_v1.md` va khong duoc dung lam huong dan hien tai.
 
@@ -26,7 +26,7 @@
 | Binh luan bai viet | ✅ | `server/routes/comments.js`, `models/Comment.js` | `targetType` mo rong sang `article`; enum model va `TARGET_TYPES` cua route phai khop |
 | Cloud Desktop + agents | ✅ | `server/routes/cloud.js`, models HostMachine/CloudSession | Contract cheo host/flow |
 | CRM + analytics | ✅ | `server/routes/crm.js`, `analytics.js` | Co rate limit va test |
-| Tool/file download tracking & streaming | ✅ | `server/routes/toolDownloads.js`, `server/routes/articles.js` | GET attachment download chỉ bài published, tự `$inc`; `versions` key đổi `.`→`_`; admin trả `serviceDownloads`; `downloadCount` select:false (ẩn khỏi API công khai) |
+| Tool/file download tracking & streaming | ✅ | `server/routes/toolDownloads.js`, `server/routes/articles.js` | GET attachment download chỉ bài published, tự `$inc`; tên tải lấy basename gốc từ `fileKey` (bỏ tiền tố timestamp), tách khỏi nhãn biên tập; `versions` key đổi `.`→`_`; admin trả `serviceDownloads`; `downloadCount` select:false (ẩn khỏi API công khai) |
 | B2 orphan/retention/migrations | ✅ | `server/routes/admin.js`, `server/retention/`, `server/migrations/` | DELETE đối chiếu cả Article attachments |
 | Automated tests | ✅ | `test/*.test.js`, `server/**/*.test.*` | Node test runner |
 

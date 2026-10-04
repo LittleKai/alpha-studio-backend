@@ -8,6 +8,7 @@ process.env.B2_BUCKET_NAME = 'alpha-studio';
 process.env.CDN_BASE_URL = 'https://download.giaiphapsangtao.com/file/alpha-studio';
 
 const { extractB2Key } = await import('../server/routes/admin.js');
+const { getAttachmentDownloadFilename } = await import('../server/routes/articles.js');
 const { generatePresignedDownloadUrl, attachmentDisposition } = await import('../server/utils/b2Storage.js');
 
 test('attachmentDisposition giữ tên tiếng Việt qua filename* và có fallback ASCII', () => {
@@ -22,6 +23,23 @@ test('extractB2Key bóc tách đúng fileKey từ URL B2 của bài viết dịc
     const url = 'https://download.giaiphapsangtao.com/file/alpha-studio/services/tu_ao/1790780527353-tu_quan_ao_thiet_ke.html';
     const key = extractB2Key(url);
     assert.equal(key, 'services/tu_ao/1790780527353-tu_quan_ao_thiet_ke.html');
+});
+
+test('download filename lấy basename gốc từ fileKey, không lấy nhãn biên tập', () => {
+    assert.equal(
+        getAttachmentDownloadFilename(
+            { name: 'Mô hình SketchUp tủ bếp (.skp)' },
+            'services/tu_bep/1790825665162-tu_bep.skp'
+        ),
+        'tu_bep.skp'
+    );
+    assert.equal(
+        getAttachmentDownloadFilename(
+            { name: 'Trang HTML gửi khách (Bản vẽ tương tác)' },
+            'services/tu_bep/1790825658081-tu_bep_thiet_ke.html'
+        ),
+        'tu_bep_thiet_ke.html'
+    );
 });
 
 test('generatePresignedDownloadUrl chèn response-content-disposition khi có filename', async () => {

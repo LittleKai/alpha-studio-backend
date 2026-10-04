@@ -26,6 +26,27 @@ function sanitizeAttachments(list) {
         }));
 }
 
+function basenameFromFileKey(fileKey) {
+    const raw = str(fileKey).split(/[\\/]/).pop()?.trim() || '';
+    if (!raw) return '';
+
+    try {
+        return decodeURIComponent(raw);
+    } catch {
+        return raw;
+    }
+}
+
+/**
+ * Keep the editorial label separate from the browser download filename.
+ * Upload keys are prefixed with Date.now(); remove that implementation prefix
+ * so downloads use the original sanitized filename (for example `model.skp`).
+ */
+export function getAttachmentDownloadFilename(attachment, fileKey) {
+    const keyName = basenameFromFileKey(fileKey).replace(/^\d{10,}-/, '');
+    return keyName || str(attachment?.name).trim() || 'download';
+}
+
 // ==================== PUBLIC ROUTES ====================
 
 // GET /api/articles - List articles (public, filtered by category + status=published)
@@ -279,8 +300,8 @@ router.get('/:id/attachments/:index/download', async (req, res) => {
         }
 
         const attachment = article.attachments[index];
-        const filename = attachment.name || 'download';
         const fileKey = attachment.fileKey || extractB2Key(attachment.url);
+        const filename = getAttachmentDownloadFilename(attachment, fileKey);
 
         // Tăng lượt tải
         await Article.findByIdAndUpdate(req.params.id, { $inc: { downloadCount: 1 } });
