@@ -312,7 +312,9 @@ export async function callOpenClaw(content, sessionId) {
  * Tên không có trong map → gửi nguyên (fallback an toàn).
  */
 const GCLI_MODEL_CODE_MAP = {
-    // Tên model UI hiện tại → mã 假流式.
+    // Tên model UI hiện tại → mã 假流式 / upstream.
+    'gemini-3.8-flash': '假流式-agy-gemini-3.8-flash-low', // Gemini 3.8 Flash Low (mới nhất)
+    'gemini-3.1-flash-lite': '假流式-agy-gemini-3.1-flash-lite', // Gemini 3.1 Flash Lite
     'gemini-2.5-flash': '假流式-agy-gemini-2.5-flash-low', // cũ: 'gemini-2.5-flash'
     'gemini-3-flash': '假流式-agy-gemini-3-flash-low',     // cũ: 'gemini-3-flash-preview'
     'gemini-3.5-flash': '假流式-agy-gemini-3.5-flash-low', // mới
@@ -345,7 +347,7 @@ function resolveGcliModelCode(model, options = {}) {
  */
 export async function callGcliDirect(content, options = {}) {
     const url = process.env.GCLI_DIRECT_URL || 'https://gcli.ggchan.dev/v1/chat/completions';
-    const model = options.model || process.env.GCLI_DIRECT_MODEL || 'gemini-3-flash';
+    const model = options.model || process.env.GCLI_DIRECT_MODEL || 'gemini-3.1-flash-lite';
     // Key pool + retry handled inside fetchGcliWithRetry. Each retry picks a
     // fresh key (weighted random) so multi-key envs naturally rotate around a
     // rate-limited key.
@@ -433,7 +435,7 @@ export async function shouldUseOpenClawForChat() {
 
 export async function getGcliBotModel() {
     const setting = await SystemSetting.findOne({ key: 'gcliBotModel' }).lean();
-    return setting?.value || process.env.GCLI_DIRECT_MODEL || 'gemini-2.5-flash';
+    return setting?.value || process.env.GCLI_DIRECT_MODEL || 'gemini-3.1-flash-lite';
 }
 
 export async function callConfiguredAiProvider(content, sessionId, options = {}) {

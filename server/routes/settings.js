@@ -15,8 +15,8 @@ const PUBLIC_KEYS = [
     'landingVideoQuality'
 ];
 
-const GCLI_BOT_ALLOWED_MODELS = ['gemini-2.5-flash'];
-const GCLI_BOT_DEFAULT_MODEL = 'gemini-2.5-flash';
+const GCLI_BOT_ALLOWED_MODELS = ['gemini-3.1-flash-lite', 'gemini-3.8-flash', 'gemini-2.5-flash'];
+const GCLI_BOT_DEFAULT_MODEL = 'gemini-3.1-flash-lite';
 const LANDING_VIDEO_QUALITIES = ['high', 'standard'];
 const LANDING_VIDEO_DEFAULT_QUALITY = 'high';
 

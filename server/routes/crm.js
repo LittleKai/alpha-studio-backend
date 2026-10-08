@@ -101,10 +101,10 @@ const sanitizeUpdate = (body, allowedFields) => {
 };
 
 const getChatbotSettingsKey = (userId) => `crmChatbotSettings:${userId}`;
-const CHATBOT_ALLOWED_AI_MODELS = ['gemini-2.5-flash', 'gemini-3-flash'];
-const CHATBOT_DEFAULT_AI_MODEL = 'gemini-2.5-flash';
+const CHATBOT_ALLOWED_AI_MODELS = ['gemini-3.1-flash-lite', 'gemini-3.8-flash', 'gemini-2.5-flash', 'gemini-3-flash'];
+const CHATBOT_DEFAULT_AI_MODEL = 'gemini-3.1-flash-lite';
 // Group AI summary supports a richer model choice than the chatbot.
-const SUMMARY_ALLOWED_AI_MODELS = ['gemini-3.1-pro', 'gemini-3.5-flash'];
+const SUMMARY_ALLOWED_AI_MODELS = ['gemini-3.1-pro', 'gemini-3.1-flash-lite', 'gemini-3.8-flash', 'gemini-3.5-flash'];
 const SUMMARY_DEFAULT_AI_MODEL = 'gemini-3.1-pro';
 function normalizeSummaryAiModel(value) {
     return SUMMARY_ALLOWED_AI_MODELS.includes(value) ? value : SUMMARY_DEFAULT_AI_MODEL;

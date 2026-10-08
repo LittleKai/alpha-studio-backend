@@ -10,7 +10,9 @@ const router = express.Router();
 const DAILY_FREE_LIMIT = 1;
 
 const AI_CARD_MODELS = {
-    flash: { id: 'gemini-3-flash', cost: 5, allowsDailyFree: true },
+    flash: { id: 'gemini-3.1-flash-lite', cost: 5, allowsDailyFree: true },
+    'gemini-3.1-flash-lite': { id: 'gemini-3.1-flash-lite', cost: 5, allowsDailyFree: true },
+    'gemini-3.8-flash': { id: 'gemini-3.8-flash', cost: 5, allowsDailyFree: true },
     'gemini-3-flash': { id: 'gemini-3-flash', cost: 5, allowsDailyFree: true },
     pro: { id: 'gemini-3.1-pro', cost: 10, allowsDailyFree: false },
     'gemini-3.1-pro': { id: 'gemini-3.1-pro', cost: 10, allowsDailyFree: false },
@@ -22,7 +24,7 @@ function todayUtcKey() {
 }
 
 function normalizeAiCardModel(model) {
-    return AI_CARD_MODELS[model || 'gemini-3-flash'] || null;
+    return AI_CARD_MODELS[model || 'gemini-3.1-flash-lite'] || null;
 }
 
 function dailyFreeRemaining(usage) {

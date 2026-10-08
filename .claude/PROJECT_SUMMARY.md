@@ -1,6 +1,6 @@
 # PROJECT SUMMARY - Alpha Studio Backend
 
-**Last Updated:** 2026-10-04 · **Session:** 6
+**Last Updated:** 2026-10-08 · **Session:** 7
 
 > Trang thai hien tai, khong phai changelog. Sau moi task: cap nhat ngay/session; doi bang trang thai va TODO; cap nhat `DATABASE.md` khi schema doi. Bug quan trong vao `IMPORTANT_FIXED_BUGS.md`. Ban v1 nam trong `archive/PROJECT_SUMMARY_v1.md` va khong duoc dung lam huong dan hien tai.
 
@@ -79,7 +79,7 @@ test/                  integration/pure logic tests
 - [ ] Forgot-password va email verification chua co.
 - [ ] Auth security patch: run `test/auth-security.test.js`, full suite and endpoint smoke in an isolated sandbox.
 - [ ] Registration remains enumerable while immediate token issuance is retained; requires email-verification flow.
-- [ ] GCLI preview model codes dang dung low-code fallback; khoi phuc khi upstream on dinh.
+- [x] Nâng cấp bot và backend model sang gemini-3.1-flash-lite (mặc định) và gemini-3.8-flash (假流式-agy-gemini-3.8-flash-low), thay thế gemini-2.5-flash và 3.0 sắp bị dừng. Đồng bộ venue.md toàn diện.
 
 ### Thap
 - [ ] OpenAPI/Swagger chua co.

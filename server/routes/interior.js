@@ -1,4 +1,4 @@
-﻿import express from 'express';
+import express from 'express';
 import crypto from 'crypto';
 import mongoose from 'mongoose';
 import path from 'node:path';
@@ -1285,18 +1285,18 @@ router.delete('/projects/:id', authMiddleware, async (req, res) => {
     }
 });
 
-const INTERIOR_ALLOWED_MODELS = ['gemini-3-flash', 'gemini-3.5-flash', 'gemini-3.1-pro'];
+const INTERIOR_ALLOWED_MODELS = ['gemini-3.1-flash-lite', 'gemini-3.8-flash', 'gemini-3.5-flash', 'gemini-3.1-pro', 'gemini-3-flash'];
 // Default Pro for /chat apply: cabinet model synthesis needs strong reasoning to
 // (a) pick the right template + style from catalog, (b) compose valid DSL for
 // tplNew, (c) avoid silent fallback to ugly raw boxes. Flash remains opt-in via
 // frontend model selector for quick low-stakes edits. /analyze-image (image
-// summarization) keeps Flash default â€” see ANALYZE_DEFAULT_MODEL below.
+// summarization) keeps Flash default — see ANALYZE_DEFAULT_MODEL below.
 const INTERIOR_DEFAULT_MODEL = 'gemini-3.1-pro';
 
-const FLASH_MODEL = 'gemini-3-flash';
+const FLASH_MODEL = 'gemini-3.1-flash-lite';
 const PRO_MODEL = 'gemini-3.1-pro';
 const FLASH_DELEGATE_DEFAULT = process.env.INTERIOR_AGENT_FLASH_DELEGATE === 'true';
-// Tool names that are mechanical state mutations â€” safe to delegate to Flash
+// Tool names that are mechanical state mutations — safe to delegate to Flash
 // when primary model is Pro. Reads, terminals, and any error step force the
 // next turn back to Pro for reasoning.
 const FLASH_DELEGATABLE_TOOLS = new Set([
@@ -1306,7 +1306,7 @@ const FLASH_DELEGATABLE_TOOLS = new Set([
 ]);
 
 function isAllowedModel(model) {
-    return model === FLASH_MODEL || model === PRO_MODEL;
+    return INTERIOR_ALLOWED_MODELS.includes(model);
 }
 
 function pickNextTurnModel({ primaryModel, delegateFlash, lastStepTool, lastStepOk }) {
@@ -2025,7 +2025,7 @@ router.post('/projects/:id/chat', authMiddleware, async (req, res) => {
 
 const ANALYZE_MAX_HINTS = 1000;
 const ANALYZE_MAX_REPAIRS = 2;
-const ANALYZE_DEFAULT_MODEL = 'gemini-3-flash';
+const ANALYZE_DEFAULT_MODEL = 'gemini-3.1-flash-lite';
 const ANALYZE_ESCALATE_MODEL = 'gemini-3.1-pro';
 
 function sha256Hex(input) {
