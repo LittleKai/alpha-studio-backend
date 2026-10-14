@@ -1,0 +1,74 @@
+[features]
+hooks = true
+
+# Nhóm 1: Mobile App Development
+[[skills.config]]
+path = "C:/Users/XEON/.agents/skills/android-native-dev"
+enabled = false
+
+[[skills.config]]
+path = "C:/Users/XEON/.agents/skills/ios-application-dev"
+enabled = false
+
+[[skills.config]]
+path = "C:/Users/XEON/.agents/skills/flutter-dev"
+enabled = false
+
+[[skills.config]]
+path = "C:/Users/XEON/.agents/skills/react-native-dev"
+enabled = false
+
+[[skills.config]]
+path = "C:/Users/XEON/.codex/skills/imagegen-frontend-mobile"
+enabled = false
+
+# Nhóm 2: CAD / 3D Chuyên biệt ngoài Web
+[[skills.config]]
+path = "C:/Users/XEON/.codex/skills/sketchup-reference-shape"
+enabled = false
+
+[[skills.config]]
+path = "C:/Users/XEON/.agents/skills/shader-dev"
+enabled = false
+
+# Nhóm 4: Lệch Tech Stack Backend / Desktop Tooling
+[[skills.config]]
+path = "C:/Users/XEON/.agents/skills/python-pro"
+enabled = false
+
+[[skills.config]]
+path = "C:/Users/XEON/.codex/skills/python-pro"
+enabled = false
+
+[[skills.config]]
+path = "C:/Users/XEON/.agents/skills/cli-developer"
+enabled = false
+
+[[skills.config]]
+path = "C:/Users/XEON/.codex/skills/cli-developer"
+enabled = false
+
+[[skills.config]]
+path = "C:/Users/XEON/.agents/skills/rag-architect"
+enabled = false
+
+[[skills.config]]
+path = "C:/Users/XEON/.codex/skills/rag-architect"
+enabled = false
+
+[[skills.config]]
+path = "C:/Users/XEON/.agents/skills/mcp-developer"
+enabled = false
+
+[[skills.config]]
+path = "C:/Users/XEON/.codex/skills/mcp-developer"
+enabled = false
+
+# Nhóm 5: Giao thức mạng & Tooling không dùng trong FE/BE
+[[skills.config]]
+path = "C:/Users/XEON/.agents/skills/websocket-engineer"
+enabled = false
+
+[[skills.config]]
+path = "C:/Users/XEON/.codex/skills/websocket-engineer"
+enabled = false
