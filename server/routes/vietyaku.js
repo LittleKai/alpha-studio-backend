@@ -29,6 +29,16 @@ function windowsZipUrl(version) {
     return `${baseUrl()}/releases/VietYaku-windows-x64-v${version}.zip`;
 }
 
+function githubAndroidApkUrl(releaseUrl) {
+    const match = String(releaseUrl || '').match(
+        /^https:\/\/github\.com\/LittleKai\/VietYaku\/releases\/tag\/([^/?#]+)$/
+    );
+    if (!match) return undefined;
+
+    const tag = match[1];
+    return `${GITHUB_RELEASES_URL}/download/${tag}/VietYaku-android-${tag}.apk`;
+}
+
 /**
  * Parse the `vietyaku-app/version.json` manifest uploaded by the VietYaku
  * build-and-release skill. Shape mirrors a GitHub release payload.
@@ -47,15 +57,16 @@ export function parseVietYakuManifest(manifest) {
         const name = (asset.name || '').toLowerCase();
         return name.includes('android') && name.endsWith('.apk');
     }) || assets.find((asset) => (asset.name || '').toLowerCase().endsWith('.apk'));
+    const releaseUrl = manifest?.html_url || GITHUB_RELEASES_URL;
 
     return {
         version,
         windowsZipUrl: toCdnUrl(windowsAsset?.browser_download_url) || windowsZipUrl(version),
         windowsSize: windowsAsset?.size,
-        androidApkUrl: toCdnUrl(androidAsset?.browser_download_url),
+        androidApkUrl: toCdnUrl(androidAsset?.browser_download_url) || githubAndroidApkUrl(releaseUrl),
         androidSize: androidAsset?.size,
         releaseNotes: manifest?.body || '',
-        releaseUrl: manifest?.html_url || GITHUB_RELEASES_URL,
+        releaseUrl,
         publishedAt: manifest?.published_at || new Date().toISOString(),
     };
 }
@@ -90,7 +101,8 @@ router.get('/releases/latest', async (_req, res) => {
         if (setting && setting.value) {
             const val = { ...setting.value };
             if (val.windowsZipUrl) val.windowsZipUrl = toCdnUrl(val.windowsZipUrl);
-            if (val.androidApkUrl) val.androidApkUrl = toCdnUrl(val.androidApkUrl);
+            val.androidApkUrl = toCdnUrl(val.androidApkUrl)
+                || githubAndroidApkUrl(val.releaseUrl);
             return res.json({ success: true, message: 'OK', data: val });
         }
 

@@ -86,6 +86,21 @@ test('picks an android apk asset when present', () => {
     assert.equal(release.androidSize, 30000000);
 });
 
+test('derives the GitHub Android APK link when B2 manifest omits the APK asset', () => {
+    const release = parseVietYakuManifest({
+        tag_name: 'v1.3.3',
+        html_url: 'https://github.com/LittleKai/VietYaku/releases/tag/v1.3.3',
+        assets: [
+            { name: 'VietYaku-windows-x64-v1.3.3.zip', browser_download_url: 'https://example.com/app.zip' },
+        ],
+    });
+
+    assert.equal(
+        release.androidApkUrl,
+        'https://github.com/LittleKai/VietYaku/releases/download/v1.3.3/VietYaku-android-v1.3.3.apk'
+    );
+});
+
 test('never throws on a malformed manifest', () => {
     const release = parseVietYakuManifest(null);
 
