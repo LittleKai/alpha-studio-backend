@@ -3,7 +3,7 @@
 ## 1. Giới Thiệu Về Alpha Studio
 **Alpha Studio** (truy cập tại: https://giaiphapsangtao.com/) là nền tảng tiên phong kết hợp giữa:
 - **Học viện Đào tạo AI thực chiến (AI Academy)**: Các khóa học chuyên sâu từ cơ bản đến nâng cao giúp học viên làm chủ công cụ và tư duy AI trong công việc.
-- **Hệ sinh thái Công cụ Sáng tạo AI (AI Studio)**: Bộ công cụ AI chuyên biệt phục vụ thiết kế nội thất, học ngoại ngữ, dịch thuật, chăm sóc khách hàng tự động, tạo ảnh và video AI.
+- **Hệ sinh thái Công cụ Sáng tạo AI (AI Studio)**: Bộ công cụ AI chuyên biệt phục vụ học ngoại ngữ, dịch thuật, chăm sóc khách hàng tự động, tạo ảnh và video AI.
 - **Dịch vụ Tư vấn & Triển khai Giải pháp AI Sáng tạo Trọn Gói (/services)**: Đội ngũ chuyên gia trực tiếp tư vấn, thiết kế ý tưởng, dựng mô hình 3D/SketchUp và hỗ trợ thi công thực tế cho các dự án sự kiện, không gian sáng tạo, kiến trúc và truyền thông thương hiệu.
 
 > **Lưu ý:** Các công cụ tại chuyên mục `/studio` hiện đang trong giai đoạn **Thử nghiệm (Beta)** và được nâng cấp, tối ưu liên tục nhằm mang lại trải nghiệm tốt nhất.
@@ -19,8 +19,6 @@ Alpha Studio không chỉ cung cấp nền tảng tự động hóa mà còn tr�
   4. **Thi công & Bàn giao thực tế (Real)**: Bản vẽ kỹ thuật hoàn chỉnh phục vụ gia công, thi công chuẩn xác tại hiện trường.
 - **Case Study Thực Chiến Tiêu Biểu**:
   - **Lễ hội Đường hoa (Flower Street)**: Dự án case study quy mô lớn với đầy đủ các phối cảnh cổng chào, đại cảnh hoa, tiểu cảnh tương tác, bản vẽ SketchUp và ảnh thi công thực tế.
-  - **Showcase Thành phố Sáng tạo (/event-creative-city)**: Không gian mô phỏng sự kiện nghệ thuật kết hợp công nghệ tương tác hiện đại.
-  - **Kể chuyện di sản Cổ Loa (/co-loa-living-spiral)**: Trải nghiệm cuộn tương tác (living spiral) đưa chiều sâu lịch sử văn hóa vào không gian nghệ thuật đương đại.
 - **Tính năng nổi bật tại trang /services**:
   - **Xem ảnh chuyên nghiệp (Lightbox)**: Xem toàn bộ hình ảnh dự án ở độ phân giải cao với chế độ chuyển tiếp mượt mà và hiển thị trạng thái tải ảnh.
   - **Tải tệp đính kèm gốc**: Cho phép đối tác và người dùng tải trực tiếp các tệp mô hình 3D gốc (như file SketchUp `.skp`, tài liệu kỹ thuật) được lưu trữ an toàn trên Backblaze B2.
@@ -91,22 +89,6 @@ Alpha Studio không chỉ cung cấp nền tảng tự động hóa mà còn tr�
     - Gói +1.000 lượt: 500.000đ (5.000 credits).
     - Gói +2.000 lượt: 1.000.000đ (10.000 credits).
   - Quản lý gói cước và gia hạn nhanh tại: `/studio/crm/subscription`.
-
----
-
-### 🛋️ AI Interior Design — Thiết Kế Nội Thất & Tủ Áo 3D (/studio/interior-design)
-- **Mục đích**: Ứng dụng thiết kế tủ áo và không gian nội thất 3D trực quan, nhanh chóng ngay trên trình duyệt web, không cần cài đặt phần mềm nặng.
-- **Tính năng nổi bật**:
-  - **Dựng hình 3D & Bản vẽ kỹ thuật**: Thiết kế 3D chân thực, tự động xuất bản vẽ kỹ thuật các mặt đứng, mặt bằng, mặt cắt đầy đủ kích thước.
-  - **Đa dạng kiểu dáng không gian**: Thiết kế linh hoạt tủ thẳng, tủ góc chữ L, chữ U, đảo tủ giữa phòng, hệ tủ song song.
-  - **Thư viện chi tiết phong phú**: Hàng trăm mẫu ngăn kéo, đợt kệ, thanh treo, cánh phẳng, cánh kính, góc bo cong mềm mại và nhiều bảng màu vật liệu hiện đại.
-  - **Dựng 3D từ ảnh chụp hoặc phác thảo vẽ tay (Image-to-Design)**: Chỉ cần tải ảnh vẽ tay hoặc ảnh chụp căn phòng thực tế, AI sẽ tự động phân tích và chuyển đổi thành bản vẽ thiết kế 3D.
-  - **Tạo ảnh phối cảnh chân thực (Render AI)**: Tạo ảnh render không gian hoàn thiện như chụp thật từ bản vẽ 3D.
-  - **Trò chuyện với AI để sửa thiết kế**: Trò chuyện bằng tiếng Việt tự nhiên với trợ lý AI (ví dụ: "Thêm 2 ngăn kéo", "Đổi sang màu gỗ sồi", "Thêm thanh treo áo") để AI tự động chỉnh sửa.
-  - **Quản lý lịch sử phiên bản**: Xem lại các phiên bản thiết kế trước đó và khôi phục (rollback) chỉ với 1 cú nhấp chuột.
-- **Chi phí & Tín dụng**:
-  - Tiêu tốn 10 credits cho mỗi lượt AI phân tích/chỉnh sửa thiết kế.
-  - Tài khoản Admin/Mod được sử dụng không giới hạn.
 
 ---
 
