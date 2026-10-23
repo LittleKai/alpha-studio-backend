@@ -95,3 +95,5 @@ test/                  integration/pure logic tests
 ### Thap
 - [ ] OpenAPI/Swagger chua co.
 - [ ] Chua co ESLint/Prettier config.
+
+- VocabFlip repair verification: mocked/local full suite 256 passed; syntax checks passed. Live Mongo/API smoke pending.
