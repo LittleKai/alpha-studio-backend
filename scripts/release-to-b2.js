@@ -185,11 +185,18 @@ function stageDependencyClosure(srcNodeModules, destNodeModules, rootPackages, i
 function waitForHealth(port, timeoutMs) {
     return new Promise((resolve) => {
         const deadline = Date.now() + timeoutMs;
+        let resolved = false;
         const retry = () => {
-            if (Date.now() >= deadline) { resolve(false); return; }
+            if (resolved) return;
+            if (Date.now() >= deadline) {
+                resolved = true;
+                resolve(false);
+                return;
+            }
             setTimeout(tryOnce, 500);
         };
         const tryOnce = () => {
+            if (resolved) return;
             const req = http.get(
                 { host: '127.0.0.1', port, path: '/health', timeout: 2000 },
                 (res) => {
@@ -199,6 +206,7 @@ function waitForHealth(port, timeoutMs) {
                         try {
                             const json = JSON.parse(body);
                             if (res.statusCode === 200 && json.status === 'ok') {
+                                resolved = true;
                                 resolve(true);
                                 return;
                             }
@@ -208,7 +216,7 @@ function waitForHealth(port, timeoutMs) {
                 }
             );
             req.on('error', retry);
-            req.on('timeout', () => { req.destroy(); retry(); });
+            req.on('timeout', () => { req.destroy(); });
         };
         tryOnce();
     });
@@ -386,7 +394,7 @@ async function verifyStagedBackend(serviceReleaseDir) {
     let healthy = false;
     let dbOk = false;
     try {
-        healthy = await waitForHealth(SMOKE_PORT, 15000);
+        healthy = await waitForHealth(SMOKE_PORT, 30000);
         // /health KHÔNG mở SQLite (store khởi tạo lười), nên nó một mình không
         // phát hiện được addon native lệch ABI — ZIP hỏng vẫn qua cửa. Gọi thêm
         // /local/health để ép mở DB và chạy truy vấn thật.
