@@ -283,9 +283,37 @@ function serializePrivateFlashcard(card) {
         easiness_factor: c.easinessFactor || 2.5,
         interval: c.interval || 0,
         repetitions: c.repetitions || 0,
+        lapses: c.lapses ?? 0,
+        stability: c.stability ?? null,
+        difficulty: c.difficulty ?? null,
+        fsrs_state: c.fsrsState ?? null,
+        fsrs_step: c.fsrsStep ?? null,
         next_review_date: toDate(c.nextReviewDate),
         last_review_date: toDate(c.lastReviewDate),
     };
+}
+
+function privateFsrsFields(body) {
+    const fields = {};
+    for (const [api, model] of [
+        ['lapses', 'lapses'], ['stability', 'stability'], ['difficulty', 'difficulty'],
+        ['fsrs_state', 'fsrsState'], ['fsrs_step', 'fsrsStep'],
+    ]) {
+        const value = body[api];
+        if (value === undefined) continue;
+        const nullable = api !== 'lapses';
+        const integer = ['lapses', 'fsrs_state', 'fsrs_step'].includes(api);
+        if (!(value === null && nullable) && (
+            typeof value !== 'number' || !Number.isFinite(value) || value < 0 ||
+            (integer && !Number.isInteger(value)) ||
+            (api === 'fsrs_state' && value > 2) ||
+            (api === 'difficulty' && (value < 1 || value > 10))
+        )) {
+            throw new TypeError(`Invalid ${api}`);
+        }
+        fields[model] = value;
+    }
+    return fields;
 }
 
 router.get('/categories', async (_req, res) => ok(res, categories));
@@ -1042,6 +1070,7 @@ router.post('/my-decks/:deckId/cards', authMiddleware, async (req, res) => {
         }
 
         const card = await VocabPrivateFlashcard.create({
+            ...privateFsrsFields(body),
             cardId,
             deckId,
             userId: uId,
@@ -1064,6 +1093,9 @@ router.post('/my-decks/:deckId/cards', authMiddleware, async (req, res) => {
 
         return ok(res, serializePrivateFlashcard(card), 'Card created');
     } catch (error) {
+        if (error instanceof TypeError && error.message.startsWith('Invalid ')) {
+            return res.status(400).json({ success: false, message: error.message });
+        }
         console.error('Create private card error:', error);
         return res.status(500).json({ success: false, message: 'Cannot create card' });
     }
@@ -1086,6 +1118,7 @@ router.post('/my-decks/:deckId/cards/batch', authMiddleware, async (req, res) =>
         const preparedCards = cardsData.map(c => {
             const cardId = String(c.id || new mongoose.Types.ObjectId().toString());
             return {
+                ...privateFsrsFields(c),
                 cardId,
                 deckId,
                 userId: uId,
@@ -1124,6 +1157,9 @@ router.post('/my-decks/:deckId/cards/batch', authMiddleware, async (req, res) =>
 
         return ok(res, updatedCards.map(serializePrivateFlashcard), 'Batch cards synchronized');
     } catch (error) {
+        if (error instanceof TypeError && error.message.startsWith('Invalid ')) {
+            return res.status(400).json({ success: false, message: error.message });
+        }
         console.error('Batch sync private cards error:', error);
         return res.status(500).json({ success: false, message: 'Cannot sync flashcards' });
     }
@@ -1138,6 +1174,7 @@ router.put('/my-decks/:deckId/cards/:cardId', authMiddleware, async (req, res) =
         }
 
         const body = req.body || {};
+        Object.assign(card, privateFsrsFields(body));
         if (body.front !== undefined) card.front = body.front;
         if (body.front_phonetic !== undefined) card.frontPhonetic = body.front_phonetic;
         if (body.back !== undefined) card.back = body.back;
@@ -1160,6 +1197,9 @@ router.put('/my-decks/:deckId/cards/:cardId', authMiddleware, async (req, res) =
         await card.save();
         return ok(res, serializePrivateFlashcard(card), 'Card updated');
     } catch (error) {
+        if (error instanceof TypeError && error.message.startsWith('Invalid ')) {
+            return res.status(400).json({ success: false, message: error.message });
+        }
         console.error('Update private card error:', error);
         return res.status(500).json({ success: false, message: 'Cannot update card' });
     }

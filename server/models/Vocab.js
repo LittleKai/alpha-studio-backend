@@ -126,6 +126,11 @@ const vocabPrivateFlashcardSchema = new mongoose.Schema({
     easinessFactor: { type: Number, default: 2.5 },
     interval: { type: Number, default: 0 },
     repetitions: { type: Number, default: 0 },
+    lapses: { type: Number, default: 0, min: 0, validate: Number.isInteger },
+    stability: { type: Number, default: null, min: 0 },
+    difficulty: { type: Number, default: null, min: 1, max: 10 },
+    fsrsState: { type: Number, default: null, enum: [0, 1, 2, null] },
+    fsrsStep: { type: Number, default: null, min: 0, validate: value => value == null || Number.isInteger(value) },
     nextReviewDate: { type: Date, default: null, index: true },
     lastReviewDate: { type: Date, default: null },
 }, { timestamps: true });

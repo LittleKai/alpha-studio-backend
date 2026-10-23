@@ -28,6 +28,9 @@ const crmCampaignSchema = new mongoose.Schema({
         phone: { type: String, default: '' },
         name: { type: String, default: '' }
     }],
+    attachments: [{
+        type: String
+    }],
     channel: {
         type: String,
         enum: ['email', 'zalo', 'sms'],

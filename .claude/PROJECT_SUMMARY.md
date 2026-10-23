@@ -1,6 +1,6 @@
 # PROJECT SUMMARY - Alpha Studio Backend
 
-**Last Updated:** 2026-10-19 · **Session:** 13
+**Last Updated:** 2026-10-23 · **Session:** 14
 
 > Trang thai hien tai, khong phai changelog. Sau moi task: cap nhat ngay/session; doi bang trang thai va TODO; cap nhat `DATABASE.md` khi schema doi. Bug quan trong vao `IMPORTANT_FIXED_BUGS.md`. Ban v1 nam trong `archive/PROJECT_SUMMARY_v1.md` va khong duoc dung lam huong dan hien tai.
 
@@ -31,9 +31,17 @@
 | Tool/file download tracking & streaming | ✅ | `server/routes/toolDownloads.js`, `server/routes/articles.js` | GET attachment download chỉ bài published, tự `$inc`; tên tải lấy basename gốc từ `fileKey` (bỏ tiền tố timestamp), tách khỏi nhãn biên tập; `versions` key đổi `.`→`_`; admin trả `serviceDownloads`; `downloadCount` select:false (ẩn khỏi API công khai) |
 | B2 orphan/retention/migrations | ✅ | `server/routes/admin.js`, `server/retention/`, `server/migrations/` | DELETE đối chiếu cả Article attachments |
 | Automated tests | ✅ | `test/*.test.js`, `server/**/*.test.*` | Node test runner |
+| VocabFlip private FSRS state | ✅ | `server/models/Vocab.js`, `server/routes/vocab.js` | Optional FSRS fields persist; lazy legacy normalization; no DB backfill |
 | XML sitemap | ✅ | `server/routes/sitemap.js`, `test/sitemap.test.js` | Public hubs/dynamic records; excludes private items and invalid dates |
 
 ## 3. Gia dinh dang giu
+
+VocabFlip private-card contract: optional `lapses`, `stability`, `difficulty`,
+`fsrs_state`, `fsrs_step` round-trip through create/batch/PUT/read. Omitted fields
+preserve existing FSRS values on updates; explicit null clears nullable fields.
+Old records read as zero lapses and null FSRS values, then normalize lazily in
+the client on review. Deploy backend before clients; rollback ignores additive
+fields without deleting them. No index change or database backfill is required.
 
 | Gia dinh | Gia tri | Nguon |
 |---|---|---|

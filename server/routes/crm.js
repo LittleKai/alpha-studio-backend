@@ -2353,6 +2353,7 @@ router.post('/campaigns', authMiddleware, requireActiveSubscription, async (req,
         const {
             name, templateId, channel, audienceType,
             targetCustomerIds, targetGroupIds, manualRecipients,
+            attachments,
             selectedDeviceId, selectedAccountId,
             rateLimit, requireHumanApproval, scheduledAt
         } = req.body;
@@ -2389,6 +2390,9 @@ router.post('/campaigns', authMiddleware, requireActiveSubscription, async (req,
             targetCustomerIds: Array.isArray(targetCustomerIds) ? targetCustomerIds : [],
             targetGroupIds: Array.isArray(targetGroupIds) ? targetGroupIds : [],
             manualRecipients: Array.isArray(manualRecipients) ? manualRecipients : [],
+            attachments: Array.isArray(attachments)
+                ? attachments.map((item) => String(item || '').trim()).filter(Boolean).slice(0, 10)
+                : [],
             selectedDeviceId: selectedDeviceId || null,
             selectedAccountId: selectedAccountId || null,
             rateLimit: rateLimitObj,
@@ -2605,7 +2609,9 @@ router.post('/campaigns/:id/start', authMiddleware, requireActiveSubscription, a
             payload: {
                 campaignId: campaign._id,
                 templateId: campaign.templateId,
+                accountId: campaign.selectedAccountId || null,
                 message: templateMessageText,
+                attachments: Array.isArray(campaign.attachments) ? campaign.attachments : [],
                 channel: campaign.channel,
                 recipients: targetRecipients,
                 rateLimit: campaign.rateLimit
