@@ -403,10 +403,8 @@ async function verifyStagedBackend(serviceReleaseDir) {
         } catch { /* process may already be gone */ }
     }
 
-    // Remove the ephemeral active-port.json the smoke-test wrote so it is not shipped.
-    try {
-        fs.rmSync(path.join(serviceReleaseDir, '.data', 'active-port.json'), { force: true });
-    } catch { /* ignore */ }
+    // Smoke tests also write logs: no ephemeral .data content may enter the ZIP.
+    fs.rmSync(path.join(serviceReleaseDir, '.data'), { recursive: true, force: true });
 
     if (!healthy) {
         throw new Error(

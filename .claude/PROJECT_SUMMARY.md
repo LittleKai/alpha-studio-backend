@@ -1,6 +1,6 @@
 # PROJECT SUMMARY - Alpha Studio Backend
 
-**Last Updated:** 2026-10-23 · **Session:** 14
+**Last Updated:** 2026-10-24 · **Session:** 15
 
 > Trang thai hien tai, khong phai changelog. Sau moi task: cap nhat ngay/session; doi bang trang thai va TODO; cap nhat `DATABASE.md` khi schema doi. Bug quan trong vao `IMPORTANT_FIXED_BUGS.md`. Ban v1 nam trong `archive/PROJECT_SUMMARY_v1.md` va khong duoc dung lam huong dan hien tai.
 
@@ -31,6 +31,7 @@
 | Tool/file download tracking & streaming | ✅ | `server/routes/toolDownloads.js`, `server/routes/articles.js` | GET attachment download chỉ bài published, tự `$inc`; tên tải lấy basename gốc từ `fileKey` (bỏ tiền tố timestamp), tách khỏi nhãn biên tập; `versions` key đổi `.`→`_`; admin trả `serviceDownloads`; `downloadCount` select:false (ẩn khỏi API công khai) |
 | B2 orphan/retention/migrations | ✅ | `server/routes/admin.js`, `server/retention/`, `server/migrations/` | DELETE đối chiếu cả Article attachments |
 | Automated tests | ✅ | `test/*.test.js`, `server/**/*.test.*` | Node test runner |
+| CRM Windows packaging | ✅ | `scripts/release-to-b2.js` | Remove all smoke-test .data before ZIP; CRM artifact guard rejects .data/.env |
 | VocabFlip private FSRS state | ✅ | `server/models/Vocab.js`, `server/routes/vocab.js` | Optional FSRS fields persist; lazy legacy normalization; no DB backfill |
 | XML sitemap | ✅ | `server/routes/sitemap.js`, `test/sitemap.test.js` | Public hubs/dynamic records; excludes private items and invalid dates |
 
@@ -97,3 +98,4 @@ test/                  integration/pure logic tests
 - [ ] Chua co ESLint/Prettier config.
 
 - VocabFlip repair verification: mocked/local full suite 256 passed; syntax checks passed. Live Mongo/API smoke pending.
+- CRM packaging verification: 256 tests and syntax checks pass; rebuilt ZIP is clean, bundled Node/SQLite boot twice successfully. No API deploy.
