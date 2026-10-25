@@ -1,6 +1,6 @@
 # PROJECT SUMMARY - Alpha Studio Backend
 
-**Last Updated:** 2026-10-24 · **Session:** 15
+**Last Updated:** 2026-10-26 · **Session:** 18
 
 > Trang thai hien tai, khong phai changelog. Sau moi task: cap nhat ngay/session; doi bang trang thai va TODO; cap nhat `DATABASE.md` khi schema doi. Bug quan trong vao `IMPORTANT_FIXED_BUGS.md`. Ban v1 nam trong `archive/PROJECT_SUMMARY_v1.md` va khong duoc dung lam huong dan hien tai.
 
@@ -24,16 +24,18 @@
 | Workflow, event library, AI skills | ✅ | `server/routes/workflow.js`, `eventLibrary.js`, `skills.js` | API cho frontend |
 | Phan muc dich vu + bai dich vu co sections | ✅ | `server/routes/serviceCategories.js`, `models/ServiceCategory.js`, `models/contentSection.js`, `utils/contentSections.js` | Article có section song ngữ tùy chọn (`*En`), fallback vi; HOME và Nhà anh Thái ở danh mục CAD/kiến trúc với preview tân cổ điển |
 | Flower Street article | ✅ | Article data | Published /services case study with 20 WebP Cloudinary images, 4 galleries, and a B2 SketchUp attachment |
-| HOME + Nhà anh Thái articles | ✅ | Article data + skill sync scripts | HOME tách gallery Blender/SketchUp, Nhà anh Thái có 12 ảnh WebP + file SKP B2; đã backfill createdAt cho hai bài tạo trực tiếp |
+| HOME + Nhà anh Thái articles | ✅ | Article data + skill sync scripts | HOME tách Blender/SketchUp; Nhà anh Thái: 11 render + ảnh BOM WebP, SKP B2; không đính kèm Excel |
+| Lao Cai + image-to-3D articles | ✅ | Article data + `publish_image_only_articles.mjs` | Hai bài Việt–Anh, 9 + 4 ảnh WebP, không tệp; API/ảnh đạt, browser review chưa có |
 | Binh luan bai viet | ✅ | `server/routes/comments.js`, `models/Comment.js` | `targetType` mo rong sang `article`; enum model va `TARGET_TYPES` cua route phai khop |
 | Cloud Desktop + agents | ✅ | `server/routes/cloud.js`, models HostMachine/CloudSession | Contract cheo host/flow |
 | CRM + analytics | ✅ | `server/routes/crm.js`, `analytics.js` | Co rate limit va test |
 | Tool/file download tracking & streaming | ✅ | `server/routes/toolDownloads.js`, `server/routes/articles.js` | GET attachment download chỉ bài published, tự `$inc`; tên tải lấy basename gốc từ `fileKey` (bỏ tiền tố timestamp), tách khỏi nhãn biên tập; `versions` key đổi `.`→`_`; admin trả `serviceDownloads`; `downloadCount` select:false (ẩn khỏi API công khai) |
 | B2 orphan/retention/migrations | ✅ | `server/routes/admin.js`, `server/retention/`, `server/migrations/` | DELETE đối chiếu cả Article attachments |
-| Automated tests | ✅ | `test/*.test.js`, `server/**/*.test.*` | Node test runner |
+| Automated tests | ✅ | `test/*.test.js`, `server/**/*.test.*` | 257 tests + syntax check đạt; news publishing guard có regression |
 | CRM Windows packaging | ✅ | `scripts/release-to-b2.js` | Remove all smoke-test .data before ZIP; CRM artifact guard rejects .data/.env |
 | VocabFlip private FSRS state | ✅ | `server/models/Vocab.js`, `server/routes/vocab.js` | Optional FSRS fields persist; lazy legacy normalization; no DB backfill |
-| XML sitemap | ✅ | `server/routes/sitemap.js`, `test/sitemap.test.js` | Public hubs/dynamic records; excludes private items and invalid dates |
+| XML sitemap | ✅ | `server/routes/sitemap.js`, `test/sitemap.test.js` | Chỉ public/indexable; bài thử/rỗng đã về draft, news còn 3 bài có mô tả |
+| News publishing | ✅ | `server/models/Article.js`, `server/routes/articles.js` | Tin published cần nội dung vi/media; create/update/publish chạy validation; lỗi trả 400 |
 
 ## 3. Gia dinh dang giu
 

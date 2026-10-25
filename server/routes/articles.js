@@ -227,6 +227,7 @@ router.put('/:id', authMiddleware, modOnly, async (req, res) => {
         });
     } catch (error) {
         console.error('Update article error:', error);
+        if (error.name === 'ValidationError') return res.status(400).json({ success: false, message: error.message });
         res.status(500).json({ success: false, message: 'Lỗi server' });
     }
 });
@@ -234,18 +235,17 @@ router.put('/:id', authMiddleware, modOnly, async (req, res) => {
 // PATCH /api/articles/:id/publish - Publish article
 router.patch('/:id/publish', authMiddleware, modOnly, async (req, res) => {
     try {
-        const article = await Article.findByIdAndUpdate(
-            req.params.id,
-            { status: 'published' },
-            { new: true }
-        );
+        const article = await Article.findById(req.params.id);
         if (!article) {
             return res.status(404).json({ success: false, message: 'Không tìm thấy bài viết' });
         }
 
+        article.status = 'published';
+        await article.save();
         res.json({ success: true, message: 'Xuất bản bài viết thành công', data: article });
     } catch (error) {
         console.error('Publish article error:', error);
+        if (error.name === 'ValidationError') return res.status(400).json({ success: false, message: error.message });
         res.status(500).json({ success: false, message: 'Lỗi server' });
     }
 });

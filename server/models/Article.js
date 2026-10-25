@@ -87,6 +87,13 @@ const articleSchema = new mongoose.Schema({
 
 articleSchema.plugin(noInlineMediaPlugin);
 
+articleSchema.pre('validate', function () {
+    if (this.category !== 'news' || this.status !== 'published') return;
+    const html = this.content?.vi || '';
+    const text = html.replace(/<(script|style)\b[^>]*>[\s\S]*?<\/\1>/gi, '').replace(/<[^>]*>/g, '').replace(/&(?:nbsp|#160|#xA0);/gi, ' ').trim();
+    if (!text && !/<(?:img|video|audio|iframe)\b[^>]*\bsrc\s*=/i.test(html)) this.invalidate('content.vi', 'Cần nội dung tiếng Việt trước khi xuất bản tin tức');
+});
+
 // Auto-generate slug from Vietnamese title before save
 articleSchema.pre('save', function (next) {
     if (this.isModified('title.vi') || !this.slug) {
