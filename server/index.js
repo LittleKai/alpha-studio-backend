@@ -322,6 +322,8 @@ setInterval(async () => {
             crmEventHub.publish(device.userId, 'device.status', {
                 deviceId: device._id,
                 agentStatus: 'offline',
+                appVersion: device.appVersion || null,
+                agentVersion: device.agentVersion || null,
                 zaloAccounts: device.zaloAccounts,
                 queueDepth: device.queueDepth,
                 lastHeartbeatAt: device.lastHeartbeatAt

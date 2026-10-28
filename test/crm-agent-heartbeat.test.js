@@ -1,6 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { normalizeSupervisorStats } from '../server/routes/crm.js';
+import {
+    CRM_SSE_HELLO_DEVICE_SELECT,
+    buildDeviceStatusEventPayload,
+    normalizeSupervisorStats
+} from '../server/routes/crm.js';
 
 test('normalizeSupervisorStats accepts a well-formed payload', () => {
     const out = normalizeSupervisorStats({
@@ -41,4 +45,56 @@ test('normalizeSupervisorStats falls back to now for a bad reportedAt', () => {
     const before = Date.now();
     const out = normalizeSupervisorStats({ restartCount: 1, reportedAt: 'không phải ngày' });
     assert.ok(out.reportedAt.getTime() >= before);
+});
+
+test('CRM_SSE_HELLO_DEVICE_SELECT includes appVersion and agentVersion for mobile compatibility checks', () => {
+    const fields = CRM_SSE_HELLO_DEVICE_SELECT.split(/\s+/);
+    assert.ok(fields.includes('appVersion'));
+    assert.ok(fields.includes('agentVersion'));
+    assert.ok(fields.includes('agentStatus'));
+});
+
+test('buildDeviceStatusEventPayload forwards appVersion and agentVersion or null', () => {
+    const now = new Date('2026-10-28T00:00:00.000Z');
+    assert.deepEqual(
+        buildDeviceStatusEventPayload({
+            _id: 'dev-1',
+            agentStatus: 'online',
+            appVersion: '0.2.3',
+            agentVersion: '0.2.0',
+            zaloAccounts: [{ accountId: 'z1', status: 'online' }],
+            queueDepth: 0,
+            lastHeartbeatAt: now
+        }),
+        {
+            deviceId: 'dev-1',
+            agentStatus: 'online',
+            appVersion: '0.2.3',
+            agentVersion: '0.2.0',
+            zaloAccounts: [{ accountId: 'z1', status: 'online' }],
+            queueDepth: 0,
+            lastHeartbeatAt: now
+        }
+    );
+
+    assert.deepEqual(
+        buildDeviceStatusEventPayload({
+            _id: 'dev-2',
+            agentStatus: 'offline',
+            appVersion: '',
+            agentVersion: undefined,
+            zaloAccounts: [],
+            queueDepth: 1,
+            lastHeartbeatAt: now
+        }),
+        {
+            deviceId: 'dev-2',
+            agentStatus: 'offline',
+            appVersion: null,
+            agentVersion: null,
+            zaloAccounts: [],
+            queueDepth: 1,
+            lastHeartbeatAt: now
+        }
+    );
 });

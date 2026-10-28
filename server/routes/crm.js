@@ -1568,14 +1568,29 @@ router.get('/pairing/:id', authMiddleware, async (req, res) => {
 //                           (payload: { messageId, conversationId, status, providerMessageId, errorMessage, sentAt })
 //   - conversation.updated Conversation preview/unread changed (payload: CrmConversation)
 //   - device.status        Desktop Agent online/offline or Zalo account status changed
-//                           (payload: { deviceId, agentStatus, zaloAccounts, queueDepth, lastHeartbeatAt })
+//                           (payload: { deviceId, agentStatus, appVersion, agentVersion, zaloAccounts, queueDepth, lastHeartbeatAt })
 //   - pairing.completed    Mobile device successfully paired (payload: { deviceId, sessionId, confirmedAt })
+
+export const CRM_SSE_HELLO_DEVICE_SELECT =
+    'displayName agentStatus appVersion agentVersion zaloAccounts queueDepth lastHeartbeatAt lastSeenAt';
+
+export function buildDeviceStatusEventPayload(device) {
+    return {
+        deviceId: device._id,
+        agentStatus: device.agentStatus,
+        appVersion: device.appVersion || null,
+        agentVersion: device.agentVersion || null,
+        zaloAccounts: device.zaloAccounts,
+        queueDepth: device.queueDepth,
+        lastHeartbeatAt: device.lastHeartbeatAt
+    };
+}
 
 // GET /api/crm/events/subscribe
 router.get('/events/subscribe', sseAuthMiddleware, requireActiveSubscription, async (req, res) => {
     try {
         const devices = await CrmDevice.find({ userId: req.user._id, status: 'active' })
-            .select('displayName agentStatus zaloAccounts queueDepth lastHeartbeatAt lastSeenAt')
+            .select(CRM_SSE_HELLO_DEVICE_SELECT)
             .lean();
 
         setSseHeaders(res);
@@ -1633,6 +1648,8 @@ router.post('/agent/heartbeat', agentAuthMiddleware, async (req, res) => {
 
         const now = new Date();
         const previousAgentStatus = device.agentStatus;
+        const previousAppVersion = device.appVersion || '';
+        const previousAgentVersion = device.agentVersion || '';
         const previousZaloAccounts = JSON.stringify(
             (device.zaloAccounts || []).map((account) => ({ accountId: account.accountId, status: account.status }))
         );
@@ -1642,8 +1659,8 @@ router.post('/agent/heartbeat', agentAuthMiddleware, async (req, res) => {
         device.lastIp = req.ip;
         device.agentStatus = status === 'offline' ? 'offline' : 'online';
 
-        if (appVersion) device.appVersion = appVersion;
-        if (agentVersion) device.agentVersion = agentVersion;
+        if (appVersion) device.appVersion = String(appVersion).trim().slice(0, 64);
+        if (agentVersion) device.agentVersion = String(agentVersion).trim().slice(0, 64);
         if (Array.isArray(zaloAccounts)) {
             device.zaloAccounts = zaloAccounts
                 .map((account) => ({
@@ -1664,14 +1681,17 @@ router.post('/agent/heartbeat', agentAuthMiddleware, async (req, res) => {
         const newZaloAccounts = JSON.stringify(
             (device.zaloAccounts || []).map((account) => ({ accountId: account.accountId, status: account.status }))
         );
-        if (previousAgentStatus !== device.agentStatus || previousZaloAccounts !== newZaloAccounts) {
-            crmEventHub.publish(device.userId, 'device.status', {
-                deviceId: device._id,
-                agentStatus: device.agentStatus,
-                zaloAccounts: device.zaloAccounts,
-                queueDepth: device.queueDepth,
-                lastHeartbeatAt: device.lastHeartbeatAt
-            });
+        if (
+            previousAgentStatus !== device.agentStatus ||
+            previousZaloAccounts !== newZaloAccounts ||
+            previousAppVersion !== (device.appVersion || '') ||
+            previousAgentVersion !== (device.agentVersion || '')
+        ) {
+            crmEventHub.publish(
+                device.userId,
+                'device.status',
+                buildDeviceStatusEventPayload(device)
+            );
         }
 
         res.json({
