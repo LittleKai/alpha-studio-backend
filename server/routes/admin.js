@@ -15,6 +15,8 @@ import InteriorAnalysis from '../models/InteriorAnalysis.js';
 import InteriorRender from '../models/InteriorRender.js';
 import InteriorTemplate from '../models/InteriorTemplate.js';
 import ToolDownload from '../models/ToolDownload.js';
+import LedStudioProject from '../models/LedStudioProject.js';
+import LedStudioPreset from '../models/LedStudioPreset.js';
 import { KNOWN_TOOLS, getOrCreateToolDownload } from './toolDownloads.js';
 import { authMiddleware, adminOnly } from '../middleware/auth.js';
 import { listAllFiles, deleteFile as deleteB2File } from '../utils/b2Storage.js';
@@ -906,6 +908,40 @@ export async function collectReferencedKeys() {
                     });
                 }
             }
+        }
+
+        // LED Stage Studio projects & presets (b2FileKey / b2AssetKey / thumbnailUrl)
+        const [ledProjects, ledPresets] = await Promise.all([
+            LedStudioProject.find({}, 'b2FileKey thumbnailUrl title createdAt').lean(),
+            LedStudioPreset.find({}, 'b2AssetKey thumbnailUrl title createdAt').lean()
+        ]);
+        for (const p of ledProjects) {
+            if (p.b2FileKey) {
+                usedKeys.add(p.b2FileKey);
+                if (!docKeyMap.has(p.b2FileKey)) {
+                    docKeyMap.set(p.b2FileKey, {
+                        uploader: p.title || 'LED Studio Project',
+                        uploadedAt: p.createdAt || null,
+                        source: 'led-studio-project'
+                    });
+                }
+            }
+            const thumbKey = extractB2Key(p.thumbnailUrl);
+            if (thumbKey) usedKeys.add(thumbKey);
+        }
+        for (const pr of ledPresets) {
+            if (pr.b2AssetKey) {
+                usedKeys.add(pr.b2AssetKey);
+                if (!docKeyMap.has(pr.b2AssetKey)) {
+                    docKeyMap.set(pr.b2AssetKey, {
+                        uploader: pr.title?.vi || 'LED Studio Preset',
+                        uploadedAt: pr.createdAt || null,
+                        source: 'led-studio-preset'
+                    });
+                }
+            }
+            const thumbKey = extractB2Key(pr.thumbnailUrl);
+            if (thumbKey) usedKeys.add(thumbKey);
         }
 
     return { usedKeys, docKeyMap };

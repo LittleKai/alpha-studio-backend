@@ -43,6 +43,7 @@ import aiRoutes from './routes/ai.js';
 import interiorRoutes from './routes/interior.js';
 import skillRoutes from './routes/skills.js';
 import eventLibraryRoutes from './routes/eventLibrary.js';
+import ledStudioRoutes from './routes/ledStudio.js';
 import crmRoutes from './routes/crm.js';
 import channelWebhookRoutes from './routes/channelWebhooks.js';
 import webchatPublicRoutes from './routes/webchatPublic.js';
@@ -139,6 +140,7 @@ app.use('/api/crm', crmRoutes);
 app.use('/api/crm', channelWebhookRoutes);
 app.use('/api/skills', skillRoutes);
 app.use('/api/event-library', eventLibraryRoutes);
+app.use('/api/led-studio', ledStudioRoutes);
 app.use('/api/tools', toolDownloadRoutes);
 app.use('/api/analytics', analyticsRoutes);
 

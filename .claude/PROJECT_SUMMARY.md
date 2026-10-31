@@ -1,6 +1,6 @@
 # PROJECT SUMMARY - Alpha Studio Backend
 
-**Last Updated:** 2026-10-28 · **Session:** 19
+**Last Updated:** 2026-10-31 · **Session:** 21
 
 > Trang thai hien tai, khong phai changelog. Sau moi task: cap nhat ngay/session; doi bang trang thai va TODO; cap nhat `DATABASE.md` khi schema doi. Bug quan trong vao `IMPORTANT_FIXED_BUGS.md`. Ban v1 nam trong `archive/PROJECT_SUMMARY_v1.md` va khong duoc dung lam huong dan hien tai.
 
@@ -21,7 +21,7 @@
 | Auth, users, roles | 🔶 | `server/routes/auth.js`, `server/middleware/auth.js` | JWT version revocation; reset fields hidden; regression tests pending sandbox |
 | Content/course/job/partner/prompt | ✅ | `server/routes/`, `server/models/` | Noi dung `vi` bat buoc, `en` optional |
 | VietYaku release metadata | ✅ | `server/routes/vietyaku.js`, `test/vietyaku-release.test.js` | Suy ra link APK GitHub theo tag khi manifest B2 chỉ có ZIP Windows |
-| Workflow, event library, AI skills | ✅ | `server/routes/workflow.js`, `eventLibrary.js`, `skills.js` | API cho frontend |
+| Workflow, event library, AI skills | ✅ | `server/routes/workflow.js`, `eventLibrary.js`, `skills.js`, `test/workflow-routes.test.js` | API cho frontend; phan quyen 2 tang project/doc, escape regex searchUsers |
 | Phan muc dich vu + bai dich vu co sections | ✅ | `server/routes/serviceCategories.js`, `models/ServiceCategory.js`, `models/contentSection.js`, `utils/contentSections.js` | Article có section song ngữ tùy chọn (`*En`), fallback vi; HOME và Nhà anh Thái ở danh mục CAD/kiến trúc với preview tân cổ điển |
 | Flower Street article | ✅ | Article data | Published /services case study with 20 WebP Cloudinary images, 4 galleries, and a B2 SketchUp attachment |
 | HOME + Nhà anh Thái articles | ✅ | Article data + skill sync scripts | HOME tách Blender/SketchUp; Nhà anh Thái: 11 render + ảnh BOM WebP, SKP B2; không đính kèm Excel |
@@ -31,11 +31,12 @@
 | CRM + analytics | ✅ | `server/routes/crm.js`, `analytics.js` | SSE hello/device.status có app/agent version; đổi version phát event |
 | Tool/file download tracking & streaming | ✅ | `server/routes/toolDownloads.js`, `server/routes/articles.js` | GET attachment download chỉ bài published, tự `$inc`; tên tải lấy basename gốc từ `fileKey` (bỏ tiền tố timestamp), tách khỏi nhãn biên tập; `versions` key đổi `.`→`_`; admin trả `serviceDownloads`; `downloadCount` select:false (ẩn khỏi API công khai) |
 | B2 orphan/retention/migrations | ✅ | `server/routes/admin.js`, `server/retention/`, `server/migrations/` | DELETE đối chiếu cả Article attachments |
-| Automated tests | ✅ | `test/*.test.js`, `server/**/*.test.*` | 259 tests + syntax check đạt; heartbeat/SSE handler smoke với DB giả lập đạt |
+| Automated tests | ✅ | `test/*.test.js`, `server/**/*.test.*` | 269 tests + syntax check đạt; heartbeat/SSE handler smoke với DB giả lập đạt |
 | CRM Windows packaging | ✅ | `scripts/release-to-b2.js` | Remove all smoke-test .data before ZIP; CRM artifact guard rejects .data/.env |
 | VocabFlip private FSRS state | ✅ | `server/models/Vocab.js`, `server/routes/vocab.js` | Optional FSRS fields persist; lazy legacy normalization; no DB backfill |
 | XML sitemap | ✅ | `server/routes/sitemap.js`, `test/sitemap.test.js` | Chỉ public/indexable; bài thử/rỗng đã về draft, news còn 3 bài có mô tả |
 | News publishing | ✅ | `server/models/Article.js`, `server/routes/articles.js` | Tin published cần nội dung vi/media; create/update/publish chạy validation; lỗi trả 400 |
+| Creative LED Stage Studio Cloud & Share | ✅ | `server/routes/ledStudio.js`, `models/LedStudioProject.js`, `models/LedStudioPreset.js`, `test/led-studio-routes.test.js` | CRUD dự án `.ledstudio` (B2 key do server cấp, lưu/mở/cập nhật), preset cá nhân/công khai (`vi` bắt buộc) và link duyệt 3D chỉ đọc băm SHA-256 |
 
 ## 3. Gia dinh dang giu
 

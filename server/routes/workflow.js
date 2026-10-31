@@ -6,9 +6,124 @@ import { authMiddleware, modOnly } from '../middleware/auth.js';
 
 const router = express.Router();
 
-// Helper: check if requester owns resource or is admin
-const isOwnerOrAdmin = (resource, user) =>
-    resource.createdBy.toString() === user._id.toString() || user.role === 'admin';
+const MANAGER_PROJECT_FIELDS = [
+    'name', 'client', 'tagline', 'requirements', 'description', 'department', 'status',
+    'startDate', 'deadline', 'budget', 'expenses', 'expenseLog',
+    'team', 'progress', 'chatHistory', 'tasks', 'avatar'
+];
+
+const MEMBER_PROJECT_FIELDS = [
+    'chatHistory', 'tasks', 'progress', 'expenses', 'expenseLog'
+];
+
+const OWNER_DOCUMENT_FIELDS = [
+    'name', 'type', 'size', 'uploadDate', 'uploader',
+    'status', 'url', 'fileKey', 'isProject', 'projectId', 'comments', 'note'
+];
+
+const MANAGER_DOCUMENT_FIELDS = ['status', 'comments', 'note'];
+
+export function buildUserSearchRegex(rawQuery) {
+    const q = typeof rawQuery === 'string' ? rawQuery.trim().slice(0, 64) : '';
+    if (q.length < 2) return null;
+    const escaped = q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    return new RegExp(escaped, 'i');
+}
+
+export function isProjectManagerOrAdmin(project, user) {
+    if (!project || !user) return false;
+    if (user.role === 'admin' || user.role === 'mod') return true;
+    const userId = user._id?.toString();
+    if (!userId) return false;
+    if (project.createdBy?.toString() === userId) return true;
+    const team = Array.isArray(project.team) ? project.team : [];
+    const member = team.find(m => m.id?.toString() === userId);
+    return Boolean(member && (member.projectRole === 'creator' || member.projectRole === 'manager'));
+}
+
+export function canAccessProject(project, user) {
+    if (!project || !user) return false;
+    if (isProjectManagerOrAdmin(project, user)) return true;
+    const userId = user._id?.toString();
+    const team = Array.isArray(project.team) ? project.team : [];
+    return Boolean(userId && team.some(m => m.id?.toString() === userId));
+}
+
+function isSelfLeaveTeamUpdate(currentTeam, nextTeam, userId) {
+    if (!Array.isArray(currentTeam) || !Array.isArray(nextTeam)) return false;
+    const expectedIds = currentTeam
+        .map(m => m.id?.toString())
+        .filter(id => id && id !== userId);
+    const actualIds = nextTeam.map(m => m?.id?.toString()).filter(Boolean);
+    if (expectedIds.length !== actualIds.length) return false;
+    return expectedIds.every((id, idx) => id === actualIds[idx]);
+}
+
+export function resolveProjectUpdateAccess(project, user, body) {
+    if (!project || !user || !body || typeof body !== 'object' || Array.isArray(body)) {
+        return { allowed: false, allowedFields: [] };
+    }
+    if (isProjectManagerOrAdmin(project, user)) {
+        return { allowed: true, allowedFields: MANAGER_PROJECT_FIELDS };
+    }
+    const userId = user._id?.toString();
+    const team = Array.isArray(project.team) ? project.team : [];
+    const isTeamMember = Boolean(userId && team.some(m => m.id?.toString() === userId));
+    if (!isTeamMember) {
+        return { allowed: false, allowedFields: [] };
+    }
+
+    const requestedFields = Object.keys(body);
+    if (requestedFields.length === 0) {
+        return { allowed: false, allowedFields: [] };
+    }
+
+    const allowedForCall = [...MEMBER_PROJECT_FIELDS];
+    if (body.team !== undefined && isSelfLeaveTeamUpdate(team, body.team, userId)) {
+        allowedForCall.push('team');
+    }
+
+    const allPermitted = requestedFields.every(field => allowedForCall.includes(field));
+    if (!allPermitted) {
+        return { allowed: false, allowedFields: [] };
+    }
+
+    return { allowed: true, allowedFields: allowedForCall };
+}
+
+export function resolveDocumentUpdateAccess(doc, project, user) {
+    if (!doc || !user) return { allowed: false, allowedFields: [] };
+    const userId = user._id?.toString();
+    if (!userId) return { allowed: false, allowedFields: [] };
+    const isOwner = doc.createdBy?.toString() === userId;
+    const isAdmin = user.role === 'admin' || user.role === 'mod';
+    if (isOwner || isAdmin) {
+        return { allowed: true, allowedFields: OWNER_DOCUMENT_FIELDS };
+    }
+    if (project && isProjectManagerOrAdmin(project, user)) {
+        return { allowed: true, allowedFields: MANAGER_DOCUMENT_FIELDS };
+    }
+    return { allowed: false, allowedFields: [] };
+}
+
+export function canManageWorkflowDocument(doc, project, user) {
+    return resolveDocumentUpdateAccess(doc, project, user).allowed;
+}
+
+function handleRouteError(res, label, error) {
+    console.error(`${label}:`, error);
+    if (error?.code === 'INLINE_MEDIA_NOT_ALLOWED') {
+        return res.status(400).json({ success: false, message: error.message });
+    }
+    if (error?.name === 'ValidationError') {
+        const messages = Object.values(error.errors || {}).map(e => e.message);
+        return res.status(400).json({ success: false, message: messages.join(', ') || error.message });
+    }
+    if (error?.name === 'CastError') {
+        return res.status(400).json({ success: false, message: 'ID không hợp lệ' });
+    }
+    return res.status(500).json({ success: false, message: 'Lỗi server' });
+}
 
 // ─── PROJECTS ──────────────────────────────────────────────────────────────
 
@@ -17,22 +132,13 @@ const isOwnerOrAdmin = (resource, user) =>
 // @access  Auth
 router.get('/projects', authMiddleware, async (req, res) => {
     try {
-        const userId = req.user._id.toString();
         const isAdmin = req.user.role === 'admin';
-
-        let query;
-        if (isAdmin) {
-            query = {}; // admin sees all projects (including completed)
-        } else {
-            // Regular users see all non-completed projects
-            query = { status: { $ne: 'completed' } };
-        }
+        const query = isAdmin ? {} : { status: { $ne: 'completed' } };
 
         const projects = await WorkflowProject.find(query).sort({ createdAt: -1 });
         res.json({ success: true, data: projects });
     } catch (error) {
-        console.error('Get workflow projects error:', error);
-        res.status(500).json({ success: false, message: 'Lỗi server' });
+        handleRouteError(res, 'Get workflow projects error', error);
     }
 });
 
@@ -74,17 +180,12 @@ router.post('/projects', authMiddleware, modOnly, async (req, res) => {
         await project.save();
         res.status(201).json({ success: true, message: 'Tạo dự án thành công', data: project });
     } catch (error) {
-        console.error('Create workflow project error:', error);
-        if (error.name === 'ValidationError') {
-            const messages = Object.values(error.errors).map(e => e.message);
-            return res.status(400).json({ success: false, message: messages.join(', ') });
-        }
-        res.status(500).json({ success: false, message: 'Lỗi server' });
+        handleRouteError(res, 'Create workflow project error', error);
     }
 });
 
 // @route   PUT /api/workflow/projects/:id
-// @desc    Update a project (creator or admin); team members may update chatHistory only
+// @desc    Update a project (creator, manager, mod, admin; team members may update tasks/progress/expenses/chatHistory or self-leave)
 // @access  Auth
 router.put('/projects/:id', authMiddleware, async (req, res) => {
     try {
@@ -93,23 +194,10 @@ router.put('/projects/:id', authMiddleware, async (req, res) => {
             return res.status(404).json({ success: false, message: 'Không tìm thấy dự án' });
         }
 
-        const userId = req.user._id.toString();
-        const isTeamMember = project.team.some(m => m.id?.toString() === userId);
-        const requestedFields = Object.keys(req.body);
-        const isChatHistoryOnly = requestedFields.length === 1 && requestedFields[0] === 'chatHistory';
-
-        if (!isOwnerOrAdmin(project, req.user)) {
-            // Team members may only append to chatHistory
-            if (!(isTeamMember && isChatHistoryOnly)) {
-                return res.status(403).json({ success: false, message: 'Không có quyền chỉnh sửa' });
-            }
+        const { allowed, allowedFields } = resolveProjectUpdateAccess(project, req.user, req.body);
+        if (!allowed) {
+            return res.status(403).json({ success: false, message: 'Không có quyền chỉnh sửa' });
         }
-
-        const allowedFields = isOwnerOrAdmin(project, req.user)
-            ? ['name', 'client', 'tagline', 'requirements', 'description', 'department', 'status',
-               'startDate', 'deadline', 'budget', 'expenses', 'expenseLog',
-               'team', 'progress', 'chatHistory', 'tasks', 'avatar']
-            : ['chatHistory']; // team members restricted to chatHistory only
 
         for (const field of allowedFields) {
             if (req.body[field] !== undefined) {
@@ -120,16 +208,12 @@ router.put('/projects/:id', authMiddleware, async (req, res) => {
         await project.save();
         res.json({ success: true, message: 'Cập nhật dự án thành công', data: project });
     } catch (error) {
-        console.error('Update workflow project error:', error);
-        if (error.name === 'CastError') {
-            return res.status(400).json({ success: false, message: 'ID không hợp lệ' });
-        }
-        res.status(500).json({ success: false, message: 'Lỗi server' });
+        handleRouteError(res, 'Update workflow project error', error);
     }
 });
 
 // @route   DELETE /api/workflow/projects/:id
-// @desc    Delete a project (creator or admin)
+// @desc    Delete a project (admin only, completed projects only)
 // @access  Auth
 router.delete('/projects/:id', authMiddleware, async (req, res) => {
     try {
@@ -150,11 +234,7 @@ router.delete('/projects/:id', authMiddleware, async (req, res) => {
 
         res.json({ success: true, message: 'Xóa dự án thành công' });
     } catch (error) {
-        console.error('Delete workflow project error:', error);
-        if (error.name === 'CastError') {
-            return res.status(400).json({ success: false, message: 'ID không hợp lệ' });
-        }
-        res.status(500).json({ success: false, message: 'Lỗi server' });
+        handleRouteError(res, 'Delete workflow project error', error);
     }
 });
 
@@ -165,11 +245,10 @@ router.delete('/projects/:id', authMiddleware, async (req, res) => {
 // @access  Auth
 router.get('/users/search', authMiddleware, async (req, res) => {
     try {
-        const q = (req.query.q || '').trim();
-        if (!q || q.length < 2) {
+        const regex = buildUserSearchRegex(req.query.q);
+        if (!regex) {
             return res.json({ success: true, data: [] });
         }
-        const regex = new RegExp(q, 'i');
         const filter = { $or: [{ name: regex }, { email: regex }] };
         if (req.query.includeSelf !== 'true') {
             filter._id = { $ne: req.user._id };
@@ -190,8 +269,7 @@ router.get('/users/search', authMiddleware, async (req, res) => {
 
         res.json({ success: true, data: result });
     } catch (error) {
-        console.error('Search users error:', error);
-        res.status(500).json({ success: false, message: 'Lỗi server' });
+        handleRouteError(res, 'Search users error', error);
     }
 });
 
@@ -225,11 +303,7 @@ router.get('/users/:id', async (req, res) => {
             }
         });
     } catch (error) {
-        console.error('Get user profile error:', error);
-        if (error.name === 'CastError') {
-            return res.status(400).json({ success: false, message: 'ID không hợp lệ' });
-        }
-        res.status(500).json({ success: false, message: 'Lỗi server' });
+        handleRouteError(res, 'Get user profile error', error);
     }
 });
 
@@ -241,20 +315,8 @@ router.get('/users/:id', async (req, res) => {
 router.get('/documents', authMiddleware, async (req, res) => {
     try {
         if (req.query.projectId) {
-            // For project documents: check membership, then return all docs for that project
-            const userId = req.user._id.toString();
-            const isAdmin = req.user.role === 'admin' || req.user.role === 'mod';
-            let canAccess = isAdmin;
-
-            if (!canAccess) {
-                const project = await WorkflowProject.findById(req.query.projectId).lean();
-                if (project) {
-                    canAccess = project.createdBy?.toString() === userId ||
-                        project.team.some(m => m.id?.toString() === userId);
-                }
-            }
-
-            if (!canAccess) {
+            const project = await WorkflowProject.findById(req.query.projectId).lean();
+            if (!canAccessProject(project, req.user)) {
                 return res.status(403).json({ success: false, message: 'Không có quyền xem' });
             }
 
@@ -266,8 +328,7 @@ router.get('/documents', authMiddleware, async (req, res) => {
         const documents = await WorkflowDocument.find({ createdBy: req.user._id }).sort({ createdAt: -1 });
         res.json({ success: true, data: documents });
     } catch (error) {
-        console.error('Get workflow documents error:', error);
-        res.status(500).json({ success: false, message: 'Lỗi server' });
+        handleRouteError(res, 'Get workflow documents error', error);
     }
 });
 
@@ -278,11 +339,21 @@ router.post('/documents', authMiddleware, async (req, res) => {
     try {
         const {
             name, type, size, uploadDate, uploader,
-            status, url, fileKey, isProject, projectId, comments
+            status, url, fileKey, isProject, projectId, comments, note
         } = req.body;
 
         if (!name) {
             return res.status(400).json({ success: false, message: 'Tên file là bắt buộc' });
+        }
+
+        if (projectId) {
+            const project = await WorkflowProject.findById(projectId).lean();
+            if (!project) {
+                return res.status(404).json({ success: false, message: 'Không tìm thấy dự án' });
+            }
+            if (!canAccessProject(project, req.user)) {
+                return res.status(403).json({ success: false, message: 'Không có quyền tải file vào dự án này' });
+            }
         }
 
         const doc = new WorkflowDocument({
@@ -294,26 +365,22 @@ router.post('/documents', authMiddleware, async (req, res) => {
             status: status || 'pending',
             url: url || '',
             fileKey: fileKey || '',
-            isProject: isProject || false,
+            isProject: isProject || Boolean(projectId),
             projectId: projectId || null,
             comments: comments || [],
+            note: note || '',
             createdBy: req.user._id
         });
 
         await doc.save();
         res.status(201).json({ success: true, message: 'Tạo tài liệu thành công', data: doc });
     } catch (error) {
-        console.error('Create workflow document error:', error);
-        if (error.name === 'ValidationError') {
-            const messages = Object.values(error.errors).map(e => e.message);
-            return res.status(400).json({ success: false, message: messages.join(', ') });
-        }
-        res.status(500).json({ success: false, message: 'Lỗi server' });
+        handleRouteError(res, 'Create workflow document error', error);
     }
 });
 
 // @route   PUT /api/workflow/documents/:id
-// @desc    Update a document (status, comments, etc.)
+// @desc    Update a document (status, comments, note, etc.)
 // @access  Auth
 router.put('/documents/:id', authMiddleware, async (req, res) => {
     try {
@@ -321,29 +388,13 @@ router.put('/documents/:id', authMiddleware, async (req, res) => {
         if (!doc) {
             return res.status(404).json({ success: false, message: 'Không tìm thấy tài liệu' });
         }
-        const userId = req.user._id.toString();
-        const isOwner = doc.createdBy.toString() === userId;
-        const isAdmin = req.user.role === 'admin' || req.user.role === 'mod';
 
-        // Also allow project creator/manager to update doc status/comments
-        let isProjectManager = false;
-        if (doc.projectId) {
-            const project = await WorkflowProject.findById(doc.projectId).lean();
-            if (project) {
-                const member = project.team.find(m => m.id === userId);
-                if (member && (member.projectRole === 'creator' || member.projectRole === 'manager')) {
-                    isProjectManager = true;
-                }
-                // Also check createdBy
-                if (project.createdBy.toString() === userId) isProjectManager = true;
-            }
-        }
-
-        if (!isOwner && !isAdmin && !isProjectManager) {
+        const project = doc.projectId ? await WorkflowProject.findById(doc.projectId).lean() : null;
+        const { allowed, allowedFields } = resolveDocumentUpdateAccess(doc, project, req.user);
+        if (!allowed) {
             return res.status(403).json({ success: false, message: 'Không có quyền chỉnh sửa' });
         }
 
-        const allowedFields = ['name', 'type', 'size', 'uploadDate', 'uploader', 'status', 'url', 'fileKey', 'isProject', 'projectId', 'comments', 'note'];
         for (const field of allowedFields) {
             if (req.body[field] !== undefined) {
                 doc[field] = req.body[field];
@@ -353,16 +404,12 @@ router.put('/documents/:id', authMiddleware, async (req, res) => {
         await doc.save();
         res.json({ success: true, message: 'Cập nhật tài liệu thành công', data: doc });
     } catch (error) {
-        console.error('Update workflow document error:', error);
-        if (error.name === 'CastError') {
-            return res.status(400).json({ success: false, message: 'ID không hợp lệ' });
-        }
-        res.status(500).json({ success: false, message: 'Lỗi server' });
+        handleRouteError(res, 'Update workflow document error', error);
     }
 });
 
 // @route   DELETE /api/workflow/documents/:id
-// @desc    Delete a document (creator, admin, or project creator/manager)
+// @desc    Delete a document (creator, admin/mod, or project creator/manager)
 // @access  Auth
 router.delete('/documents/:id', authMiddleware, async (req, res) => {
     try {
@@ -371,34 +418,15 @@ router.delete('/documents/:id', authMiddleware, async (req, res) => {
             return res.status(404).json({ success: false, message: 'Không tìm thấy tài liệu' });
         }
 
-        const userId = req.user._id.toString();
-        const isOwner = doc.createdBy.toString() === userId;
-        const isAdmin = req.user.role === 'admin';
-
-        // Check if user is project creator/manager
-        let isProjectManager = false;
-        if (doc.projectId) {
-            const project = await WorkflowProject.findById(doc.projectId).lean();
-            if (project) {
-                const member = project.team.find(m => m.id === userId);
-                if (member && (member.projectRole === 'creator' || member.projectRole === 'manager')) {
-                    isProjectManager = true;
-                }
-            }
-        }
-
-        if (!isOwner && !isAdmin && !isProjectManager) {
+        const project = doc.projectId ? await WorkflowProject.findById(doc.projectId).lean() : null;
+        if (!canManageWorkflowDocument(doc, project, req.user)) {
             return res.status(403).json({ success: false, message: 'Không có quyền xóa' });
         }
 
         await WorkflowDocument.findByIdAndDelete(req.params.id);
         res.json({ success: true, message: 'Xóa tài liệu thành công' });
     } catch (error) {
-        console.error('Delete workflow document error:', error);
-        if (error.name === 'CastError') {
-            return res.status(400).json({ success: false, message: 'ID không hợp lệ' });
-        }
-        res.status(500).json({ success: false, message: 'Lỗi server' });
+        handleRouteError(res, 'Delete workflow document error', error);
     }
 });
 
