@@ -2,7 +2,6 @@ import express from 'express';
 import Course from '../models/Course.js';
 import Article from '../models/Article.js';
 import EventLibraryItem from '../models/EventLibraryItem.js';
-import Skill from '../models/Skill.js';
 
 const router = express.Router();
 export const SITE_URL = 'https://giaiphapsangtao.com';
@@ -24,7 +23,7 @@ function urlEntry(loc, { lastmod, changefreq = 'monthly', priority = '0.7' } = {
     return `  <url>\n    <loc>${escapeXml(loc)}</loc>${date ? `\n    <lastmod>${date}</lastmod>` : ''}\n    <changefreq>${changefreq}</changefreq>\n    <priority>${priority}</priority>\n  </url>`;
 }
 
-export function buildSitemapXml({ courses = [], articles = [], eventItems = [], skills = [] } = {}) {
+export function buildSitemapXml({ courses = [], articles = [], eventItems = [] } = {}) {
     const entries = new Map();
     const add = (path, options) => {
         const loc = `${SITE_URL}${path === '/' ? '/' : `/${String(path).replace(/^\/+/, '')}`}`;
@@ -46,7 +45,6 @@ export function buildSitemapXml({ courses = [], articles = [], eventItems = [], 
         if (!article?.slug || !['about', 'news', 'services'].includes(article.category)) return;
         add(`/${article.category}/${article.slug}`, { lastmod: article.updatedAt, priority: '0.7' });
     });
-    skills.forEach((skill) => skill?.slug && add(`/studio/ai-skills/${skill.slug}`, { lastmod: skill.updatedAt, priority: '0.6' }));
     eventItems.forEach((item) => {
         if (!item?.slug) return;
         if (item.ownership !== 'platform' && !(item.ownership === 'user' && item.visibility === 'public')) return;
@@ -58,15 +56,14 @@ export function buildSitemapXml({ courses = [], articles = [], eventItems = [], 
 
 router.get('/', async (req, res) => {
     try {
-        const [courses, articles, eventItems, skills] = await Promise.all([
+        const [courses, articles, eventItems] = await Promise.all([
             Course.find({ status: 'published' }, { slug: 1, updatedAt: 1 }).lean(),
             Article.find({ status: 'published', category: { $in: ['about', 'news', 'services'] } }, { slug: 1, category: 1, updatedAt: 1 }).lean(),
             EventLibraryItem.find({ $or: [{ ownership: 'platform' }, { visibility: 'public' }] }, { slug: 1, ownership: 1, visibility: 1, updatedAt: 1 }).lean(),
-            Skill.find({}, { slug: 1, updatedAt: 1 }).lean(),
         ]);
         res.header('Content-Type', 'application/xml');
         res.header('Cache-Control', 'public, max-age=3600');
-        res.send(buildSitemapXml({ courses, articles, eventItems, skills }));
+        res.send(buildSitemapXml({ courses, articles, eventItems }));
     } catch (error) {
         console.error('Sitemap error:', error);
         res.status(500).send('Error generating sitemap');

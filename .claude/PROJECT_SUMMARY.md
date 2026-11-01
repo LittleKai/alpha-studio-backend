@@ -1,6 +1,6 @@
 # PROJECT SUMMARY - Alpha Studio Backend
 
-**Last Updated:** 2026-10-31 · **Session:** 21
+**Last Updated:** 2026-11-01 · **Session:** 22
 
 > Trang thai hien tai, khong phai changelog. Sau moi task: cap nhat ngay/session; doi bang trang thai va TODO; cap nhat `DATABASE.md` khi schema doi. Bug quan trong vao `IMPORTANT_FIXED_BUGS.md`. Ban v1 nam trong `archive/PROJECT_SUMMARY_v1.md` va khong duoc dung lam huong dan hien tai.
 
@@ -34,7 +34,7 @@
 | Automated tests | ✅ | `test/*.test.js`, `server/**/*.test.*` | 269 tests + syntax check đạt; heartbeat/SSE handler smoke với DB giả lập đạt |
 | CRM Windows packaging | ✅ | `scripts/release-to-b2.js` | Remove all smoke-test .data before ZIP; CRM artifact guard rejects .data/.env |
 | VocabFlip private FSRS state | ✅ | `server/models/Vocab.js`, `server/routes/vocab.js` | Optional FSRS fields persist; lazy legacy normalization; no DB backfill |
-| XML sitemap | ✅ | `server/routes/sitemap.js`, `test/sitemap.test.js` | Chỉ public/indexable; bài thử/rỗng đã về draft, news còn 3 bài có mô tả |
+| XML sitemap | ✅ | `server/routes/sitemap.js`, `test/sitemap.test.js` | Chỉ public/indexable (56 URL cốt lõi, chỉ giữ `/studio/ai-skills` và bỏ `/studio/ai-skills/:slug`); news còn 3 bài có mô tả |
 | News publishing | ✅ | `server/models/Article.js`, `server/routes/articles.js` | Tin published cần nội dung vi/media; create/update/publish chạy validation; lỗi trả 400 |
 | Creative LED Stage Studio Cloud & Share | ✅ | `server/routes/ledStudio.js`, `models/LedStudioProject.js`, `models/LedStudioPreset.js`, `test/led-studio-routes.test.js` | CRUD dự án `.ledstudio` (B2 key do server cấp, lưu/mở/cập nhật), preset cá nhân/công khai (`vi` bắt buộc) và link duyệt 3D chỉ đọc băm SHA-256 |
 

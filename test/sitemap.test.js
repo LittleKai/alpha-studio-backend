@@ -22,7 +22,7 @@ test('buildSitemapXml emits canonical public URLs without duplicate hreflang', (
     assert.match(xml, /\/studio\/vietyaku<\/loc>/);
     assert.match(xml, /\/studio\/crm<\/loc>/);
     assert.match(xml, /\/studio\/vocab<\/loc>/);
-    assert.match(xml, /\/studio\/ai-skills\/firecrawl<\/loc>/);
+    assert.doesNotMatch(xml, /\/studio\/ai-skills\/firecrawl/);
     assert.match(xml, /\/studio\/event-library\/public-case<\/loc>/);
     assert.doesNotMatch(xml, /private-case/);
     assert.doesNotMatch(xml, /event-creative-city|co-loa-living-spiral|interior-design/);
