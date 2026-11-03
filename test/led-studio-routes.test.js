@@ -9,7 +9,8 @@ import ledStudioRouter, {
   validateShareAccess,
   sanitizeStageSummary,
   validateProjectPayload,
-  isOwnedB2Key
+  isOwnedB2Key,
+  setPresignedDownloadUrlGenerator
 } from '../server/routes/ledStudio.js';
 
 function getRouteHandler(method, path) {
@@ -95,7 +96,7 @@ test('validateProjectPayload rejects empty {} Promise serialization and accepts 
   assert.equal(valid.ok, true);
 });
 
-test('POST/PUT/GET/DELETE /projects enforce B2 key ownership (C1), reject empty payloads (C2), and support save -> update -> reopen -> share round-trip (I2, I7)', async () => {
+function mockProjectStore() {
   const store = new Map();
   const origCreate = LedStudioProject.create;
   const origFindOne = LedStudioProject.findOne;
@@ -146,6 +147,19 @@ test('POST/PUT/GET/DELETE /projects enforce B2 key ownership (C1), reject empty 
       })
     })
   });
+
+  return {
+    store,
+    restore() {
+      LedStudioProject.create = origCreate;
+      LedStudioProject.findOne = origFindOne;
+      LedStudioProject.find = origFind;
+    }
+  };
+}
+
+test('POST/PUT/GET/DELETE /projects enforce B2 key ownership (C1), reject empty payloads (C2), and support save -> update -> reopen -> share round-trip (I2, I7)', async () => {
+  const { store, restore } = mockProjectStore();
 
   try {
     const postProjects = getRouteHandler('post', '/projects');
@@ -252,9 +266,61 @@ test('POST/PUT/GET/DELETE /projects enforce B2 key ownership (C1), reject empty 
     assert.equal(resShareResolve.body.data.mode, 'client_review_readonly');
     assert.equal(resShareResolve.body.data.projectJson.model.name, 'StageV2.glb');
   } finally {
-    LedStudioProject.create = origCreate;
-    LedStudioProject.findOne = origFindOne;
-    LedStudioProject.find = origFind;
+    restore();
+  }
+});
+
+test('share snapshot via requestUploadUrl returns a presigned PUT, drops stale inline payload, and share resolves to downloadUrl without proxying the file', async () => {
+  const B2_ENV = ['B2_BUCKET_NAME', 'B2_ENDPOINT', 'B2_ACCESS_KEY_ID', 'B2_SECRET_ACCESS_KEY'];
+  const savedEnv = Object.fromEntries(B2_ENV.map(k => [k, process.env[k]]));
+  Object.assign(process.env, {
+    B2_BUCKET_NAME: 'test-bucket',
+    B2_ENDPOINT: 'https://s3.b2.test',
+    B2_ACCESS_KEY_ID: 'test-key-id',
+    B2_SECRET_ACCESS_KEY: 'test-secret'
+  });
+  setPresignedDownloadUrlGenerator(async key => `https://s3.b2.test/test-bucket/${key}?signed=1`);
+  const { store, restore } = mockProjectStore();
+  try {
+    const user = { _id: 'user-S', role: 'user' };
+    const summary = { widthM: 18, depthM: 10, heightM: 8, ledCount: 3, lightCount: 4, cueCount: 0 };
+
+    const resCreate = makeRes();
+    await getRouteHandler('post', '/projects')({
+      user,
+      body: { title: 'Gala Snapshot', fileSize: 1234, stageSummary: summary, requestUploadUrl: true }
+    }, resCreate);
+    assert.equal(resCreate.statusCode, 201);
+    const proj = resCreate.body.data.project;
+    assert.ok(isOwnedB2Key(proj.b2FileKey, 'projects', 'user-S'));
+    assert.ok(resCreate.body.data.uploadInfo.presignedUrl.includes(encodeURI(proj.b2FileKey)));
+
+    // A stale inline payload from the old save path must not shadow the new B2 object.
+    store.get(proj._id).projectPayload = makeValidStagePayload('Stale.glb');
+    const resUpdate = makeRes();
+    await getRouteHandler('put', '/projects/:id')({
+      user,
+      params: { id: proj._id },
+      body: { title: 'Gala Snapshot', fileSize: 2048, stageSummary: summary, requestUploadUrl: true }
+    }, resUpdate);
+    assert.equal(resUpdate.statusCode, 200);
+    assert.equal(store.get(proj._id).projectPayload, null);
+    assert.equal(store.get(proj._id).fileSize, 2048);
+
+    const resShare = makeRes();
+    await getRouteHandler('post', '/projects/:id/share')({ user, params: { id: proj._id }, body: {} }, resShare);
+    const resResolve = makeRes();
+    await getRouteHandler('get', '/share/:shareToken')({ params: { shareToken: resShare.body.data.shareToken } }, resResolve);
+    assert.equal(resResolve.statusCode, 200);
+    assert.equal(resResolve.body.data.projectJson, null);
+    assert.equal(resResolve.body.data.downloadUrl, `https://s3.b2.test/test-bucket/${proj.b2FileKey}?signed=1`);
+  } finally {
+    restore();
+    setPresignedDownloadUrlGenerator(null);
+    for (const k of B2_ENV) {
+      if (savedEnv[k] === undefined) delete process.env[k];
+      else process.env[k] = savedEnv[k];
+    }
   }
 });
 

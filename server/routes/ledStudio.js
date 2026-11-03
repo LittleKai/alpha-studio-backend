@@ -396,9 +396,8 @@ async function persistProjectWrite(req, res, existingId = null) {
       existingDoc.thumbnailUrl = String(thumbnailUrl || '').trim();
     }
     existingDoc.stageSummary = autoSummary;
-    if (validatedPayload) {
-      existingDoc.projectPayload = validatedPayload;
-    }
+    // Presigned uploads replace the B2 object, so drop any stale inline copy.
+    existingDoc.projectPayload = validatedPayload;
     await existingDoc.save();
     const outObj = existingDoc.toObject ? existingDoc.toObject() : { ...existingDoc };
     delete outObj.projectPayload;
@@ -460,7 +459,8 @@ router.get('/projects/:id', authMiddleware, async (req, res) => {
     let projectJson = project.projectPayload || null;
     if (isB2Configured() && project.b2FileKey) {
       downloadUrl = await resolveStorageDownloadUrl(project.b2FileKey, 3600).catch(() => null);
-      if (!projectJson) {
+      // Large snapshots go browser -> B2 directly; only proxy through the server when no URL can be signed.
+      if (!projectJson && !downloadUrl) {
         const rawBuf = await downloadFile(project.b2FileKey).catch(() => null);
         if (rawBuf && rawBuf.length > 0) {
           try {
@@ -541,7 +541,8 @@ router.get('/share/:shareToken', async (req, res) => {
     let projectJson = project.projectPayload || null;
     if (isB2Configured() && project.b2FileKey && isOwnedB2Key(project.b2FileKey, 'projects', project.owner)) {
       downloadUrl = await resolveStorageDownloadUrl(project.b2FileKey, 3600).catch(() => null);
-      if (!projectJson) {
+      // Large snapshots go browser -> B2 directly; only proxy through the server when no URL can be signed.
+      if (!projectJson && !downloadUrl) {
         const rawBuf = await downloadFile(project.b2FileKey).catch(() => null);
         if (rawBuf && rawBuf.length > 0) {
           try {
