@@ -140,7 +140,7 @@ const userSchema = new mongoose.Schema({
     lumiStage: {
         plan: {
             type: String,
-            enum: ['free', 'pro_monthly', 'pro_quarterly', 'pro_yearly', 'lumi_pro_monthly', 'lumi_pro_quarterly', 'lumi_pro_yearly', 'pro_partner'],
+            enum: ['free', 'pro_monthly', 'pro_quarterly', 'pro_yearly', 'show_pro_plus', 'lumi_pro_monthly', 'lumi_pro_quarterly', 'lumi_pro_yearly', 'lumi_show_pro_plus', 'pro_partner'],
             default: 'free'
         },
         expiresAt: {

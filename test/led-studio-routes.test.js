@@ -18,6 +18,8 @@ import ledStudioRouter, {
 } from '../server/routes/ledStudio.js';
 import {
   LUMI_BRAND,
+  LUMI_PLANS,
+  LUMI_DEFAULT_PRESET_PACK,
   LUMI_TOKEN_PRICING,
   calculateLumiTokenCredits,
   signLumiLicenseToken,
@@ -824,8 +826,10 @@ test('Pre-commit review regressions: IPv6/loopback SSRF guard, Mongoose User/Tra
     await assert.rejects(() => validateUrlSafety(unsafeUrl), /Blocked|không hợp lệ|nội bộ/i, `Expected ${unsafeUrl} to be blocked`);
   }
 
-  // 2. Mongoose User schema accepts both catalog plan IDs and short plan IDs
-  for (const planId of ['free', 'pro_monthly', 'lumi_pro_monthly', 'lumi_pro_quarterly', 'lumi_pro_yearly']) {
+  // 2. Mongoose User schema enum includes every LUMI_PLANS key (Object.keys(LUMI_PLANS) ⊆ enum) plus legacy/short plan IDs
+  const allowedPlanEnum = User.schema.path('lumiStage.plan').enumValues;
+  for (const planId of [...Object.keys(LUMI_PLANS), 'free', 'pro_monthly', 'pro_quarterly', 'pro_yearly', 'show_pro_plus', 'pro_partner']) {
+    assert.ok(allowedPlanEnum.includes(planId), `User.lumiStage.plan enum must include ${planId}`);
     const u = new User({ email: 'test@grouplife.vn', name: 'Tester', password: 'Password123!', lumiStage: { plan: planId } });
     const err = u.validateSync();
     assert.equal(err, undefined, `User.lumiStage.plan=${planId} must pass Mongoose validation`);
@@ -933,5 +937,91 @@ test('Pre-commit review regressions: IPv6/loopback SSRF guard, Mongoose User/Tra
     setStageAiRunner(null);
     Transaction.create = origTxCreate;
     restore();
+  }
+});
+
+test('C4 & Phase 4: Curated Default Preset Pack, platform preset fallback, lumi_show_pro_plus plan, and Phase 4 telemetry events', async () => {
+  assert.ok(Array.isArray(LUMI_DEFAULT_PRESET_PACK) && LUMI_DEFAULT_PRESET_PACK.length >= 6);
+  assert.ok(LUMI_PLANS.lumi_show_pro_plus, 'lumi_show_pro_plus plan must exist in LUMI_PLANS');
+  assert.equal(LUMI_PLANS.lumi_show_pro_plus.priceCredits, 2990);
+
+    const u = new User({ email: 'showpro@grouplife.vn', name: 'Show Director', password: 'Password123!', lumiStage: { plan: 'lumi_show_pro_plus' } });
+  assert.equal(u.validateSync(), undefined, 'User.lumiStage.plan=lumi_show_pro_plus must pass Mongoose validation');
+
+  const origTxCreate = Transaction.create;
+  Transaction.create = async () => null;
+  try {
+    const postCheckout = getRouteHandler('post', '/billing/checkout');
+    const showProUser = {
+      _id: '507f1f77bcf86cd799439088',
+      email: 'showpro@grouplife.vn',
+      role: 'user',
+      balance: 6000,
+      lumiStage: {
+        plan: 'free',
+        expiresAt: null,
+        freeAiCreditsRemaining: 0,
+        singleExportCredits: 0,
+        unlockedProjectKeys: []
+      },
+      async save() { return this; }
+    };
+    const resShowPro = makeRes();
+    await postCheckout({ user: showProUser, body: { productId: 'lumi_show_pro_plus' } }, resShowPro);
+    assert.equal(resShowPro.statusCode, 200);
+    assert.equal(showProUser.lumiStage.plan, 'lumi_show_pro_plus');
+    assert.equal(showProUser.lumiStage.freeAiCreditsRemaining, 800);
+    assert.equal(showProUser.balance, 3010);
+
+    const resShortAlias = makeRes();
+    await postCheckout({ user: showProUser, body: { productId: 'show_pro_plus' } }, resShortAlias);
+    assert.equal(resShortAlias.statusCode, 200);
+    assert.equal(showProUser.lumiStage.plan, 'lumi_show_pro_plus');
+    assert.equal(showProUser.lumiStage.freeAiCreditsRemaining, 1600);
+    assert.equal(showProUser.balance, 20);
+  } finally {
+    Transaction.create = origTxCreate;
+  }
+
+  const origFind = LedStudioPreset.find;
+  const origFindOne = LedStudioPreset.findOne;
+  LedStudioPreset.find = () => ({ sort: () => ({ limit: () => ({ lean: async () => [] }) }) });
+  LedStudioPreset.findOne = () => ({ lean: async () => null });
+  try {
+    const getPresetPack = getRouteHandler('get', '/presets/pack');
+    const getPresets = getRouteHandler('get', '/presets');
+    const getPresetById = getRouteHandler('get', '/presets/:id');
+    const postTelemetry = getRouteHandler('post', '/telemetry');
+
+    const resPack = makeRes();
+    await getPresetPack({ query: {}, headers: {} }, resPack);
+    assert.equal(resPack.statusCode, 200);
+    assert.equal(resPack.body.data.length, LUMI_DEFAULT_PRESET_PACK.length);
+
+    const resStagePack = makeRes();
+    await getPresetPack({ query: { category: 'stage_template' }, headers: {} }, resStagePack);
+    assert.equal(resStagePack.statusCode, 200);
+    assert.ok(resStagePack.body.data.every(p => p.category === 'stage_template'));
+
+    const resMerged = makeRes();
+    await getPresets({ query: { includePlatform: '1' }, headers: {} }, resMerged);
+    assert.equal(resMerged.statusCode, 200);
+    assert.equal(resMerged.body.data.length, LUMI_DEFAULT_PRESET_PACK.length);
+
+    const resPackItem = makeRes();
+    await getPresetById({ params: { id: 'lumi_pack_stage_edm_2026' }, headers: {} }, resPackItem);
+    assert.equal(resPackItem.statusCode, 200);
+    assert.equal(resPackItem.body.data.preset.ownership, 'platform');
+    assert.equal(resPackItem.body.data.payloadJson.templateId, 'concert');
+
+    for (const evt of ['guide_opened', 'preview_committed', 'preview_reverted', 'dmx_bridge_started', 'live_led_output_opened', 'show_cue_triggered', 'show_lock_toggled']) {
+      const resTel = makeRes();
+      await postTelemetry({ body: { optIn: true, event: evt, meta: { ok: true } } }, resTel);
+      assert.equal(resTel.statusCode, 200);
+      assert.equal(resTel.body.recorded, true, `Telemetry event ${evt} must be accepted`);
+    }
+  } finally {
+    LedStudioPreset.find = origFind;
+    LedStudioPreset.findOne = origFindOne;
   }
 });

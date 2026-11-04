@@ -11,6 +11,7 @@ import {
   LUMI_EFFORT_MODELS,
   LUMI_PLANS,
   LUMI_CREDIT_ACTIONS,
+  LUMI_DEFAULT_PRESET_PACK,
   getLumiProduct,
   calculateLumiTokenCredits,
   signLumiLicenseToken,
@@ -234,9 +235,18 @@ async function loadMutableUser(reqUser) {
   return reqUser;
 }
 
+router.get('/presets/pack', async (req, res) => {
+  const cat = req.query?.category || req.query?.presetType;
+  const list = cat && PRESET_TYPES.includes(String(cat))
+    ? LUMI_DEFAULT_PRESET_PACK.filter(p => p.category === String(cat))
+    : LUMI_DEFAULT_PRESET_PACK;
+  return res.json({ success: true, message: 'OK', data: list });
+});
+
 router.get('/presets', async (req, res) => {
   try {
     const scope = String(req.query?.scope || 'public');
+    const includePlatform = scope === 'platform' || req.query?.includePlatform === '1' || req.query?.includePlatform === 'true';
     const user = await resolveOptionalUser(req);
     let filter = { isPublic: true };
 
@@ -254,7 +264,19 @@ router.get('/presets', async (req, res) => {
       filter.category = String(cat);
     }
 
-    const presets = await LedStudioPreset.find(filter).sort({ createdAt: -1 }).limit(100).lean();
+    const presets = scope === 'platform'
+      ? []
+      : await LedStudioPreset.find(filter).sort({ createdAt: -1 }).limit(100).lean();
+
+    if (includePlatform) {
+      const pack = cat && PRESET_TYPES.includes(String(cat))
+        ? LUMI_DEFAULT_PRESET_PACK.filter(p => p.category === String(cat))
+        : LUMI_DEFAULT_PRESET_PACK;
+      const existingIds = new Set(presets.map(p => String(p._id)));
+      const merged = [...pack.filter(p => !existingIds.has(String(p._id))), ...presets];
+      return res.json({ success: true, message: 'OK', data: merged });
+    }
+
     return res.json({ success: true, message: 'OK', data: presets });
   } catch (err) {
     return res.status(500).json({ success: false, message: err.message });
@@ -305,7 +327,9 @@ router.get('/presets/asset', async (req, res) => {
 
 router.get('/presets/:id', async (req, res) => {
   try {
-    const preset = await LedStudioPreset.findOne({ _id: req.params.id }).lean();
+    const preset = (await LedStudioPreset.findOne({ _id: req.params.id }).lean()) ||
+      LUMI_DEFAULT_PRESET_PACK.find(p => String(p._id) === String(req.params.id)) ||
+      null;
     return await respondWithPresetDescriptor(req, res, preset);
   } catch (err) {
     return res.status(500).json({ success: false, message: err.message });
@@ -1122,8 +1146,13 @@ function buildStageAiSystemPrompt(mode = 'design', stageState = {}, budgetLimitV
     '    // 6. {"action":"add_light","fixtureType":"beam_230_7r|beam_350_17r|par_led_54x3w|katana_bar_12x40w|cob_blinder_2x100w","count":8,"row":"front|back|floor","color":"#38bdf8","height":6.5}',
     '    // 7. {"action":"build_truss","width":14,"depth":8,"height":7}',
     '    // 8. {"action":"add_prop","assetId":"podium_vip|line_array_hang|stage_sub_stack|haze_machine_pro|co2_cannon_jet|cold_spark_fountain|backdrop_arch|gala_round_table|conference_ibm_table|foh_control_booth","count":2,"x":0,"z":0}',
-    '    // 9. {"action":"apply_style","mood":"corporate|wedding|edm|gala|festival","primaryColor":"#0ea5e9","secondaryColor":"#f59e0b","fogDensity":0.35,"bpm":128}',
-    '    // 10. {"action":"optimize_budget","maxBudgetVnd":80000000}',
+    '    // 9. {"action":"move_led","index":0,"dx":0,"dy":0,"dz":-1.0}',
+    '    // 10. {"action":"move_prop","kind":"dj_booth","dx":1.5,"dy":0,"dz":0}',
+    '    // 11. {"action":"layout_seating","seatingType":"gala_round_table|conference_ibm_table|banquet_chair","guestCount":200}',
+    '    // 12. {"action":"music_cues","bpm":128,"mood":"edm|gala|wedding|conference"}',
+    '    // 13. {"action":"apply_brand","brandName":"GROUPLIFE","primaryColor":"#38bdf8","accentColor":"#f59e0b"}',
+    '    // 14. {"action":"apply_style","mood":"corporate|wedding|edm|gala|festival","primaryColor":"#0ea5e9","secondaryColor":"#f59e0b","fogDensity":0.35,"bpm":128}',
+    '    // 15. {"action":"optimize_budget","maxBudgetVnd":80000000}',
     '  ],',
     '  "audit": [',
     '    {"severity":"info|warn|error","title":"Tiêu đề kiểm tra","detail":"Chi tiết kỹ thuật điện 3 pha / tầm nhìn / tải trọng truss / TCVN"}',
@@ -1355,7 +1384,14 @@ const ALLOWED_TELEMETRY_EVENTS = new Set([
   'seating_auto_layout',
   'sightline_checked',
   'music_show_cues',
-  'brand_identity_applied'
+  'brand_identity_applied',
+  'guide_opened',
+  'preview_committed',
+  'preview_reverted',
+  'dmx_bridge_started',
+  'live_led_output_opened',
+  'show_cue_triggered',
+  'show_lock_toggled'
 ]);
 
 router.post('/telemetry', async (req, res) => {

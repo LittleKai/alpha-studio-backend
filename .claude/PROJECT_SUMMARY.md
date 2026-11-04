@@ -1,6 +1,6 @@
 # PROJECT SUMMARY - Alpha Studio Backend
 
-**Last Updated:** 2026-11-04 · **Session:** 24
+**Last Updated:** 2026-11-04 · **Session:** 25
 
 > Trang thai hien tai, khong phai changelog. Sau moi task: cap nhat ngay/session; doi bang trang thai va TODO; cap nhat `DATABASE.md` khi schema doi. Bug quan trong vao `IMPORTANT_FIXED_BUGS.md`. Ban v1 nam trong `archive/PROJECT_SUMMARY_v1.md` va khong duoc dung lam huong dan hien tai.
 
