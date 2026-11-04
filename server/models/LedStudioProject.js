@@ -66,7 +66,48 @@ const ledStudioProjectSchema = new mongoose.Schema({
   shareExpiresAt: {
     type: Date,
     default: null
-  }
+  },
+  unlockedPro: {
+    type: Boolean,
+    default: false
+  },
+  sharePasswordProtected: {
+    type: Boolean,
+    default: false
+  },
+  sharePasswordHash: {
+    type: String,
+    default: null,
+    select: false
+  },
+  reviewStatus: {
+    type: String,
+    enum: ['pending', 'approved', 'changes_requested'],
+    default: 'pending'
+  },
+  reviewBy: {
+    type: String,
+    default: '',
+    maxlength: 120
+  },
+  reviewNote: {
+    type: String,
+    default: '',
+    maxlength: 1000
+  },
+  reviewUpdatedAt: {
+    type: Date,
+    default: null
+  },
+  reviewComments: [{
+    id: { type: String, required: true },
+    author: { type: String, default: 'Khách hàng', maxlength: 100 },
+    message: { type: String, required: true, maxlength: 800 },
+    position: [{ type: Number }],
+    targetName: { type: String, default: '', maxlength: 120 },
+    resolved: { type: Boolean, default: false },
+    createdAt: { type: Date, default: Date.now }
+  }]
 }, { timestamps: true });
 
 export default mongoose.model('LedStudioProject', ledStudioProjectSchema);

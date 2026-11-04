@@ -1,6 +1,6 @@
 # PROJECT SUMMARY - Alpha Studio Backend
 
-**Last Updated:** 2026-11-03 · **Session:** 23
+**Last Updated:** 2026-11-04 · **Session:** 24
 
 > Trang thai hien tai, khong phai changelog. Sau moi task: cap nhat ngay/session; doi bang trang thai va TODO; cap nhat `DATABASE.md` khi schema doi. Bug quan trong vao `IMPORTANT_FIXED_BUGS.md`. Ban v1 nam trong `archive/PROJECT_SUMMARY_v1.md` va khong duoc dung lam huong dan hien tai.
 
@@ -31,12 +31,12 @@
 | CRM + analytics | ✅ | `server/routes/crm.js`, `analytics.js` | SSE hello/device.status có app/agent version; đổi version phát event |
 | Tool/file download tracking & streaming | ✅ | `server/routes/toolDownloads.js`, `server/routes/articles.js` | GET attachment download chỉ bài published, tự `$inc`; tên tải lấy basename gốc từ `fileKey` (bỏ tiền tố timestamp), tách khỏi nhãn biên tập; `versions` key đổi `.`→`_`; admin trả `serviceDownloads`; `downloadCount` select:false (ẩn khỏi API công khai) |
 | B2 orphan/retention/migrations | ✅ | `server/routes/admin.js`, `server/retention/`, `server/migrations/` | DELETE đối chiếu cả Article attachments |
-| Automated tests | ✅ | `test/*.test.js`, `server/**/*.test.*` | 269 tests + syntax check đạt; heartbeat/SSE handler smoke với DB giả lập đạt |
+| Automated tests | ✅ | `test/*.test.js`, `server/**/*.test.*` | 280 tests + syntax check đạt; heartbeat/SSE handler smoke với DB giả lập đạt |
 | CRM Windows packaging | ✅ | `scripts/release-to-b2.js` | Remove all smoke-test .data before ZIP; CRM artifact guard rejects .data/.env |
 | VocabFlip private FSRS state | ✅ | `server/models/Vocab.js`, `server/routes/vocab.js` | Optional FSRS fields persist; lazy legacy normalization; no DB backfill |
 | XML sitemap | ✅ | `server/routes/sitemap.js`, `test/sitemap.test.js` | Chỉ public/indexable (56 URL cốt lõi, chỉ giữ `/studio/ai-skills` và bỏ `/studio/ai-skills/:slug`); news còn 3 bài có mô tả |
 | News publishing | ✅ | `server/models/Article.js`, `server/routes/articles.js` | Tin published cần nội dung vi/media; create/update/publish chạy validation; lỗi trả 400 |
-| Creative LED Stage Studio Cloud & Share | ✅ | `server/routes/ledStudio.js`, `models/LedStudioProject.js`, `models/LedStudioPreset.js`, `test/led-studio-routes.test.js` | Bản chụp `.ledstudio` cho link duyệt (client `PUT` thẳng B2 qua `requestUploadUrl`, share trả `downloadUrl`; lưu cá nhân nay ở Google Drive phía client), preset cá nhân/công khai (`vi` bắt buộc) và link duyệt 3D chỉ đọc băm SHA-256 |
+| Creative LED Stage Studio (LumiStage) Cloud, Share, Billing, Stage AI & Telemetry | ✅ | `server/routes/ledStudio.js`, `server/utils/lumiCatalog.js`, `server/utils/aiProvider.js`, `server/models/LedStudioProject.js`, `server/models/User.js`, `test/led-studio-routes.test.js` | B4/B5 (share có mật khẩu, ghim bình luận 3D, duyệt phương án), Billing/License qua Credit (`User.balance`), Stage AI (`gemini-3.8-flash` 3 effort qua `gcli` giá 1/3 chính thức + BYOK 0 Credit), Opt-in Telemetry (NĐ 13/2023) |
 
 ## 3. Gia dinh dang giu
 

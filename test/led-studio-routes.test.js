@@ -4,14 +4,25 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import LedStudioProject from '../server/models/LedStudioProject.js';
 import LedStudioPreset from '../server/models/LedStudioPreset.js';
+import User from '../server/models/User.js';
+import Transaction from '../server/models/Transaction.js';
+import { validateUrlSafety } from '../server/utils/aiProvider.js';
 import ledStudioRouter, {
   hashShareToken,
   validateShareAccess,
   sanitizeStageSummary,
   validateProjectPayload,
   isOwnedB2Key,
-  setPresignedDownloadUrlGenerator
+  setPresignedDownloadUrlGenerator,
+  setStageAiRunner
 } from '../server/routes/ledStudio.js';
+import {
+  LUMI_BRAND,
+  LUMI_TOKEN_PRICING,
+  calculateLumiTokenCredits,
+  signLumiLicenseToken,
+  verifyLumiLicenseToken
+} from '../server/utils/lumiCatalog.js';
 
 function getRouteHandler(method, path) {
   const layer = ledStudioRouter.stack.find(
@@ -539,4 +550,353 @@ test('admin.js collectReferencedKeys includes LedStudioProject.b2FileKey and Led
   assert.ok(adminSrc.includes('LedStudioPreset'), 'admin.js must reference LedStudioPreset');
   assert.ok(adminSrc.includes('b2FileKey'), 'admin.js must collect b2FileKey');
   assert.ok(adminSrc.includes('b2AssetKey'), 'admin.js must collect b2AssetKey');
+});
+
+test('LumiStage catalog calculates token credits at 1/3 official Gemini price and 0 credit for BYOK', () => {
+  assert.equal(LUMI_BRAND.name, 'LumiStage');
+  assert.equal(LUMI_BRAND.legalEntity, 'CÔNG TY TNHH MTV GROUPLIFE');
+  assert.equal(LUMI_TOKEN_PRICING.inputCreditsPerMillion, 25);
+  assert.equal(LUMI_TOKEN_PRICING.outputCreditsPerMillion, 210);
+
+  // 1,000,000 input + 1,000,000 output = 25 + 210 = 235 Credits
+  const fullMillion = calculateLumiTokenCredits({ promptTokens: 1_000_000, completionTokens: 1_000_000 });
+  assert.equal(fullMillion.totalCredits, 235);
+
+  // Typical medium Stage AI call: 1,500 input + 1,500 output = 0.0375 + 0.315 = 0.3525 Credits (~35 VND)
+  const mediumCall = calculateLumiTokenCredits({ promptTokens: 1500, completionTokens: 1500 });
+  assert.equal(mediumCall.totalCredits, 0.3525);
+
+  // BYOK is always 0 Credit
+  const byokCall = calculateLumiTokenCredits({ promptTokens: 50_000, completionTokens: 20_000 }, { byok: true });
+  assert.equal(byokCall.totalCredits, 0);
+
+  // License token sign & verify
+  const token = signLumiLicenseToken({
+    userId: 'user_lumi_1',
+    email: 'director@grouplife.vn',
+    plan: 'pro_monthly',
+    expiresAt: new Date(Date.now() + 86400_000).toISOString(),
+    unlockedProjectKeys: ['proj_1']
+  });
+  const verified = verifyLumiLicenseToken(token);
+  assert.equal(verified.valid, true);
+  assert.equal(verified.payload.brand, 'LumiStage');
+  assert.equal(verified.payload.plan, 'pro_monthly');
+});
+
+test('B4 & B5: Password-protected share link, 3D pin comments, and client approval decision', async () => {
+  const { restore } = mockProjectStore();
+  try {
+    const postProjects = getRouteHandler('post', '/projects');
+    const postShare = getRouteHandler('post', '/projects/:id/share');
+    const getShare = getRouteHandler('get', '/share/:shareToken');
+    const postComments = getRouteHandler('post', '/share/:shareToken/comments');
+    const postDecision = getRouteHandler('post', '/share/:shareToken/decision');
+
+    const resCreate = makeRes();
+    await postProjects({
+      user: { _id: 'user-owner', role: 'user' },
+      body: { title: 'Gala GroupLife 2026', projectJson: makeValidStagePayload('Gala.glb') }
+    }, resCreate);
+    const projId = resCreate.body.data.project._id;
+
+    // Enable share with password
+    const resShare = makeRes();
+    await postShare({
+      user: { _id: 'user-owner', role: 'user' },
+      params: { id: projId },
+      body: { enabled: true, expiresInHours: 72, password: 'vip2026' }
+    }, resShare);
+    assert.equal(resShare.statusCode, 200);
+    assert.equal(resShare.body.data.passwordProtected, true);
+    const shareToken = resShare.body.data.shareToken;
+
+    // 1. Access without password returns requiresPassword: true without leaking projectJson
+    const resNoPwd = makeRes();
+    await getShare({ params: { shareToken }, headers: {}, query: {} }, resNoPwd);
+    assert.equal(resNoPwd.statusCode, 200);
+    assert.equal(resNoPwd.body.data.requiresPassword, true);
+    assert.equal(resNoPwd.body.data.projectJson, undefined);
+
+    // 2. Access with wrong password returns 401
+    const resWrongPwd = makeRes();
+    await getShare({
+      params: { shareToken },
+      headers: { 'x-share-password': 'wrong' },
+      query: {}
+    }, resWrongPwd);
+    assert.equal(resWrongPwd.statusCode, 401);
+
+    // 3. Access with valid password returns stage payload
+    const resValidPwd = makeRes();
+    await getShare({
+      params: { shareToken },
+      headers: { 'x-share-password': 'vip2026' },
+      query: {}
+    }, resValidPwd);
+    assert.equal(resValidPwd.statusCode, 200);
+    assert.equal(resValidPwd.body.data.requiresPassword, false);
+    assert.equal(resValidPwd.body.data.projectJson.model.name, 'Gala.glb');
+
+    // 4. Pin a 3D comment on stage coordinates
+    const resComment = makeRes();
+    await postComments({
+      params: { shareToken },
+      headers: { 'x-share-password': 'vip2026' },
+      body: {
+        author: 'Giám đốc Sự kiện',
+        message: 'Nâng màn LED chính cao thêm 0.5m để không vướng bàn VIP',
+        position: [0, 3.2, -4.5],
+        targetName: 'CENTER LED'
+      }
+    }, resComment);
+    assert.equal(resComment.statusCode, 201);
+    assert.equal(resComment.body.data.reviewComments.length, 1);
+    assert.deepEqual(resComment.body.data.comment.position, [0, 3.2, -4.5]);
+
+    // 5. Client approves the stage design
+    const resApprove = makeRes();
+    await postDecision({
+      params: { shareToken },
+      headers: { 'x-share-password': 'vip2026' },
+      body: {
+        status: 'approved',
+        reviewerName: 'Chủ đầu tư GroupLife',
+        note: 'Chốt phương án này để xuất bản vẽ DXF & báo giá.'
+      }
+    }, resApprove);
+    assert.equal(resApprove.statusCode, 200);
+    assert.equal(resApprove.body.data.reviewStatus, 'approved');
+  } finally {
+    restore();
+  }
+});
+
+test('LumiStage credit billing, project unlock, Pro upgrade, and Stage AI token deduction + BYOK', async () => {
+  const { restore } = mockProjectStore();
+  const origTxCreate = Transaction.create;
+  Transaction.create = async () => null;
+  try {
+    const getBillingStatus = getRouteHandler('get', '/billing/status');
+    const postCheckout = getRouteHandler('post', '/billing/checkout');
+    const postConsumeExport = getRouteHandler('post', '/billing/consume-export');
+    const postStageAi = getRouteHandler('post', '/ai/stage');
+
+    const mockUser = {
+      _id: 'user-credit-test',
+      email: 'agency@grouplife.vn',
+      role: 'user',
+      balance: 2000,
+      lumiStage: {
+        plan: 'free',
+        expiresAt: null,
+        freeAiCreditsRemaining: 0.2,
+        singleExportCredits: 0,
+        unlockedProjectKeys: []
+      },
+      async save() { return this; }
+    };
+
+    // 1. Initial billing status
+    const resStatus = makeRes();
+    await getBillingStatus({ user: mockUser }, resStatus);
+    assert.equal(resStatus.statusCode, 200);
+    assert.equal(resStatus.body.data.balance, 2000);
+    assert.equal(resStatus.body.data.subscription.proActive, false);
+
+    // 2. Free user export without autoDeductCredits requires watermark removal (402)
+    const resBlockedExport = makeRes();
+    await postConsumeExport({
+      user: mockUser,
+      body: { projectKey: 'proj_abc', autoDeductCredits: false }
+    }, resBlockedExport);
+    assert.equal(resBlockedExport.statusCode, 402);
+
+    // 3. Unlock single project permanently for 200 Credits
+    const resUnlock = makeRes();
+    await postCheckout({
+      user: mockUser,
+      body: { productId: 'lumi_unlock_project', projectKey: 'proj_abc' }
+    }, resUnlock);
+    assert.equal(resUnlock.statusCode, 200);
+    assert.equal(mockUser.balance, 1800);
+    assert.ok(mockUser.lumiStage.unlockedProjectKeys.includes('proj_abc'));
+
+    // Now export on unlocked project is free and unwatermarked
+    const resUnlockedExport = makeRes();
+    await postConsumeExport({
+      user: mockUser,
+      body: { projectKey: 'proj_abc' }
+    }, resUnlockedExport);
+    assert.equal(resUnlockedExport.statusCode, 200);
+    assert.equal(resUnlockedExport.body.data.watermark, false);
+    assert.equal(resUnlockedExport.body.data.chargedCredits, 0);
+
+    // 4. Stage AI call via Web model deducts from freeAiCreditsRemaining first, then wallet balance
+    setStageAiRunner(async ({ effort, isByok }) => ({
+      text: JSON.stringify({
+        reply: `Đã dựng sân khấu hội nghị (${effort})`,
+        commands: [{ action: 'load_template', templateId: 'conference' }],
+        audit: [{ severity: 'info', title: 'Điện 3 pha ổn định', detail: 'Tổng tải 18 kVA' }],
+        proposal: { title: 'Phương án Hội nghị', summary: 'LED P3.91', highlights: ['Rõ nét'] },
+        estimatedCostVnd: 45000000
+      }),
+      model: isByok ? 'custom-model' : 'gemini-3.8-flash',
+      provider: isByok ? 'openai' : 'gcli',
+      usage: { promptTokens: 2000, completionTokens: 2000, totalTokens: 4000 }
+    }));
+
+    // 2000 input * 25/1M = 0.05 Cr; 2000 output * 210/1M = 0.42 Cr -> Total = 0.47 Cr
+    // User has 0.20 freeAiCreditsRemaining -> uses 0.20 free + 0.27 from wallet balance (1800 -> 1799.73)
+    const resAiWeb = makeRes();
+    await postStageAi({
+      user: mockUser,
+      body: { prompt: 'Dựng sân khấu hội nghị 500 khách', effort: 'medium' }
+    }, resAiWeb);
+    assert.equal(resAiWeb.statusCode, 200);
+    assert.equal(resAiWeb.body.data.billing.creditCharged, 0.47);
+    assert.equal(resAiWeb.body.data.billing.usedFreeCredits, 0.2);
+    assert.equal(resAiWeb.body.data.billing.usedWalletCredits, 0.27);
+    assert.equal(mockUser.lumiStage.freeAiCreditsRemaining, 0);
+    assert.equal(mockUser.balance, 1799.73);
+
+    // 5. Stage AI call with BYOK charges 0 Credits
+    const resAiByok = makeRes();
+    await postStageAi({
+      user: mockUser,
+      body: {
+        prompt: 'Thêm 8 đèn Beam 230',
+        byok: { provider: 'openai', apiKey: 'sk-user-own-key-123456', model: 'gpt-4o-mini' }
+      }
+    }, resAiByok);
+    assert.equal(resAiByok.statusCode, 200);
+    assert.equal(resAiByok.body.data.billing.byok, true);
+    assert.equal(resAiByok.body.data.billing.creditCharged, 0);
+    assert.equal(mockUser.balance, 1799.73);
+
+    // 6. Upgrade to LumiStage Pro Monthly (1490 Credits) grants +300 bonus AI Credits
+    const resPro = makeRes();
+    await postCheckout({
+      user: mockUser,
+      body: { productId: 'lumi_pro_monthly' }
+    }, resPro);
+    assert.equal(resPro.statusCode, 200);
+    assert.equal(resPro.body.data.subscription.proActive, true);
+    assert.equal(mockUser.lumiStage.freeAiCreditsRemaining, 300);
+    assert.equal(mockUser.balance, 309.73);
+  } finally {
+    // 7. Phase 2 Opt-in Telemetry (Nghị định 13/2023): ignored when optIn !== true, recorded when optIn === true
+    const postTelemetry = getRouteHandler('post', '/telemetry');
+    const resTelOff = makeRes();
+    await postTelemetry({
+      body: { optIn: false, event: 'template_applied', meta: { templateId: 'vn_wedding_luxury' } }
+    }, resTelOff);
+    assert.equal(resTelOff.statusCode, 200);
+    assert.equal(resTelOff.body.recorded, false);
+
+    const resTelOn = makeRes();
+    await postTelemetry({
+      body: { optIn: true, event: 'seating_auto_layout', meta: { guestCount: 300, type: 'gala_round_table' } }
+    }, resTelOn);
+    assert.equal(resTelOn.statusCode, 200);
+    assert.equal(resTelOn.body.recorded, true);
+    assert.equal(resTelOn.body.data.event, 'seating_auto_layout');
+
+    setStageAiRunner(null);
+    Transaction.create = origTxCreate;
+    restore();
+  }
+});
+
+test('Pre-commit review regressions: IPv6/loopback SSRF guard, Mongoose User/Transaction validation, and frontend contract aliases', async () => {
+  // 1. SSRF guard blocks bracketed IPv6 loopback, 0.0.0.0, IPv4-mapped IPv6, and Unique Local IPv6
+  for (const unsafeUrl of [
+    'http://[::1]:18791/v1',
+    'http://[0:0:0:0:0:0:0:1]:8080/v1',
+    'http://0.0.0.0:11434/v1',
+    'http://[::ffff:127.0.0.1]:8000/v1',
+    'http://[fd00::1]:8000/v1'
+  ]) {
+    await assert.rejects(() => validateUrlSafety(unsafeUrl), /Blocked|không hợp lệ|nội bộ/i, `Expected ${unsafeUrl} to be blocked`);
+  }
+
+  // 2. Mongoose User schema accepts both catalog plan IDs and short plan IDs
+  for (const planId of ['free', 'pro_monthly', 'lumi_pro_monthly', 'lumi_pro_quarterly', 'lumi_pro_yearly']) {
+    const u = new User({ email: 'test@grouplife.vn', name: 'Tester', password: 'Password123!', lumiStage: { plan: planId } });
+    const err = u.validateSync();
+    assert.equal(err, undefined, `User.lumiStage.plan=${planId} must pass Mongoose validation`);
+  }
+
+  // 3. Transaction creation during checkout/AI spend passes Mongoose validation (userId + transactionCode)
+  const capturedTxs = [];
+  const origTxCreate = Transaction.create;
+  Transaction.create = async (doc) => {
+    const txDoc = new Transaction(doc);
+    const validationErr = txDoc.validateSync();
+    assert.equal(validationErr, undefined, 'Transaction document must pass Mongoose schema validation');
+    capturedTxs.push(doc);
+    return txDoc;
+  };
+
+  const { restore } = mockProjectStore();
+  try {
+    const postCheckout = getRouteHandler('post', '/billing/checkout');
+    const postDecision = getRouteHandler('post', '/share/:shareToken/decision');
+    const postProjects = getRouteHandler('post', '/projects');
+    const postShare = getRouteHandler('post', '/projects/:id/share');
+
+    const mockUser = {
+      _id: '507f1f77bcf86cd799439011',
+      email: 'client@grouplife.vn',
+      role: 'user',
+      balance: 500,
+      lumiStage: {
+        plan: 'free',
+        expiresAt: null,
+        freeAiCreditsRemaining: 20,
+        singleExportCredits: 0,
+        unlockedProjectKeys: []
+      },
+      async save() { return this; }
+    };
+
+    // Checkout using frontend `productKey` field returns both nested and flat billing fields
+    const resCheckout = makeRes();
+    await postCheckout({
+      user: mockUser,
+      body: { productKey: 'lumi_single_export' }
+    }, resCheckout);
+    assert.equal(resCheckout.statusCode, 200);
+    assert.equal(resCheckout.body.data.singleExportPasses, 1);
+    assert.equal(resCheckout.body.data.balanceCredits, 450);
+    assert.equal(capturedTxs.length, 1);
+    assert.match(capturedTxs[0].transactionCode, /^LUMI_/);
+
+    // Share decision using frontend `{ decision, author, note }` fields succeeds
+    const resProj = makeRes();
+    await postProjects({
+      user: { _id: '507f1f77bcf86cd799439011', role: 'user' },
+      body: { title: 'Alias Share Test', projectJson: makeValidStagePayload('Alias.glb') }
+    }, resProj);
+    const resShare = makeRes();
+    await postShare({
+      user: { _id: '507f1f77bcf86cd799439011', role: 'user' },
+      params: { id: resProj.body.data.project._id },
+      body: { enabled: true }
+    }, resShare);
+    const shareToken = resShare.body.data.shareToken;
+
+    const resDec = makeRes();
+    await postDecision({
+      params: { shareToken },
+      headers: {},
+      body: { decision: 'changes_requested', author: 'Đạo diễn Sân khấu', note: 'Tăng thêm 4 đèn Blinder' }
+    }, resDec);
+    assert.equal(resDec.statusCode, 200);
+    assert.equal(resDec.body.data.reviewStatus, 'changes_requested');
+    assert.equal(resDec.body.data.reviewBy, 'Đạo diễn Sân khấu');
+  } finally {
+    Transaction.create = origTxCreate;
+    restore();
+  }
 });

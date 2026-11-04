@@ -210,6 +210,7 @@ async function fetchGcliWithRetry(url, body) {
 
 // ─── SSRF protection for user-supplied URLs ────────────────────────────────
 import dns from 'node:dns/promises';
+import net from 'node:net';
 
 const PRIVATE_IP_RANGES = [
     /^127\./,                          // loopback
@@ -219,15 +220,18 @@ const PRIVATE_IP_RANGES = [
     /^169\.254\./,                     // link-local
     /^0\./,                            // current network
     /^::1$/,                           // IPv6 loopback
-    /^fc00:/i,                         // IPv6 unique-local
+    /^::$/,                            // IPv6 unspecified
+    /^::ffff:/i,                       // IPv4-mapped IPv6 (including WHATWG hex-normalized ::ffff:7f00:1)
+    /^f[cd][0-9a-f]{2}:/i,             // IPv6 unique-local (fc00::/7)
     /^fe80:/i,                         // IPv6 link-local
 ];
 
 function isPrivateIp(ip) {
-    return PRIVATE_IP_RANGES.some((r) => r.test(ip));
+    const clean = String(ip || '').replace(/^\[|\]$/g, '').trim().toLowerCase();
+    return PRIVATE_IP_RANGES.some((r) => r.test(clean));
 }
 
-async function validateUrlSafety(urlString) {
+export async function validateUrlSafety(urlString) {
     let parsed;
     try {
         parsed = new URL(urlString);
@@ -238,17 +242,29 @@ async function validateUrlSafety(urlString) {
         throw new Error(`Blocked URL protocol: ${parsed.protocol}`);
     }
     const hostname = parsed.hostname;
-    if (hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '::1') {
-        throw new Error('Blocked localhost URL.');
+    const cleanHost = hostname.replace(/^\[|\]$/g, '').trim().toLowerCase();
+    if (
+        !cleanHost ||
+        cleanHost === 'localhost' ||
+        cleanHost.endsWith('.localhost') ||
+        isPrivateIp(cleanHost)
+    ) {
+        throw new Error('Blocked localhost or private IP URL.');
+    }
+    if (net.isIP(cleanHost)) {
+        if (isPrivateIp(cleanHost)) {
+            throw new Error(`Blocked private IP (${cleanHost}).`);
+        }
+        return;
     }
     // DNS resolve to check for private IPs
     try {
-        const addresses = await dns.resolve4(hostname).catch(() => []);
-        const addresses6 = await dns.resolve6(hostname).catch(() => []);
+        const addresses = await dns.resolve4(cleanHost).catch(() => []);
+        const addresses6 = await dns.resolve6(cleanHost).catch(() => []);
         const all = [...addresses, ...addresses6];
         for (const addr of all) {
             if (isPrivateIp(addr)) {
-                throw new Error(`Blocked private IP (${addr}) for host ${hostname}.`);
+                throw new Error(`Blocked private IP (${addr}) for host ${cleanHost}.`);
             }
         }
     } catch (err) {
@@ -314,6 +330,9 @@ export async function callOpenClaw(content, sessionId) {
 const GCLI_MODEL_CODE_MAP = {
     // Tên model UI hiện tại → mã 假流式 / upstream.
     'gemini-3.8-flash': '假流式-agy-gemini-3.8-flash-low', // Gemini 3.8 Flash Low (mới nhất)
+    'gemini-3.8-flash-low': '假流式-agy-gemini-3.8-flash-low',
+    'gemini-3.8-flash-medium': '假流式-agy-gemini-3.8-flash-medium',
+    'gemini-3.8-flash-high': '假流式-agy-gemini-3.8-flash-high',
     'gemini-3.1-flash-lite': '假流式-agy-gemini-3.1-flash-lite', // Gemini 3.1 Flash Lite
     'gemini-2.5-flash': '假流式-agy-gemini-2.5-flash-low', // cũ: 'gemini-2.5-flash'
     'gemini-3-flash': '假流式-agy-gemini-3-flash-low',     // cũ: 'gemini-3-flash-preview'
@@ -463,4 +482,152 @@ export async function callConfiguredAiProvider(content, sessionId, options = {})
         disableLowModelFallback: options.disableLowModelFallback,
         enableLowModelFallback: options.enableLowModelFallback
     });
+}
+
+export const BYOK_PROVIDER_ENDPOINTS = {
+    gemini: 'https://generativelanguage.googleapis.com/v1beta/openai/chat/completions',
+    openai: 'https://api.openai.com/v1/chat/completions',
+    openrouter: 'https://openrouter.ai/api/v1/chat/completions',
+    deepseek: 'https://api.deepseek.com/v1/chat/completions',
+    groq: 'https://api.groq.com/openai/v1/chat/completions',
+    anthropic: 'https://api.anthropic.com/v1/messages'
+};
+
+const BYOK_DEFAULT_MODELS = {
+    gemini: 'gemini-2.5-flash',
+    openai: 'gpt-4o-mini',
+    openrouter: 'google/gemini-2.5-flash',
+    deepseek: 'deepseek-chat',
+    groq: 'llama-3.3-70b-versatile',
+    anthropic: 'claude-3-5-sonnet-latest',
+    custom: 'gpt-4o-mini'
+};
+
+/**
+ * Gọi model AI bên ngoài bằng API Key cá nhân của người dùng (BYOK — 0 Credit).
+ * Hỗ trợ: gemini, openai, openrouter, deepseek, groq, anthropic, custom (OpenAI-compatible).
+ */
+export async function callExternalByokAi(content, options = {}) {
+    const provider = String(options.provider || 'gemini').toLowerCase().trim();
+    const apiKey = String(options.apiKey || '').trim();
+    if (!apiKey || apiKey.length < 8) {
+        throw new Error('API Key cá nhân (BYOK) không hợp lệ hoặc bị trống.');
+    }
+
+    const model = String(options.model || BYOK_DEFAULT_MODELS[provider] || 'gemini-2.5-flash').trim();
+    const temperature = Number.isFinite(Number(options.temperature)) ? Number(options.temperature) : 0.3;
+
+    if (provider === 'anthropic') {
+        const endpoint = BYOK_PROVIDER_ENDPOINTS.anthropic;
+        const userMessages = [];
+        if (Array.isArray(options.messages) && options.messages.length > 0) {
+            for (const m of options.messages) {
+                if (!m || typeof m.content !== 'string' || !m.content.trim() || m.role === 'system') continue;
+                userMessages.push({
+                    role: m.role === 'assistant' ? 'assistant' : 'user',
+                    content: m.content.trim()
+                });
+            }
+        }
+        if (userMessages.length === 0) {
+            userMessages.push({ role: 'user', content: String(content || '').trim() });
+        }
+
+        const res = await fetch(endpoint, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'x-api-key': apiKey,
+                'anthropic-version': '2023-06-01'
+            },
+            body: JSON.stringify({
+                model,
+                max_tokens: 4096,
+                temperature,
+                ...(options.systemPrompt ? { system: String(options.systemPrompt) } : {}),
+                messages: userMessages
+            }),
+            signal: AbortSignal.timeout(60000)
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) {
+            throw new Error(data.error?.message || `Anthropic BYOK lỗi (${res.status}).`);
+        }
+        const text = Array.isArray(data.content)
+            ? data.content.map((part) => part.text || '').join('\n').trim()
+            : '';
+        if (!text) throw new Error('Model BYOK trả về phản hồi rỗng.');
+        const promptTokens = data.usage?.input_tokens ?? 0;
+        const completionTokens = data.usage?.output_tokens ?? 0;
+        return {
+            text,
+            usage: {
+                promptTokens,
+                completionTokens,
+                totalTokens: promptTokens + completionTokens
+            },
+            model: data.model || model,
+            byok: true,
+            provider
+        };
+    }
+
+    let endpoint = BYOK_PROVIDER_ENDPOINTS[provider] || '';
+    if (provider === 'custom' || options.baseUrl) {
+        const rawUrl = String(options.baseUrl || '').trim();
+        if (!rawUrl) throw new Error('Vui lòng nhập Base URL cho nhà cung cấp Custom.');
+        endpoint = rawUrl.endsWith('/chat/completions')
+            ? rawUrl
+            : `${rawUrl.replace(/\/+$/, '')}/chat/completions`;
+        await validateUrlSafety(endpoint);
+    }
+    if (!endpoint) {
+        throw new Error(`Nhà cung cấp BYOK không được hỗ trợ: ${provider}`);
+    }
+
+    const messages = [];
+    if (options.systemPrompt) {
+        messages.push({ role: 'system', content: String(options.systemPrompt) });
+    }
+    if (Array.isArray(options.messages) && options.messages.length > 0) {
+        for (const msg of options.messages) {
+            if (!msg || typeof msg.content !== 'string' || !msg.content.trim()) continue;
+            const role = ['system', 'user', 'assistant'].includes(msg.role) ? msg.role : 'user';
+            messages.push({ role, content: msg.content.trim() });
+        }
+    } else {
+        messages.push({ role: 'user', content: String(content || '').trim() });
+    }
+
+    const res = await fetch(endpoint, {
+        method: 'POST',
+        redirect: 'error',
+        headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${apiKey}`
+        },
+        body: JSON.stringify({
+            model,
+            messages,
+            temperature
+        }),
+        signal: AbortSignal.timeout(60000)
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+        throw new Error(data.error?.message || data.message || `BYOK (${provider}) lỗi (${res.status}).`);
+    }
+    const text = data.choices?.[0]?.message?.content || '';
+    if (!text) throw new Error('Model BYOK trả về phản hồi rỗng.');
+    const promptTokens = data.usage?.prompt_tokens ?? 0;
+    const completionTokens = data.usage?.completion_tokens ?? 0;
+    const totalTokens = data.usage?.total_tokens ?? (promptTokens + completionTokens);
+
+    return {
+        text,
+        usage: { promptTokens, completionTokens, totalTokens },
+        model: data.model || model,
+        byok: true,
+        provider
+    };
 }

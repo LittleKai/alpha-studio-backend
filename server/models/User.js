@@ -136,6 +136,31 @@ const userSchema = new mongoose.Schema({
     },
     preferences: {
         interiorTwoStepConfirm: { type: Boolean, default: false }
+    },
+    lumiStage: {
+        plan: {
+            type: String,
+            enum: ['free', 'pro_monthly', 'pro_quarterly', 'pro_yearly', 'lumi_pro_monthly', 'lumi_pro_quarterly', 'lumi_pro_yearly', 'pro_partner'],
+            default: 'free'
+        },
+        expiresAt: {
+            type: Date,
+            default: null
+        },
+        freeAiCreditsRemaining: {
+            type: Number,
+            default: 3,
+            min: 0
+        },
+        singleExportCredits: {
+            type: Number,
+            default: 0,
+            min: 0
+        },
+        unlockedProjectKeys: [{
+            type: String,
+            trim: true
+        }]
     }
 }, {
     timestamps: true
