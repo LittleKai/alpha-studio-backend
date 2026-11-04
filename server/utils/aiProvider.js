@@ -215,6 +215,7 @@ import net from 'node:net';
 const PRIVATE_IP_RANGES = [
     /^127\./,                          // loopback
     /^10\./,                           // Class A private
+    /^100\.(6[4-9]|[7-9]\d|1[01]\d|12[0-7])\./, // RFC 6598 CGNAT / Tailscale / cloud metadata
     /^172\.(1[6-9]|2\d|3[01])\./,      // Class B private
     /^192\.168\./,                     // Class C private
     /^169\.254\./,                     // link-local
@@ -247,6 +248,9 @@ export async function validateUrlSafety(urlString) {
         !cleanHost ||
         cleanHost === 'localhost' ||
         cleanHost.endsWith('.localhost') ||
+        cleanHost.endsWith('.local') ||
+        cleanHost.endsWith('.internal') ||
+        cleanHost.endsWith('.invalid') ||
         isPrivateIp(cleanHost)
     ) {
         throw new Error('Blocked localhost or private IP URL.');
@@ -257,19 +261,27 @@ export async function validateUrlSafety(urlString) {
         }
         return;
     }
-    // DNS resolve to check for private IPs
-    try {
-        const addresses = await dns.resolve4(cleanHost).catch(() => []);
-        const addresses6 = await dns.resolve6(cleanHost).catch(() => []);
-        const all = [...addresses, ...addresses6];
-        for (const addr of all) {
-            if (isPrivateIp(addr)) {
-                throw new Error(`Blocked private IP (${addr}) for host ${cleanHost}.`);
-            }
+    if (!cleanHost.includes('.')) {
+        throw new Error(`Blocked internal single-label host: ${cleanHost}.`);
+    }
+    // Resolve via OS resolver (dns.lookup, matching fetch/undici) and c-ares DNS in parallel, failing closed
+    const [lookupRecords, addresses, addresses6] = await Promise.all([
+        dns.lookup(cleanHost, { all: true, verbatim: true }).catch(() => []),
+        dns.resolve4(cleanHost).catch(() => []),
+        dns.resolve6(cleanHost).catch(() => [])
+    ]);
+    const all = [
+        ...lookupRecords.map((r) => r.address),
+        ...addresses,
+        ...addresses6
+    ];
+    if (all.length === 0) {
+        throw new Error(`Blocked unresolvable host: ${cleanHost}.`);
+    }
+    for (const addr of all) {
+        if (isPrivateIp(addr)) {
+            throw new Error(`Blocked private IP (${addr}) for host ${cleanHost}.`);
         }
-    } catch (err) {
-        if (err.message.startsWith('Blocked')) throw err;
-        // DNS resolution failure — allow the request to proceed (fetch will fail naturally)
     }
 }
 

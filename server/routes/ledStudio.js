@@ -1268,22 +1268,27 @@ router.post('/ai/stage', authMiddleware, async (req, res) => {
     const parsed = parseStageAiJson(aiRes?.text || '');
     const tokenBill = calculateLumiTokenCredits(aiRes?.usage || {}, { byok: isByok });
 
+    const postAiUser = (await loadMutableUser(req.user)) || user;
+    if (!postAiUser.lumiStage) {
+      postAiUser.lumiStage = user.lumiStage;
+    }
+
     let usedFreeCredits = 0;
     let usedWalletCredits = 0;
 
     if (!isByok && tokenBill.totalCredits > 0) {
-      const freeAvail = Math.max(0, Number(user.lumiStage.freeAiCreditsRemaining || 0));
+      const freeAvail = Math.max(0, Number(postAiUser.lumiStage.freeAiCreditsRemaining || 0));
       usedFreeCredits = Number(Math.min(freeAvail, tokenBill.totalCredits).toFixed(4));
       const remainder = Number(Math.max(0, tokenBill.totalCredits - usedFreeCredits).toFixed(4));
-      user.lumiStage.freeAiCreditsRemaining = Number(Math.max(0, freeAvail - usedFreeCredits).toFixed(4));
+      postAiUser.lumiStage.freeAiCreditsRemaining = Number(Math.max(0, freeAvail - usedFreeCredits).toFixed(4));
 
       if (remainder > 0) {
-        const currentWallet = Math.max(0, Number(user.balance || 0));
+        const currentWallet = Math.max(0, Number(postAiUser.balance || 0));
         usedWalletCredits = Number(Math.min(currentWallet, remainder).toFixed(4));
-        user.balance = Number(Math.max(0, currentWallet - usedWalletCredits).toFixed(4));
+        postAiUser.balance = Number(Math.max(0, currentWallet - usedWalletCredits).toFixed(4));
         if (usedWalletCredits > 0) {
           await recordLumiSpendTransaction({
-            userId: user._id,
+            userId: postAiUser._id,
             amount: Math.max(1, Math.round(usedWalletCredits * LUMI_BRAND.creditUnitVnd)),
             credits: usedWalletCredits,
             serviceType: 'lumistage_ai_token',
@@ -1297,11 +1302,12 @@ router.post('/ai/stage', authMiddleware, async (req, res) => {
           });
         }
       }
-      await user.save();
+      await postAiUser.save();
     }
 
-    const remainingFreeAiCredits = Number(user.lumiStage?.freeAiCreditsRemaining ?? 0);
-    const remainingBalance = Number(user.balance || 0);
+    const actualCreditsCharged = Number((usedFreeCredits + usedWalletCredits).toFixed(4));
+    const remainingFreeAiCredits = Number(postAiUser.lumiStage?.freeAiCreditsRemaining ?? 0);
+    const remainingBalance = Number(postAiUser.balance || 0);
 
     return res.json({
       success: true,
@@ -1313,7 +1319,7 @@ router.post('/ai/stage', authMiddleware, async (req, res) => {
           completionTokens: tokenBill.completionTokens,
           totalTokens: tokenBill.totalTokens
         },
-        creditsCharged: tokenBill.totalCredits,
+        creditsCharged: actualCreditsCharged,
         balanceAfter: remainingBalance,
         freeAiCreditsRemaining: remainingFreeAiCredits,
         billing: {
@@ -1324,10 +1330,10 @@ router.post('/ai/stage', authMiddleware, async (req, res) => {
           promptTokens: tokenBill.promptTokens,
           completionTokens: tokenBill.completionTokens,
           totalTokens: tokenBill.totalTokens,
-          creditCharged: tokenBill.totalCredits,
+          creditCharged: actualCreditsCharged,
           usedFreeCredits,
           usedWalletCredits,
-          vndEquivalent: tokenBill.vndEquivalent,
+          vndEquivalent: Math.round(actualCreditsCharged * LUMI_BRAND.creditUnitVnd),
           remainingFreeAiCredits,
           remainingBalance
         }

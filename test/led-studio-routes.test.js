@@ -809,13 +809,17 @@ test('LumiStage credit billing, project unlock, Pro upgrade, and Stage AI token 
 });
 
 test('Pre-commit review regressions: IPv6/loopback SSRF guard, Mongoose User/Transaction validation, and frontend contract aliases', async () => {
-  // 1. SSRF guard blocks bracketed IPv6 loopback, 0.0.0.0, IPv4-mapped IPv6, and Unique Local IPv6
+  // 1. SSRF guard blocks bracketed IPv6 loopback, 0.0.0.0, IPv4-mapped IPv6, Unique Local IPv6, CGNAT metadata, and unresolvable/internal hosts
   for (const unsafeUrl of [
     'http://[::1]:18791/v1',
     'http://[0:0:0:0:0:0:0:1]:8080/v1',
     'http://0.0.0.0:11434/v1',
     'http://[::ffff:127.0.0.1]:8000/v1',
-    'http://[fd00::1]:8000/v1'
+    'http://[fd00::1]:8000/v1',
+    'http://100.100.100.200/latest/meta-data',
+    'http://mongodb:27017/v1',
+    'http://redis.internal:6379/v1',
+    'http://nonexistent-ssrf-test-host.invalid/v1'
   ]) {
     await assert.rejects(() => validateUrlSafety(unsafeUrl), /Blocked|không hợp lệ|nội bộ/i, `Expected ${unsafeUrl} to be blocked`);
   }
@@ -895,7 +899,38 @@ test('Pre-commit review regressions: IPv6/loopback SSRF guard, Mongoose User/Tra
     assert.equal(resDec.statusCode, 200);
     assert.equal(resDec.body.data.reviewStatus, 'changes_requested');
     assert.equal(resDec.body.data.reviewBy, 'Đạo diễn Sân khấu');
+
+    // Partial credit deduction reports actual charged credits (usedFreeCredits + usedWalletCredits)
+    const postStageAi = getRouteHandler('post', '/ai/stage');
+    setStageAiRunner(async () => ({
+      text: JSON.stringify({ reply: 'OK', commands: [], audit: [], proposal: null, estimatedCostVnd: 0 }),
+      model: 'gemini-3.8-flash',
+      provider: 'gcli',
+      usage: { promptTokens: 2000, completionTokens: 2000, totalTokens: 4000 }
+    }));
+    const lowCreditUser = {
+      _id: '507f1f77bcf86cd799439099',
+      email: 'low@grouplife.vn',
+      role: 'user',
+      balance: 0,
+      lumiStage: {
+        plan: 'free',
+        expiresAt: null,
+        freeAiCreditsRemaining: 0.01,
+        singleExportCredits: 0,
+        unlockedProjectKeys: []
+      },
+      async save() { return this; }
+    };
+    const resLowAi = makeRes();
+    await postStageAi({ user: lowCreditUser, body: { prompt: 'Test partial credit', effort: 'low' } }, resLowAi);
+    assert.equal(resLowAi.statusCode, 200);
+    assert.equal(resLowAi.body.data.billing.usedFreeCredits, 0.01);
+    assert.equal(resLowAi.body.data.billing.usedWalletCredits, 0);
+    assert.equal(resLowAi.body.data.billing.creditCharged, 0.01);
+    assert.equal(resLowAi.body.data.creditsCharged, 0.01);
   } finally {
+    setStageAiRunner(null);
     Transaction.create = origTxCreate;
     restore();
   }
