@@ -1,6 +1,7 @@
 import mongoose from 'mongoose';
 import bcrypt from 'bcryptjs';
 import { noInlineMediaPlugin } from '../validation/inlineMedia.js';
+import { LUMI_FREE_AI_CREDITS } from '../utils/lumiCatalog.js';
 
 const userSchema = new mongoose.Schema({
     email: {
@@ -149,7 +150,7 @@ const userSchema = new mongoose.Schema({
         },
         freeAiCreditsRemaining: {
             type: Number,
-            default: 3,
+            default: LUMI_FREE_AI_CREDITS,
             min: 0
         },
         singleExportCredits: {

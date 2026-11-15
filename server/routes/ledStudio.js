@@ -7,6 +7,7 @@ import Transaction from '../models/Transaction.js';
 import { callGcliDirect, callExternalByokAi } from '../utils/aiProvider.js';
 import {
   LUMI_BRAND,
+  LUMI_FREE_AI_CREDITS,
   LUMI_TOKEN_PRICING,
   LUMI_EFFORT_MODELS,
   LUMI_PLANS,
@@ -73,6 +74,8 @@ export function verifySharePassword(projectDoc, rawPassword) {
   return { ok: true, requiresPassword: false };
 }
 
+export const FREE_SHARE_MAX_HOURS = 168;
+
 export function validateShareAccess(projectDoc, rawToken) {
   if (!projectDoc || !projectDoc.shareEnabled || !projectDoc.shareTokenHash) {
     return { ok: false, reason: 'Share link is disabled' };
@@ -87,6 +90,21 @@ export function validateShareAccess(projectDoc, rawToken) {
     return { ok: false, reason: 'Invalid share token' };
   }
   return { ok: true };
+}
+
+async function resolveShareProGate(project) {
+  if (!project?.shareUntilPro) {
+    return { ok: true, expiresAt: project?.shareExpiresAt || null };
+  }
+  let owner = null;
+  if (typeof User.findById === 'function') {
+    const q = User.findById(project.owner);
+    owner = typeof q?.select === 'function'
+      ? await q.select('role lumiStage').lean().catch(() => null)
+      : await Promise.resolve(q).catch(() => null);
+  }
+  const sub = normalizeUserLumiState(owner);
+  return sub.proActive ? { ok: true, expiresAt: sub.expiresAt } : { ok: false };
 }
 
 export function sanitizeStageSummary(raw = {}) {
@@ -208,7 +226,7 @@ export function normalizeUserLumiState(userDoc) {
     plan: effectivePlan,
     proActive,
     expiresAt: isSubActive ? expiresAt.toISOString() : null,
-    freeAiCreditsRemaining: Number(Number(raw.freeAiCreditsRemaining ?? 3).toFixed(4)),
+    freeAiCreditsRemaining: Number(Number(raw.freeAiCreditsRemaining ?? LUMI_FREE_AI_CREDITS).toFixed(4)),
     singleExportCredits: Math.max(0, Math.floor(Number(raw.singleExportCredits ?? 0))),
     unlockedProjectKeys: Array.isArray(raw.unlockedProjectKeys) ? raw.unlockedProjectKeys.map(String) : []
   };
@@ -224,7 +242,7 @@ async function loadMutableUser(reqUser) {
     reqUser.lumiStage = {
       plan: 'free',
       expiresAt: null,
-      freeAiCreditsRemaining: 3,
+      freeAiCreditsRemaining: LUMI_FREE_AI_CREDITS,
       singleExportCredits: 0,
       unlockedProjectKeys: []
     };
@@ -615,7 +633,7 @@ router.delete('/projects/:id', authMiddleware, async (req, res) => {
 
 router.post('/projects/:id/share', authMiddleware, async (req, res) => {
   try {
-    const { enabled = true, expiresInHours = 168, password } = req.body || {};
+    const { enabled = true, expiresInHours = FREE_SHARE_MAX_HOURS, untilPro = false, password } = req.body || {};
     const project = await LedStudioProject.findOne({ _id: req.params.id, owner: req.user._id });
     if (!project) {
       return res.status(404).json({ success: false, message: 'Project not found' });
@@ -624,15 +642,26 @@ router.post('/projects/:id/share', authMiddleware, async (req, res) => {
       project.shareEnabled = false;
       project.shareTokenHash = null;
       project.shareExpiresAt = null;
+      project.shareUntilPro = false;
       project.sharePasswordProtected = false;
       project.sharePasswordHash = null;
       await project.save();
       return res.json({ success: true, message: 'Share disabled', data: { shareEnabled: false, passwordProtected: false } });
     }
+    const ownerSub = normalizeUserLumiState(req.user);
+    if (untilPro && !ownerSub.proActive) {
+      return res.status(403).json({
+        success: false,
+        code: 'PRO_REQUIRED',
+        message: 'Chỉ tài khoản đang có gói Pro mới tạo được link hiệu lực theo thời hạn gói Pro.'
+      });
+    }
     const rawToken = crypto.randomBytes(24).toString('base64url');
+    const hours = Math.min(FREE_SHARE_MAX_HOURS, Math.max(1, Number(expiresInHours) || FREE_SHARE_MAX_HOURS));
     project.shareEnabled = true;
     project.shareTokenHash = hashShareToken(rawToken);
-    project.shareExpiresAt = new Date(Date.now() + Math.max(1, Number(expiresInHours) || 168) * 3600_000);
+    project.shareUntilPro = Boolean(untilPro);
+    project.shareExpiresAt = untilPro ? null : new Date(Date.now() + hours * 3600_000);
     if (typeof password === 'string' && password.trim().length > 0) {
       project.sharePasswordProtected = true;
       project.sharePasswordHash = hashSharePassword(password.trim());
@@ -646,7 +675,8 @@ router.post('/projects/:id/share', authMiddleware, async (req, res) => {
       message: 'Share link generated',
       data: {
         shareToken: rawToken,
-        shareExpiresAt: project.shareExpiresAt,
+        shareExpiresAt: untilPro ? ownerSub.expiresAt : project.shareExpiresAt,
+        shareUntilPro: project.shareUntilPro,
         passwordProtected: Boolean(project.sharePasswordProtected)
       }
     });
@@ -667,6 +697,14 @@ router.get('/share/:shareToken', async (req, res) => {
     if (!check.ok) {
       return res.status(403).json({ success: false, message: check.reason });
     }
+    const proGate = await resolveShareProGate(project);
+    if (!proGate.ok) {
+      return res.status(403).json({
+        success: false,
+        code: 'SHARE_PRO_EXPIRED',
+        message: 'Link đã hết hiệu lực vì gói Pro của chủ dự án đã hết hạn.'
+      });
+    }
 
     const incomingPassword = req.headers?.['x-share-password'] || req.query?.password || '';
     const pwdCheck = verifySharePassword(project, incomingPassword);
@@ -683,7 +721,8 @@ router.get('/share/:shareToken', async (req, res) => {
             title: project.title,
             description: project.description,
             stageSummary: project.stageSummary,
-            shareExpiresAt: project.shareExpiresAt || null
+            shareExpiresAt: proGate.expiresAt,
+            shareUntilPro: Boolean(project.shareUntilPro)
           }
         });
       }
@@ -724,7 +763,8 @@ router.get('/share/:shareToken', async (req, res) => {
         title: project.title,
         description: project.description,
         stageSummary: project.stageSummary,
-        shareExpiresAt: project.shareExpiresAt || null,
+        shareExpiresAt: proGate.expiresAt,
+        shareUntilPro: Boolean(project.shareUntilPro),
         unlockedPro: Boolean(project.unlockedPro),
         reviewStatus: project.reviewStatus || 'pending',
         reviewBy: project.reviewBy || '',
@@ -747,6 +787,14 @@ async function loadSharedProjectForReview(rawToken, incomingPassword) {
   const check = validateShareAccess(project, rawToken);
   if (!check.ok) {
     return { status: 403, error: check.reason };
+  }
+  const proGate = await resolveShareProGate(project);
+  if (!proGate.ok) {
+    return {
+      status: 403,
+      code: 'SHARE_PRO_EXPIRED',
+      error: 'Link đã hết hiệu lực vì gói Pro của chủ dự án đã hết hạn.'
+    };
   }
   if (project.sharePasswordProtected && !project.sharePasswordHash) {
     const q = LedStudioProject.findOne({ shareTokenHash: tokenHash, shareEnabled: true });
@@ -939,7 +987,7 @@ router.post('/billing/checkout', authMiddleware, async (req, res) => {
       user.lumiStage = {
         plan: 'free',
         expiresAt: null,
-        freeAiCreditsRemaining: 3,
+        freeAiCreditsRemaining: LUMI_FREE_AI_CREDITS,
         singleExportCredits: 0,
         unlockedProjectKeys: []
       };
@@ -1235,7 +1283,7 @@ router.post('/ai/stage', authMiddleware, async (req, res) => {
       user.lumiStage = {
         plan: 'free',
         expiresAt: null,
-        freeAiCreditsRemaining: 3,
+        freeAiCreditsRemaining: LUMI_FREE_AI_CREDITS,
         singleExportCredits: 0,
         unlockedProjectKeys: []
       };

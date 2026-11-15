@@ -5,8 +5,11 @@ import { authMiddleware, modOnly } from '../middleware/auth.js';
 import { sanitizeSections, SERVICE_SECTION_KINDS } from '../utils/contentSections.js';
 import { extractB2Key } from './admin.js';
 import { generatePresignedDownloadUrl, attachmentDisposition } from '../utils/b2Storage.js';
+import { isBotUserAgent } from './analytics.js';
+import { viewerKey, shouldCountView } from '../utils/viewCooldown.js';
 
 const router = express.Router();
+const recentArticleViews = new Map();
 
 // Tệp tham khảo tải về đi kèm bài dịch vụ (.skp, .html…). Chỉ giữ đúng 5 field
 // của `Article.attachments`; ảnh không đi đường này mà nằm trong khối gallery.
@@ -342,12 +345,33 @@ router.get('/:id/attachments/:index/download', async (req, res) => {
 // NOTE: This MUST be last because :slug is a catch-all param
 router.get('/:slug', async (req, res) => {
     try {
-        const article = await Article.findOne({
+        const filter = {
             slug: req.params.slug,
             status: 'published'
-        })
-            .populate('author', 'name avatar')
-            .populate('serviceCategory', 'title slug accent icon');
+        };
+        let article = null;
+
+        // Chỉ đếm lượt xem khi client chủ động gửi ?trackView=1 (tránh middleware/crawler),
+        // không phải bot UA, và qua ngưỡng cooldown theo IP/user.
+        if (
+            req.query.trackView === '1'
+            && !isBotUserAgent(req.headers['user-agent'])
+            && shouldCountView(viewerKey(req, `article:${req.params.slug}`), Date.now(), recentArticleViews)
+        ) {
+            article = await Article.findOneAndUpdate(
+                { ...filter, category: 'services' },
+                { $inc: { viewCount: 1 } },
+                { new: true, timestamps: false }
+            )
+                .populate('author', 'name avatar')
+                .populate('serviceCategory', 'title slug accent icon');
+        }
+
+        if (!article) {
+            article = await Article.findOne(filter)
+                .populate('author', 'name avatar')
+                .populate('serviceCategory', 'title slug accent icon');
+        }
 
         if (!article) {
             return res.status(404).json({ success: false, message: 'Không tìm thấy bài viết' });

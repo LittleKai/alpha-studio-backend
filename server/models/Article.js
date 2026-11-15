@@ -58,6 +58,13 @@ const articleSchema = new mongoose.Schema({
     // xem SERVICE_SECTION_KINDS trong utils/contentSections.js
     sections: { type: [sectionSchema], default: [] },
 
+    // Tổng số lượt xem công khai — seed từ PageVisit cũ và tăng khi xem chi tiết.
+    viewCount: {
+        type: Number,
+        default: 0,
+        min: 0,
+    },
+
     // Tổng số lượt tải file đính kèm — tăng ở GET /:id/attachments/:index/download.
     // select: false để API công khai không lộ số; chỉ admin query chọn tường minh.
     downloadCount: {

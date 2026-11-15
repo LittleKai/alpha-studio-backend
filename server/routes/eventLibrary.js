@@ -10,6 +10,7 @@ import WorkflowDocument from '../models/WorkflowDocument.js';
 import { authMiddleware, getUserFromToken } from '../middleware/auth.js';
 import User from '../models/User.js';
 import { sanitizeSections } from '../utils/contentSections.js';
+import { VIEW_COOLDOWN_MS, viewerKey, shouldCountView as countViewWithCooldown } from '../utils/viewCooldown.js';
 
 const router = express.Router();
 
@@ -149,45 +150,13 @@ export function buildSort(sort) {
 }
 
 // ─── Đếm lượt xem có thời gian nguội ───────────────────────────────────────
-// Trước đây mỗi lần GET chi tiết là +1 view, nên F5 vài lần hay mở đi mở lại
-// một mục là số nhảy liên tục. Mỗi người xem chỉ được tính một lượt cho mỗi
-// mục trong VIEW_COOLDOWN_MS.
-export const VIEW_COOLDOWN_MS = 6 * 60 * 60 * 1000;
-const VIEW_STORE_MAX = 5000;
-
+// Dùng helper chung tại utils/viewCooldown.js; giữ store riêng cho thư viện sự kiện.
 const recentViews = new Map();
 
-/**
- * Khoá định danh người xem: user đã đăng nhập thì theo id, còn lại theo IP.
- * App không bật `trust proxy` nên `req.ip` trên Fly.io là IP của proxy — phải
- * đọc `x-forwarded-for` trước, nếu không mọi khách vãng lai dùng chung một khoá.
- */
-export function viewerKey(req, slug) {
-    if (req.user?._id) return `${String(req.user._id)}:${slug}`;
-    const forwarded = String(req.headers?.['x-forwarded-for'] || '').split(',')[0].trim();
-    return `${forwarded || req.ip || 'unknown'}:${slug}`;
-}
+export { VIEW_COOLDOWN_MS, viewerKey };
 
-/**
- * `true` nếu lượt xem này được tính. Ghi luôn mốc thời gian vào store, nên chỉ
- * gọi một lần cho mỗi request.
- */
 export function shouldCountView(key, now = Date.now(), store = recentViews) {
-    const last = store.get(key);
-    if (last !== undefined && now - last < VIEW_COOLDOWN_MS) return false;
-    store.set(key, now);
-    if (store.size > VIEW_STORE_MAX) {
-        for (const [k, ts] of store) {
-            if (now - ts >= VIEW_COOLDOWN_MS) store.delete(k);
-        }
-        // Cửa sổ nguội dài (6 giờ) nên có thể chẳng khoá nào đủ cũ để dọn — khi
-        // đó bỏ bớt khoá cũ nhất (Map giữ đúng thứ tự chèn) để store không phình.
-        for (const k of store.keys()) {
-            if (store.size <= VIEW_STORE_MAX) break;
-            store.delete(k);
-        }
-    }
-    return true;
+    return countViewWithCooldown(key, now, store);
 }
 
 /** Định dạng số tiền VND thành chuỗi ngắn để hiển thị trên card. */

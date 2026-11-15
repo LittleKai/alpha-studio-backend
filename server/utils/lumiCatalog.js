@@ -20,6 +20,8 @@ export const LUMI_BRAND = {
  * - LumiStage (1/3 chính thức):     25 Credits / 1M Input (2.500đ)   | 210 Credits / 1M Output (21.000đ)
  * Quy chuẩn hệ thống: 1 Credit = 100 VNĐ.
  */
+export const LUMI_FREE_AI_CREDITS = 50;
+
 export const LUMI_TOKEN_PRICING = {
     inputCreditsPerMillion: 25,
     outputCreditsPerMillion: 210,

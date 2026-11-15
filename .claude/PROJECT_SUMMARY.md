@@ -1,6 +1,6 @@
 # PROJECT SUMMARY - Alpha Studio Backend
 
-**Last Updated:** 2026-11-04 · **Session:** 25
+**Last Updated:** 2026-11-15 · **Session:** 27
 
 > Trang thai hien tai, khong phai changelog. Sau moi task: cap nhat ngay/session; doi bang trang thai va TODO; cap nhat `DATABASE.md` khi schema doi. Bug quan trong vao `IMPORTANT_FIXED_BUGS.md`. Ban v1 nam trong `archive/PROJECT_SUMMARY_v1.md` va khong duoc dung lam huong dan hien tai.
 
@@ -22,21 +22,21 @@
 | Content/course/job/partner/prompt | ✅ | `server/routes/`, `server/models/` | Noi dung `vi` bat buoc, `en` optional |
 | VietYaku release metadata | ✅ | `server/routes/vietyaku.js`, `test/vietyaku-release.test.js` | Suy ra link APK GitHub theo tag khi manifest B2 chỉ có ZIP Windows |
 | Workflow, event library, AI skills | ✅ | `server/routes/workflow.js`, `eventLibrary.js`, `skills.js`, `test/workflow-routes.test.js` | API cho frontend; phan quyen 2 tang project/doc, escape regex searchUsers |
-| Phan muc dich vu + bai dich vu co sections | ✅ | `server/routes/serviceCategories.js`, `models/ServiceCategory.js`, `models/contentSection.js`, `utils/contentSections.js` | Article có section song ngữ tùy chọn (`*En`), fallback vi; HOME và Nhà anh Thái ở danh mục CAD/kiến trúc với preview tân cổ điển |
+| Phan muc dich vu + bai dich vu co sections | ✅ | `server/routes/serviceCategories.js`, `server/models/ServiceCategory.js`, `server/models/contentSection.js`, `server/utils/contentSections.js`, `server/utils/articleViews.js` | Sections song ngữ; view backfill có transaction; trackView lọc bot/cooldown 6h, giữ ngày sửa bài |
 | Flower Street article | ✅ | Article data | Published /services case study with 20 WebP Cloudinary images, 4 galleries, and a B2 SketchUp attachment |
 | HOME + Nhà anh Thái articles | ✅ | Article data + skill sync scripts | HOME tách Blender/SketchUp; Nhà anh Thái: 11 render + ảnh BOM WebP, SKP B2; không đính kèm Excel |
 | Lao Cai + image-to-3D articles | ✅ | Article data + `publish_image_only_articles.mjs` | Hai bài Việt–Anh, 9 + 4 ảnh WebP, không tệp; API/ảnh đạt, browser review chưa có |
-| Binh luan bai viet | ✅ | `server/routes/comments.js`, `models/Comment.js` | `targetType` mo rong sang `article`; enum model va `TARGET_TYPES` cua route phai khop |
+| Binh luan & luot xem bai viet | ✅ | `server/routes/comments.js`, `server/models/Comment.js`, `server/utils/viewCooldown.js` | Comment `targetType` `article`; `viewCooldown.js` dùng chung cho EventLibrary và Article `/services` |
 | Cloud Desktop + agents | ✅ | `server/routes/cloud.js`, models HostMachine/CloudSession | Contract cheo host/flow |
 | CRM + analytics | ✅ | `server/routes/crm.js`, `analytics.js` | SSE hello/device.status có app/agent version; đổi version phát event |
 | Tool/file download tracking & streaming | ✅ | `server/routes/toolDownloads.js`, `server/routes/articles.js` | GET attachment download chỉ bài published, tự `$inc`; tên tải lấy basename gốc từ `fileKey` (bỏ tiền tố timestamp), tách khỏi nhãn biên tập; `versions` key đổi `.`→`_`; admin trả `serviceDownloads`; `downloadCount` select:false (ẩn khỏi API công khai) |
 | B2 orphan/retention/migrations | ✅ | `server/routes/admin.js`, `server/retention/`, `server/migrations/` | DELETE đối chiếu cả Article attachments |
-| Automated tests | ✅ | `test/*.test.js`, `server/**/*.test.*` | 280 tests + syntax check đạt; heartbeat/SSE handler smoke với DB giả lập đạt |
+| Automated tests | ✅ | `test/*.test.js`, `server/**/*.test.*` | 291 tests + syntax check đạt; health/article API smoke local với DB giả lập đạt |
 | CRM Windows packaging | ✅ | `scripts/release-to-b2.js` | Remove all smoke-test .data before ZIP; CRM artifact guard rejects .data/.env |
 | VocabFlip private FSRS state | ✅ | `server/models/Vocab.js`, `server/routes/vocab.js` | Optional FSRS fields persist; lazy legacy normalization; no DB backfill |
 | XML sitemap | ✅ | `server/routes/sitemap.js`, `test/sitemap.test.js` | Chỉ public/indexable (56 URL cốt lõi, chỉ giữ `/studio/ai-skills` và bỏ `/studio/ai-skills/:slug`); news còn 3 bài có mô tả |
 | News publishing | ✅ | `server/models/Article.js`, `server/routes/articles.js` | Tin published cần nội dung vi/media; create/update/publish chạy validation; lỗi trả 400 |
-| Creative LED Stage Studio (LumiStage) Cloud, Share, Billing, Stage AI & Telemetry | ✅ | `server/routes/ledStudio.js`, `server/utils/lumiCatalog.js`, `server/utils/aiProvider.js`, `server/models/LedStudioProject.js`, `server/models/User.js`, `test/led-studio-routes.test.js` | B4/B5 (share có mật khẩu, ghim bình luận 3D, duyệt phương án), Billing/License qua Credit (`User.balance`), Stage AI (`gemini-3.8-flash` 3 effort qua `gcli` giá 1/3 chính thức + BYOK 0 Credit), Opt-in Telemetry (NĐ 13/2023) |
+| Creative LED Stage Studio (LumiStage) Cloud, Share, Billing, Stage AI & Telemetry | ✅ | `server/routes/ledStudio.js`, `server/utils/lumiCatalog.js`, `server/utils/aiProvider.js`, `server/models/LedStudioProject.js`, `server/models/User.js`, `test/led-studio-routes.test.js` | Share ≤7 ngày hoặc theo hạn Pro (`shareUntilPro`), 50 AI Credit dùng thử + BYOK, Billing Credit, Stage AI & Telemetry |
 
 ## 3. Gia dinh dang giu
 
@@ -87,6 +87,8 @@ test/                  integration/pure logic tests
 ## 7. Known Issues & TODOs
 
 ### Cao
+- [ ] Dependency audit có 2 advisory critical (ngoài diff); cần đánh giá nâng dependency riêng.
+- [ ] View backfill transaction đã có regression giả lập; cần smoke trên MongoDB test trước deploy.
 - [ ] Input sanitization can duoc audit them tai cac public write route.
 - [ ] Can nhac `MONGODB_MIN_POOL_SIZE=2` tren Fly neu cold database handshake con gay latency.
 

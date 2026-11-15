@@ -67,6 +67,10 @@ const ledStudioProjectSchema = new mongoose.Schema({
     type: Date,
     default: null
   },
+  shareUntilPro: {
+    type: Boolean,
+    default: false
+  },
   unlockedPro: {
     type: Boolean,
     default: false

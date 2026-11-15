@@ -8,7 +8,9 @@ import User from '../server/models/User.js';
 import Transaction from '../server/models/Transaction.js';
 import { validateUrlSafety } from '../server/utils/aiProvider.js';
 import ledStudioRouter, {
+  FREE_SHARE_MAX_HOURS,
   hashShareToken,
+  normalizeUserLumiState,
   validateShareAccess,
   sanitizeStageSummary,
   validateProjectPayload,
@@ -18,6 +20,7 @@ import ledStudioRouter, {
 } from '../server/routes/ledStudio.js';
 import {
   LUMI_BRAND,
+  LUMI_FREE_AI_CREDITS,
   LUMI_PLANS,
   LUMI_DEFAULT_PRESET_PACK,
   LUMI_TOKEN_PRICING,
@@ -1023,5 +1026,136 @@ test('C4 & Phase 4: Curated Default Preset Pack, platform preset fallback, lumi_
   } finally {
     LedStudioPreset.find = origFind;
     LedStudioPreset.findOne = origFindOne;
+  }
+});
+
+test('Free AI credits default to 50 and share links enforce 7-day cap for fixed expiry + active Pro gate for untilPro links', async () => {
+  assert.equal(LUMI_FREE_AI_CREDITS, 50);
+  assert.equal(FREE_SHARE_MAX_HOURS, 168);
+  assert.equal(normalizeUserLumiState({}).freeAiCreditsRemaining, 50);
+  const freshUser = new User({ email: 'fresh50@grouplife.vn', name: 'Fresh User', password: 'Password123!' });
+  assert.equal(freshUser.lumiStage.freeAiCreditsRemaining, 50);
+
+  const { restore } = mockProjectStore();
+  const origUserFindById = User.findById;
+  const usersById = new Map();
+  User.findById = (id) => {
+    const found = usersById.get(String(id)) || null;
+    return {
+      select() {
+        return { lean: async () => (found ? { ...found } : null) };
+      },
+      then(resolve, reject) {
+        return Promise.resolve(found).then(resolve, reject);
+      },
+      catch(onRejected) {
+        return Promise.resolve(found).catch(onRejected);
+      }
+    };
+  };
+
+  try {
+    const postProjects = getRouteHandler('post', '/projects');
+    const postShare = getRouteHandler('post', '/projects/:id/share');
+    const getShare = getRouteHandler('get', '/share/:shareToken');
+    const postComments = getRouteHandler('post', '/share/:shareToken/comments');
+
+    const freeUser = {
+      _id: 'user-free-share',
+      role: 'user',
+      lumiStage: { plan: 'free', expiresAt: null, freeAiCreditsRemaining: 50 }
+    };
+    const proExpiry = new Date(Date.now() + 25 * 86400_000);
+    const proUser = {
+      _id: 'user-pro-share',
+      role: 'user',
+      lumiStage: { plan: 'lumi_pro_monthly', expiresAt: proExpiry, freeAiCreditsRemaining: 350 }
+    };
+    usersById.set(freeUser._id, freeUser);
+    usersById.set(proUser._id, proUser);
+
+    // Create projects for Free and Pro users
+    const resCreateFree = makeRes();
+    await postProjects({
+      user: freeUser,
+      body: { title: 'Free Stage', projectJson: makeValidStagePayload('Free.glb') }
+    }, resCreateFree);
+    const freeProjId = resCreateFree.body.data.project._id;
+
+    const resCreatePro = makeRes();
+    await postProjects({
+      user: proUser,
+      body: { title: 'Pro Stage', projectJson: makeValidStagePayload('Pro.glb') }
+    }, resCreatePro);
+    const proProjId = resCreatePro.body.data.project._id;
+
+    // 1. Free user requesting 720h is clamped to 168h (7 days)
+    const beforeShareMs = Date.now();
+    const resFreeClamp = makeRes();
+    await postShare({
+      user: freeUser,
+      params: { id: freeProjId },
+      body: { enabled: true, expiresInHours: 720 }
+    }, resFreeClamp);
+    assert.equal(resFreeClamp.statusCode, 200);
+    assert.equal(resFreeClamp.body.data.shareUntilPro, false);
+    const expMs = new Date(resFreeClamp.body.data.shareExpiresAt).getTime();
+    assert.ok(expMs <= Date.now() + 168 * 3600_000 + 2000, 'Fixed share expiry must be capped at 168h');
+    assert.ok(expMs >= beforeShareMs + 167 * 3600_000, 'Fixed share expiry should be ~168h');
+
+    // 2. Free user requesting untilPro: true is rejected with 403 PRO_REQUIRED
+    const resFreeUntilPro = makeRes();
+    await postShare({
+      user: freeUser,
+      params: { id: freeProjId },
+      body: { enabled: true, untilPro: true }
+    }, resFreeUntilPro);
+    assert.equal(resFreeUntilPro.statusCode, 403);
+    assert.equal(resFreeUntilPro.body.code, 'PRO_REQUIRED');
+
+    // 3. Pro user requesting untilPro: true succeeds and links expiry to Pro subscription
+    const resProShare = makeRes();
+    await postShare({
+      user: proUser,
+      params: { id: proProjId },
+      body: { enabled: true, untilPro: true }
+    }, resProShare);
+    assert.equal(resProShare.statusCode, 200);
+    assert.equal(resProShare.body.data.shareUntilPro, true);
+    assert.equal(resProShare.body.data.shareExpiresAt, proExpiry.toISOString());
+    const proShareToken = resProShare.body.data.shareToken;
+
+    // 4. Public GET /share/:shareToken succeeds while owner is Pro
+    const resGetActive = makeRes();
+    await getShare({ params: { shareToken: proShareToken } }, resGetActive);
+    assert.equal(resGetActive.statusCode, 200);
+    assert.equal(resGetActive.body.data.shareUntilPro, true);
+    assert.equal(resGetActive.body.data.shareExpiresAt, proExpiry.toISOString());
+
+    // 5. When owner's Pro expires, GET /share and POST /comments reject with 403 SHARE_PRO_EXPIRED
+    proUser.lumiStage.expiresAt = new Date(Date.now() - 60_000);
+    const resGetExpired = makeRes();
+    await getShare({ params: { shareToken: proShareToken } }, resGetExpired);
+    assert.equal(resGetExpired.statusCode, 403);
+    assert.equal(resGetExpired.body.code, 'SHARE_PRO_EXPIRED');
+
+    const resCommentExpired = makeRes();
+    await postComments({
+      params: { shareToken: proShareToken },
+      body: { author: 'Client', message: 'Late comment' }
+    }, resCommentExpired);
+    assert.equal(resCommentExpired.statusCode, 403);
+    assert.equal(resCommentExpired.body.code, 'SHARE_PRO_EXPIRED');
+
+    // 6. Renewing Pro revives the existing untilPro link without creating a new link
+    const renewedExpiry = new Date(Date.now() + 30 * 86400_000);
+    proUser.lumiStage.expiresAt = renewedExpiry;
+    const resGetRenewed = makeRes();
+    await getShare({ params: { shareToken: proShareToken } }, resGetRenewed);
+    assert.equal(resGetRenewed.statusCode, 200);
+    assert.equal(resGetRenewed.body.data.shareExpiresAt, renewedExpiry.toISOString());
+  } finally {
+    User.findById = origUserFindById;
+    restore();
   }
 });

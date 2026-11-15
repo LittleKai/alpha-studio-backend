@@ -63,6 +63,7 @@ import { buildEndedSessionUpdate } from './retention/terminalUpdates.js';
 import { localStorageMount } from './storage/localStorageMount.js';
 import { buildAllowedOrigins, buildCorsOptions } from './config/cors.js';
 import { purgeExpiredPendingTransactions } from './utils/transactionCleanup.js';
+import { backfillServiceArticleViewsFromPageVisits } from './utils/articleViews.js';
 
 // Load env variables
 dotenv.config();
@@ -369,6 +370,11 @@ async function runStartupSideEffects({ seed }) {
         } catch (error) {
             console.warn('[interior:seed] startup seed failed:', error.message);
         }
+    }
+    try {
+        await backfillServiceArticleViewsFromPageVisits({ logger: console });
+    } catch (error) {
+        console.warn('[articleViews:backfill] startup backfill failed:', error.message);
     }
     await configureBucketCors();
 }

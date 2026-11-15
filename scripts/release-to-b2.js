@@ -719,8 +719,13 @@ async function main() {
             console.log('Local Zalo backend staged beside the Windows app.');
             await verifyStagedBackend(path.join(winReleaseDir, 'zalo-bot-service'));
 
-            // Utilize native tar since it is built into Windows 10+ and much faster & robust than Compress-Archive
-            const zipCmd = `tar -a -c -f "${zipDestPath}" *`;
+            // Utilize native tar since it is built into Windows 10+ and much faster & robust than Compress-Archive.
+            // On Windows systems with Git in PATH, 'tar' resolves to Git's GNU tar which treats 'D:\...' as a remote host.
+            // Explicitly prefer System32\tar.exe (bsdtar) on Windows when available.
+            const systemTar = process.platform === 'win32' && process.env.SystemRoot && fs.existsSync(path.join(process.env.SystemRoot, 'System32', 'tar.exe'))
+                ? `"${path.join(process.env.SystemRoot, 'System32', 'tar.exe')}"`
+                : 'tar';
+            const zipCmd = `${systemTar} -a -c -f "${zipDestPath}" *`;
             console.log(`Running: ${zipCmd} (in ${winReleaseDir})`);
             execSync(zipCmd, { cwd: winReleaseDir, stdio: 'inherit' });
             console.log(`✅ Windows release successfully zipped to: ${zipDestPath}`);
