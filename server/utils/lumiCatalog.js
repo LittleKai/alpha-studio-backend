@@ -358,3 +358,74 @@ export function verifyLumiLicenseToken(token) {
         return { valid: false, reason: 'parse_error' };
     }
 }
+
+export function signLumiStudioTicket({
+    sub,
+    mode = 'user',
+    ttlSec = 900,
+    nowMs = Date.now(),
+    secret = process.env.LUMI_STUDIO_TICKET_SECRET
+} = {}) {
+    const cleanSecret = typeof secret === 'string' ? secret.trim() : '';
+    if (!cleanSecret) {
+        throw new Error('LUMI_STUDIO_TICKET_SECRET is not configured');
+    }
+    const cleanSub = String(sub || '').trim();
+    if (!cleanSub) {
+        throw new Error('Ticket subject (sub) is required');
+    }
+    const clampedTtlSec = Math.max(60, Math.min(86400, Math.trunc(Number(ttlSec) || 900)));
+    const payload = {
+        v: 1,
+        sub: cleanSub,
+        mode: mode === 'share' ? 'share' : 'user',
+        iat: nowMs,
+        exp: nowMs + clampedTtlSec * 1000
+    };
+    const encodedPayload = Buffer.from(JSON.stringify(payload), 'utf8').toString('base64url');
+    const signature = crypto
+        .createHmac('sha256', cleanSecret)
+        .update(encodedPayload)
+        .digest('base64url');
+    return `${encodedPayload}.${signature}`;
+}
+
+export function verifyLumiStudioTicket(
+    ticket,
+    secret = process.env.LUMI_STUDIO_TICKET_SECRET,
+    nowMs = Date.now()
+) {
+    const cleanSecret = typeof secret === 'string' ? secret.trim() : '';
+    if (!cleanSecret) {
+        return { valid: false, reason: 'missing_secret' };
+    }
+    if (!ticket || typeof ticket !== 'string') {
+        return { valid: false, reason: 'invalid_format' };
+    }
+    const parts = ticket.split('.');
+    if (parts.length !== 2 || !parts[0] || !parts[1]) {
+        return { valid: false, reason: 'invalid_format' };
+    }
+    const [encodedPayload, signature] = parts;
+    const expectedSig = crypto
+        .createHmac('sha256', cleanSecret)
+        .update(encodedPayload)
+        .digest('base64url');
+    try {
+        const sigBuf = Buffer.from(signature, 'utf8');
+        const expBuf = Buffer.from(expectedSig, 'utf8');
+        if (sigBuf.length !== expBuf.length || !crypto.timingSafeEqual(sigBuf, expBuf)) {
+            return { valid: false, reason: 'bad_signature' };
+        }
+        const payload = JSON.parse(Buffer.from(encodedPayload, 'base64url').toString('utf8'));
+        if (!payload || payload.v !== 1 || !payload.sub || !Number.isFinite(payload.exp)) {
+            return { valid: false, reason: 'invalid_payload' };
+        }
+        if (nowMs >= payload.exp) {
+            return { valid: false, reason: 'expired' };
+        }
+        return { valid: true, payload };
+    } catch {
+        return { valid: false, reason: 'parse_error' };
+    }
+}

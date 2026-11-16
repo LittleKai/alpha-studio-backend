@@ -16,7 +16,8 @@ import {
   getLumiProduct,
   calculateLumiTokenCredits,
   signLumiLicenseToken,
-  verifyLumiLicenseToken
+  verifyLumiLicenseToken,
+  signLumiStudioTicket
 } from '../utils/lumiCatalog.js';
 import { authMiddleware, getUserFromToken } from '../middleware/auth.js';
 import {
@@ -26,6 +27,14 @@ import {
   downloadFile,
   deleteFile
 } from '../utils/b2Storage.js';
+import {
+  generateStageDxf,
+  exportLightingMvr18,
+  buildGrandMaFixtureXml,
+  computeEngineeringRider,
+  generateCrewSplitDossier18,
+  buildPrintableStageDocumentHtml18
+} from '../utils/lumiProExporters.js';
 
 export const partnerOrAdmin = (req, res, next) => {
   if (!['admin', 'mod', 'partner'].includes(req.user?.role)) {
@@ -252,6 +261,207 @@ async function loadMutableUser(reqUser) {
   }
   return reqUser;
 }
+
+const SESSION_TICKET_MAX_AGE_SEC = 900;
+const TICKET_RATE_WINDOW_MS = 60_000;
+const TICKET_RATE_LIMIT = 30;
+const TICKET_PWD_FAIL_LIMIT = 10;
+const TICKET_BUCKET_MAX = 5000;
+const ticketRateBuckets = new Map();
+
+function extractClientFirstHop(req) {
+  const flyIp = String(req.headers?.['fly-client-ip'] || '').trim();
+  if (flyIp) return flyIp;
+  const fwdParts = String(req.headers?.['x-forwarded-for'] || '')
+    .split(',')
+    .map((p) => p.trim())
+    .filter(Boolean);
+  if (fwdParts.length > 0) return fwdParts[fwdParts.length - 1];
+  return String(req.ip || 'unknown').trim() || 'unknown';
+}
+
+function consumeRateBucket(map, key, limit, windowMs, maxKeys = TICKET_BUCKET_MAX) {
+  const now = Date.now();
+  let entry = map.get(key);
+  if (!entry || now - entry.windowStart >= windowMs) {
+    entry = { windowStart: now, count: 0 };
+  }
+  entry.count += 1;
+  map.set(key, entry);
+  if (map.size > maxKeys) {
+    for (const [k, v] of map) {
+      if (now - v.windowStart >= windowMs) map.delete(k);
+    }
+    for (const k of map.keys()) {
+      if (map.size <= maxKeys) break;
+      map.delete(k);
+    }
+  }
+  return entry.count <= limit;
+}
+
+function issueSessionTicketCookie(res, sub, mode) {
+  const nowMs = Date.now();
+  const ticket = signLumiStudioTicket({
+    sub,
+    mode,
+    ttlSec: SESSION_TICKET_MAX_AGE_SEC,
+    nowMs
+  });
+  const cookieStr = [
+    `lumi_studio_ticket=${ticket}`,
+    'Path=/led-studio',
+    `Max-Age=${SESSION_TICKET_MAX_AGE_SEC}`,
+    'HttpOnly',
+    'Secure',
+    'SameSite=Strict'
+  ].join('; ');
+  res.setHeader('Set-Cookie', cookieStr);
+  return new Date(nowMs + SESSION_TICKET_MAX_AGE_SEC * 1000).toISOString();
+}
+
+router.post('/session-ticket', async (req, res) => {
+  try {
+    if (!String(process.env.LUMI_STUDIO_TICKET_SECRET || '').trim()) {
+      return res.status(503).json({
+        success: false,
+        code: 'TICKET_SECRET_UNCONFIGURED',
+        message: 'Dịch vụ vé phiên LumiStage chưa được cấu hình.'
+      });
+    }
+
+    const rawShareToken = String(req.body?.shareToken || req.query?.shareToken || '').trim();
+    if (rawShareToken) {
+      const rateKey = `share:${hashShareToken(rawShareToken).slice(0, 16)}:${extractClientFirstHop(req)}`;
+      if (!consumeRateBucket(ticketRateBuckets, rateKey, TICKET_RATE_LIMIT, TICKET_RATE_WINDOW_MS)) {
+        return res.status(429).json({
+          success: false,
+          code: 'RATE_LIMITED',
+          message: 'Quá nhiều yêu cầu xác thực link chia sẻ. Vui lòng thử lại sau 1 phút.'
+        });
+      }
+
+      const tokenHash = hashShareToken(rawShareToken);
+      const query = LedStudioProject.findOne({ shareTokenHash: tokenHash, shareEnabled: true });
+      const project = typeof query?.select === 'function'
+        ? await query.select('+sharePasswordHash').lean()
+        : await query?.lean();
+      const check = validateShareAccess(project, rawShareToken);
+      if (!check.ok) {
+        return res.status(403).json({
+          success: false,
+          code: 'INVALID_SHARE',
+          message: check.reason
+        });
+      }
+      const proGate = await resolveShareProGate(project);
+      if (!proGate.ok) {
+        return res.status(403).json({
+          success: false,
+          code: 'SHARE_PRO_EXPIRED',
+          message: 'Link đã hết hiệu lực vì gói Pro của chủ dự án đã hết hạn.'
+        });
+      }
+
+      const incomingPassword = req.headers?.['x-share-password'] || req.body?.password || '';
+      const pwdFailKey = `share_pwd_fail:${tokenHash.slice(0, 16)}`;
+      const existingPwdFail = ticketRateBuckets.get(pwdFailKey);
+      if (
+        project?.sharePasswordProtected &&
+        existingPwdFail &&
+        Date.now() - existingPwdFail.windowStart < TICKET_RATE_WINDOW_MS &&
+        existingPwdFail.count >= TICKET_PWD_FAIL_LIMIT
+      ) {
+        return res.status(429).json({
+          success: false,
+          code: 'RATE_LIMITED',
+          message: 'Quá nhiều lần nhập sai mật khẩu link chia sẻ. Vui lòng thử lại sau 1 phút.'
+        });
+      }
+      const pwdCheck = verifySharePassword(project, incomingPassword);
+      if (!pwdCheck.ok) {
+        if (pwdCheck.requiresPassword) {
+          return res.status(200).json({
+            success: true,
+            message: pwdCheck.reason,
+            data: {
+              issued: false,
+              requiresPassword: true,
+              passwordProtected: true,
+              title: project.title || ''
+            }
+          });
+        }
+        if (!consumeRateBucket(ticketRateBuckets, pwdFailKey, TICKET_PWD_FAIL_LIMIT, TICKET_RATE_WINDOW_MS)) {
+          return res.status(429).json({
+            success: false,
+            code: 'RATE_LIMITED',
+            message: 'Quá nhiều lần nhập sai mật khẩu link chia sẻ. Vui lòng thử lại sau 1 phút.'
+          });
+        }
+        return res.status(401).json({
+          success: false,
+          code: 'INVALID_SHARE_PASSWORD',
+          message: pwdCheck.reason
+        });
+      }
+
+      const expiresAt = issueSessionTicketCookie(res, `share:${project._id}`, 'share');
+      return res.status(200).json({
+        success: true,
+        message: 'OK',
+        data: {
+          issued: true,
+          requiresPassword: false,
+          passwordProtected: Boolean(project.sharePasswordProtected),
+          expiresAt,
+          maxAge: SESSION_TICKET_MAX_AGE_SEC,
+          mode: 'share'
+        }
+      });
+    }
+
+    const user = await resolveOptionalUser(req);
+    if (!user?._id) {
+      const anonKey = `anon:${extractClientFirstHop(req)}`;
+      if (!consumeRateBucket(ticketRateBuckets, anonKey, TICKET_RATE_LIMIT, TICKET_RATE_WINDOW_MS)) {
+        return res.status(429).json({
+          success: false,
+          code: 'RATE_LIMITED',
+          message: 'Quá nhiều yêu cầu xác thực phiên. Vui lòng thử lại sau 1 phút.'
+        });
+      }
+      return res.status(401).json({
+        success: false,
+        code: 'AUTH_REQUIRED',
+        message: 'Vui lòng đăng nhập để mở LumiStage.'
+      });
+    }
+
+    const userKey = `user:${String(user._id)}`;
+    if (!consumeRateBucket(ticketRateBuckets, userKey, TICKET_RATE_LIMIT, TICKET_RATE_WINDOW_MS)) {
+      return res.status(429).json({
+        success: false,
+        code: 'RATE_LIMITED',
+        message: 'Quá nhiều yêu cầu gia hạn phiên. Vui lòng thử lại sau 1 phút.'
+      });
+    }
+
+    const expiresAt = issueSessionTicketCookie(res, String(user._id), 'user');
+    return res.status(200).json({
+      success: true,
+      message: 'OK',
+      data: {
+        issued: true,
+        expiresAt,
+        maxAge: SESSION_TICKET_MAX_AGE_SEC,
+        mode: 'user'
+      }
+    });
+  } catch (err) {
+    return res.status(500).json({ success: false, message: err.message });
+  }
+});
 
 router.get('/presets/pack', async (req, res) => {
   const cat = req.query?.category || req.query?.presetType;
@@ -1469,6 +1679,273 @@ router.post('/telemetry', async (req, res) => {
         event: cleanEvent,
         meta: safeMeta,
         timestamp: new Date().toISOString()
+      }
+    });
+  } catch (err) {
+    return res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+const PRO_EXPORT_RATE_LIMIT = 20;
+const PRO_EXPORT_WINDOW_MS = 60_000;
+const proExportRateBuckets = new Map();
+
+function hasInlineDataUri(value, depth = 0) {
+  if (depth > 5 || value == null) return false;
+  if (typeof value === 'string') {
+    return /^data:image\//i.test(value.trim());
+  }
+  if (Array.isArray(value)) {
+    for (let i = 0; i < Math.min(value.length, 512); i++) {
+      if (hasInlineDataUri(value[i], depth + 1)) return true;
+    }
+    return false;
+  }
+  if (typeof value === 'object') {
+    const entries = Object.values(value);
+    for (let i = 0; i < Math.min(entries.length, 128); i++) {
+      if (hasInlineDataUri(entries[i], depth + 1)) return true;
+    }
+  }
+  return false;
+}
+
+const MAX_SURFACE_CAB_COLS = 64;
+const MAX_SURFACE_CAB_ROWS = 48;
+const MAX_SURFACE_PHYSICAL_W_M = 64;
+const MAX_SURFACE_PHYSICAL_H_M = 48;
+
+function validateProExportBounds(body = {}) {
+  if (!body || typeof body !== 'object' || Array.isArray(body)) {
+    return { ok: false, message: 'Dữ liệu xuất hồ sơ PRO không hợp lệ.' };
+  }
+  if (body.surfaces !== undefined && (!Array.isArray(body.surfaces) || body.surfaces.length > 128)) {
+    return { ok: false, message: 'Số lượng màn hình LED vượt giới hạn cho phép (tối đa 128).' };
+  }
+  if (body.lights !== undefined && (!Array.isArray(body.lights) || body.lights.length > 512)) {
+    return { ok: false, message: 'Số lượng đèn DMX vượt giới hạn cho phép (tối đa 512).' };
+  }
+  if (body.sfxUnits !== undefined && (!Array.isArray(body.sfxUnits) || body.sfxUnits.length > 256)) {
+    return { ok: false, message: 'Số lượng cụm Pyro/SFX vượt giới hạn cho phép (tối đa 256).' };
+  }
+  if (body.bomRows !== undefined && (!Array.isArray(body.bomRows) || body.bomRows.length > 400)) {
+    return { ok: false, message: 'Số dòng vật tư BOM vượt giới hạn cho phép (tối đa 400).' };
+  }
+  if (Array.isArray(body.surfaces)) {
+    for (const s of body.surfaces) {
+      if (!s || typeof s !== 'object' || Array.isArray(s)) {
+        return { ok: false, message: 'Cấu hình màn hình LED không hợp lệ.' };
+      }
+      const spec = s.cabinetSpec && typeof s.cabinetSpec === 'object' ? s.cabinetSpec : {};
+      const rawCols = s.cabCols ?? spec.cols;
+      const rawRows = s.cabRows ?? spec.rows;
+      if (rawCols !== undefined && (!Number.isFinite(Number(rawCols)) || Number(rawCols) < 1 || Number(rawCols) > MAX_SURFACE_CAB_COLS)) {
+        return { ok: false, message: `Số cột cabinet LED vượt giới hạn cho phép (tối đa ${MAX_SURFACE_CAB_COLS}).` };
+      }
+      if (rawRows !== undefined && (!Number.isFinite(Number(rawRows)) || Number(rawRows) < 1 || Number(rawRows) > MAX_SURFACE_CAB_ROWS)) {
+        return { ok: false, message: `Số hàng cabinet LED vượt giới hạn cho phép (tối đa ${MAX_SURFACE_CAB_ROWS}).` };
+      }
+      const rawW = s.physicalWidthM ?? s.widthM ?? (Array.isArray(s.physical) ? s.physical[0] : s.physical?.width);
+      const rawH = s.physicalHeightM ?? s.heightM ?? (Array.isArray(s.physical) ? s.physical[1] : s.physical?.height);
+      if (rawW !== undefined && (!Number.isFinite(Number(rawW)) || Number(rawW) <= 0 || Number(rawW) > MAX_SURFACE_PHYSICAL_W_M)) {
+        return { ok: false, message: `Chiều rộng vật lý màn hình LED vượt giới hạn cho phép (tối đa ${MAX_SURFACE_PHYSICAL_W_M}m).` };
+      }
+      if (rawH !== undefined && (!Number.isFinite(Number(rawH)) || Number(rawH) <= 0 || Number(rawH) > MAX_SURFACE_PHYSICAL_H_M)) {
+        return { ok: false, message: `Chiều cao vật lý màn hình LED vượt giới hạn cho phép (tối đa ${MAX_SURFACE_PHYSICAL_H_M}m).` };
+      }
+      if (s.virtualTiles !== undefined && (!Array.isArray(s.virtualTiles) || s.virtualTiles.length > MAX_SURFACE_CAB_COLS * MAX_SURFACE_CAB_ROWS)) {
+        return { ok: false, message: 'Danh sách ô trống cabinet vượt giới hạn cho phép.' };
+      }
+    }
+  }
+  if (hasInlineDataUri(body)) {
+    return { ok: false, message: 'Không được gửi ảnh base64 lên API xuất hồ sơ PRO; ảnh xem trước được ghép cục bộ trên trình duyệt.' };
+  }
+  return { ok: true };
+}
+
+function sanitizePrintableSummary(rawSummary, rider) {
+  const src = rawSummary && typeof rawSummary === 'object' && !Array.isArray(rawSummary) ? rawSummary : {};
+  const out = { engineeringRider: rider };
+  const numericKeys = [
+    'stageW',
+    'stageD',
+    'stageAreaM2',
+    'totalLedAreaM2',
+    'totalCabinets500',
+    'totalPixels',
+    'rj45PortsNeeded',
+    'totalMaxKw',
+    'currentPerPhaseAmps',
+    'totalRiggingWeightKg'
+  ];
+  for (const k of numericKeys) {
+    if (src[k] !== undefined && Number.isFinite(Number(src[k]))) {
+      out[k] = Number(src[k]);
+    }
+  }
+  return out;
+}
+
+export async function requireActivePro(req, res, next) {
+  try {
+    if (!req.user?._id) {
+      return res.status(401).json({ success: false, code: 'UNAUTHORIZED', message: 'Vui lòng đăng nhập để xuất hồ sơ PRO.' });
+    }
+    const freshUser = (await loadMutableUser(req.user)) || req.user;
+    const sub = normalizeUserLumiState(freshUser);
+    if (!sub.proActive) {
+      return res.status(403).json({
+        success: false,
+        code: 'PRO_REQUIRED',
+        message: 'Tính năng xuất hồ sơ thương mại yêu cầu Gói LumiStage PRO đang hoạt động.'
+      });
+    }
+    const rateKey = `pro_export:${String(freshUser._id)}`;
+    if (!consumeRateBucket(proExportRateBuckets, rateKey, PRO_EXPORT_RATE_LIMIT, PRO_EXPORT_WINDOW_MS)) {
+      return res.status(429).json({
+        success: false,
+        code: 'RATE_LIMITED',
+        message: 'Bạn đang xuất hồ sơ quá nhanh (tối đa 20 lần/phút). Vui lòng thử lại sau ít giây.'
+      });
+    }
+    req.lumiSub = sub;
+    return next();
+  } catch (err) {
+    return res.status(500).json({ success: false, message: err.message });
+  }
+}
+
+router.post('/exports/dxf', authMiddleware, requireActivePro, async (req, res) => {
+  try {
+    const check = validateProExportBounds(req.body);
+    if (!check.ok) return res.status(400).json({ success: false, code: 'INVALID_EXPORT_INPUT', message: check.message });
+    const stageW = Math.min(200, Math.max(2, Number(req.body?.stageW) || 16));
+    const stageD = Math.min(200, Math.max(2, Number(req.body?.stageD) || 8));
+    const viewMode = req.body?.viewMode === 'rear' ? 'rear' : 'front';
+    const dxf = generateStageDxf({
+      stageW,
+      stageD,
+      viewMode,
+      watermark: false,
+      surfaces: Array.isArray(req.body?.surfaces) ? req.body.surfaces : [],
+      lights: Array.isArray(req.body?.lights) ? req.body.lights : [],
+      sfxUnits: Array.isArray(req.body?.sfxUnits) ? req.body.sfxUnits : []
+    });
+    return res.json({
+      success: true,
+      message: 'OK',
+      data: { dxf, unit: 'meters', viewMode }
+    });
+  } catch (err) {
+    return res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+router.post('/exports/mvr', authMiddleware, requireActivePro, async (req, res) => {
+  try {
+    const check = validateProExportBounds(req.body);
+    if (!check.ok) return res.status(400).json({ success: false, code: 'INVALID_EXPORT_INPUT', message: check.message });
+    const pkg = exportLightingMvr18({
+      lights: Array.isArray(req.body?.lights) ? req.body.lights : [],
+      surfaces: Array.isArray(req.body?.surfaces) ? req.body.surfaces : []
+    });
+    return res.json({
+      success: true,
+      message: 'OK',
+      data: {
+        zipBase64: Buffer.from(pkg.bytes).toString('base64'),
+        fixtureCount: pkg.fixtureCount,
+        screenCount: pkg.screenCount
+      }
+    });
+  } catch (err) {
+    return res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+router.post('/exports/gma-xml', authMiddleware, requireActivePro, async (req, res) => {
+  try {
+    const check = validateProExportBounds(req.body);
+    if (!check.ok) return res.status(400).json({ success: false, code: 'INVALID_EXPORT_INPUT', message: check.message });
+    const version = String(req.body?.version || 'ma3').toLowerCase() === 'ma2' ? 'ma2' : 'ma3';
+    const layerName = String(req.body?.layerName || 'ALPHA_Stage_Rig').slice(0, 120);
+    const xml = buildGrandMaFixtureXml(
+      Array.isArray(req.body?.lights) ? req.body.lights : [],
+      { version, layerName }
+    );
+    return res.json({
+      success: true,
+      message: 'OK',
+      data: { xml, version }
+    });
+  } catch (err) {
+    return res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+router.post('/exports/engineering-dossier', authMiddleware, requireActivePro, async (req, res) => {
+  try {
+    const check = validateProExportBounds(req.body);
+    if (!check.ok) return res.status(400).json({ success: false, code: 'INVALID_EXPORT_INPUT', message: check.message });
+    const kind = String(req.body?.kind || 'quote').toLowerCase();
+    const surfaces = Array.isArray(req.body?.surfaces) ? req.body.surfaces : [];
+    const lights = Array.isArray(req.body?.lights) ? req.body.lights : [];
+    const rider = computeEngineeringRider({
+      surfaces,
+      lights,
+      size: {
+        width: Math.min(200, Math.max(2, Number(req.body?.summary?.stageW) || 16)),
+        depth: Math.min(200, Math.max(2, Number(req.body?.summary?.stageD) || 8))
+      }
+    });
+
+    if (kind === 'crew') {
+      const role = String(req.body?.role || 'CREW_1_STAGE_RIGGING').slice(0, 64);
+      const dossier = generateCrewSplitDossier18(role, {
+        lang: req.body?.lang === 'en' ? 'en' : 'vi',
+        companyProfile: req.body?.companyProfile && typeof req.body.companyProfile === 'object' ? req.body.companyProfile : {},
+        struct: req.body?.struct && typeof req.body.struct === 'object' ? req.body.struct : undefined,
+        rider,
+        audioDiag: req.body?.audioDiag && typeof req.body.audioDiag === 'object' ? req.body.audioDiag : undefined,
+        unifilar: req.body?.unifilar && typeof req.body.unifilar === 'object' ? req.body.unifilar : undefined,
+        lights
+      });
+      return res.json({
+        success: true,
+        message: 'OK',
+        data: {
+          kind: 'crew',
+          role: dossier.role,
+          title: dossier.title,
+          summary: dossier.summary,
+          html: dossier.html,
+          rider
+        }
+      });
+    }
+
+    const mode = kind === 'tech' ? 'tech' : 'quote';
+    const html = buildPrintableStageDocumentHtml18({
+      mode,
+      watermark: false,
+      modelName: String(req.body?.modelName || 'LumiStage').slice(0, 120),
+      companyProfile: req.body?.companyProfile && typeof req.body.companyProfile === 'object' ? req.body.companyProfile : {},
+      quoteConfig: req.body?.quoteConfig && typeof req.body.quoteConfig === 'object' ? req.body.quoteConfig : {},
+      bomRows: Array.isArray(req.body?.bomRows) ? req.body.bomRows : [],
+      summary: sanitizePrintableSummary(req.body?.summary, rider),
+      surfaces,
+      lights,
+      proposalText: String(req.body?.proposalText || '').slice(0, 20_000)
+    });
+
+    return res.json({
+      success: true,
+      message: 'OK',
+      data: {
+        kind: mode,
+        html,
+        rider
       }
     });
   } catch (err) {

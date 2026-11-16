@@ -26,7 +26,9 @@ import {
   LUMI_TOKEN_PRICING,
   calculateLumiTokenCredits,
   signLumiLicenseToken,
-  verifyLumiLicenseToken
+  verifyLumiLicenseToken,
+  signLumiStudioTicket,
+  verifyLumiStudioTicket
 } from '../server/utils/lumiCatalog.js';
 
 function getRouteHandler(method, path) {
@@ -42,6 +44,14 @@ function makeRes() {
   return {
     statusCode: 200,
     body: null,
+    headers: {},
+    setHeader(name, value) {
+      this.headers[String(name).toLowerCase()] = value;
+      return this;
+    },
+    getHeader(name) {
+      return this.headers[String(name).toLowerCase()];
+    },
     status(code) {
       this.statusCode = code;
       return this;
@@ -1155,6 +1165,443 @@ test('Free AI credits default to 50 and share links enforce 7-day cap for fixed 
     assert.equal(resGetRenewed.statusCode, 200);
     assert.equal(resGetRenewed.body.data.shareExpiresAt, renewedExpiry.toISOString());
   } finally {
+    User.findById = origUserFindById;
+    restore();
+  }
+});
+
+test('Tier 1: signLumiStudioTicket / verifyLumiStudioTicket enforce secret, ms expiry, and deterministic cross-repo test vector', () => {
+  const secret = 'test-only-lumi-ticket-secret-32b!!';
+  assert.throws(() => signLumiStudioTicket({ sub: 'u1', mode: 'user', secret: '' }), /LUMI_STUDIO_TICKET_SECRET/);
+  assert.equal(verifyLumiStudioTicket('abc.def', '').valid, false);
+
+  const fixedTicket = signLumiStudioTicket({
+    sub: 'user_vector_1',
+    mode: 'user',
+    ttlSec: 900,
+    nowMs: 4102444800000, // 2100-01-01T00:00:00.000Z
+    secret
+  });
+  const checked = verifyLumiStudioTicket(fixedTicket, secret, 4102444800000 + 1000);
+  assert.equal(checked.valid, true);
+  assert.equal(checked.payload.sub, 'user_vector_1');
+  assert.equal(checked.payload.mode, 'user');
+  assert.equal(checked.payload.exp, 4102444800000 + 900_000);
+
+  // Expired check
+  const expired = verifyLumiStudioTicket(fixedTicket, secret, 4102444800000 + 900_001);
+  assert.equal(expired.valid, false);
+  assert.equal(expired.reason, 'expired');
+
+  // Tampered signature check
+  const tampered = fixedTicket.slice(0, -2) + (fixedTicket.endsWith('aa') ? 'bb' : 'aa');
+  assert.equal(verifyLumiStudioTicket(tampered, secret, 4102444800000).valid, false);
+});
+
+test('Tier 1: POST /session-ticket issues HttpOnly SameSite=Strict cookie for JWT or valid shareToken (with password & proxy-safe rate limit)', async () => {
+  const { restore } = mockProjectStore();
+  const origSecret = process.env.LUMI_STUDIO_TICKET_SECRET;
+  const origUserFindById = User.findById;
+  process.env.LUMI_STUDIO_TICKET_SECRET = 'test-only-lumi-ticket-secret-32b!!';
+
+  const owner = {
+    _id: 'u_owner_t1',
+    role: 'student',
+    lumiStage: {
+      plan: 'lumi_pro_monthly',
+      expiresAt: new Date(Date.now() + 10 * 86400_000),
+      freeAiCreditsRemaining: 50
+    }
+  };
+  User.findById = () => ({ select: () => ({ lean: async () => owner }) });
+
+  try {
+    const postProjects = getRouteHandler('post', '/projects');
+    const postShare = getRouteHandler('post', '/projects/:id/share');
+    const postTicket = getRouteHandler('post', '/session-ticket');
+
+    // 1. Unauthenticated without shareToken -> 401, no Set-Cookie
+    const resUnauth = makeRes();
+    await postTicket({ headers: {}, body: {}, ip: '10.0.0.1' }, resUnauth);
+    assert.equal(resUnauth.statusCode, 401);
+    assert.equal(resUnauth.getHeader('set-cookie'), undefined);
+
+    // 2. Authenticated user -> 200, Set-Cookie HttpOnly; Secure; SameSite=Strict; Path=/led-studio; Max-Age=900, no raw ticket in JSON
+    const resAuth = makeRes();
+    await postTicket({ user: owner, headers: {}, body: {}, ip: '10.0.0.1' }, resAuth);
+    assert.equal(resAuth.statusCode, 200);
+    assert.equal(resAuth.body.data.issued, true);
+    assert.equal(resAuth.body.data.ticket, undefined, 'Must not echo raw ticket in JSON body');
+    const cookieHeader = String(resAuth.getHeader('set-cookie') || '');
+    assert.match(cookieHeader, /^lumi_studio_ticket=[^;]+;/);
+    assert.match(cookieHeader, /Path=\/led-studio/);
+    assert.match(cookieHeader, /Max-Age=900/);
+    assert.match(cookieHeader, /HttpOnly/);
+    assert.match(cookieHeader, /Secure/);
+    assert.match(cookieHeader, /SameSite=Strict/);
+    const rawCookieVal = cookieHeader.split(';')[0].split('=')[1];
+    assert.equal(verifyLumiStudioTicket(rawCookieVal, process.env.LUMI_STUDIO_TICKET_SECRET).valid, true);
+
+    // 3. Invalid shareToken -> 403, no Set-Cookie
+    const resBadShare = makeRes();
+    await postTicket({ headers: {}, body: { shareToken: 'fake_share_token' }, ip: '10.0.0.1' }, resBadShare);
+    assert.equal(resBadShare.statusCode, 403);
+    assert.equal(resBadShare.getHeader('set-cookie'), undefined);
+
+    // 4. Password-protected shareToken requires password BEFORE issuing cookie
+    const resProj = makeRes();
+    await postProjects({ user: owner, body: { title: 'Protected Share', projectJson: makeValidStagePayload('Sec.glb') } }, resProj);
+    const projId = resProj.body.data.project._id;
+
+    const resSharePwd = makeRes();
+    await postShare({ user: owner, params: { id: projId }, body: { enabled: true, untilPro: true, password: 'vip-2026' } }, resSharePwd);
+    const pwdShareToken = resSharePwd.body.data.shareToken;
+
+    const resMissingPwd = makeRes();
+    await postTicket({ headers: {}, body: { shareToken: pwdShareToken }, ip: '10.0.0.1' }, resMissingPwd);
+    assert.equal(resMissingPwd.statusCode, 200);
+    assert.equal(resMissingPwd.body.data.issued, false);
+    assert.equal(resMissingPwd.body.data.requiresPassword, true);
+    assert.equal(resMissingPwd.getHeader('set-cookie'), undefined);
+
+    const resWrongPwd = makeRes();
+    await postTicket({ headers: {}, body: { shareToken: pwdShareToken, password: 'wrong' }, ip: '10.0.0.1' }, resWrongPwd);
+    assert.equal(resWrongPwd.statusCode, 401);
+    assert.equal(resWrongPwd.body.code, 'INVALID_SHARE_PASSWORD');
+    assert.equal(resWrongPwd.getHeader('set-cookie'), undefined);
+
+    const resRightPwd = makeRes();
+    await postTicket({ headers: {}, body: { shareToken: pwdShareToken, password: 'vip-2026' }, ip: '10.0.0.1' }, resRightPwd);
+    assert.equal(resRightPwd.statusCode, 200);
+    assert.equal(resRightPwd.body.data.issued, true);
+    assert.match(String(resRightPwd.getHeader('set-cookie') || ''), /^lumi_studio_ticket=/);
+
+    // 5. Expired owner Pro rejects share ticket with SHARE_PRO_EXPIRED
+    owner.lumiStage.expiresAt = new Date(Date.now() - 5000);
+    const resProExp = makeRes();
+    await postTicket({ headers: {}, body: { shareToken: pwdShareToken, password: 'vip-2026' }, ip: '10.0.0.1' }, resProExp);
+    assert.equal(resProExp.statusCode, 403);
+    assert.equal(resProExp.body.code, 'SHARE_PRO_EXPIRED');
+    assert.equal(resProExp.getHeader('set-cookie'), undefined);
+
+    // 6. Proxy-safe rate limiter: exhausting user A behind shared proxy IP 10.0.0.99 does NOT block user B on same req.ip
+    for (let i = 0; i < 31; i++) {
+      const r = makeRes();
+      await postTicket({ user: { _id: 'flood_user_a', role: 'student' }, headers: { 'x-forwarded-for': '203.0.113.10' }, body: {}, ip: '10.0.0.99' }, r);
+      if (i === 30) assert.equal(r.statusCode, 429);
+    }
+    const resUserB = makeRes();
+    await postTicket({ user: { _id: 'clean_user_b', role: 'student' }, headers: { 'x-forwarded-for': '203.0.113.11' }, body: {}, ip: '10.0.0.99' }, resUserB);
+    assert.equal(resUserB.statusCode, 200, 'Second user behind same proxy req.ip must not be rate-limited');
+  } finally {
+    if (origSecret === undefined) delete process.env.LUMI_STUDIO_TICKET_SECRET;
+    else process.env.LUMI_STUDIO_TICKET_SECRET = origSecret;
+    User.findById = origUserFindById;
+    restore();
+  }
+});
+
+async function runRouteMiddlewareChain(method, routePath, req, res) {
+  const layer = ledStudioRouter.stack.find(
+    (l) => l.route && l.route.path === routePath && l.route.methods[method.toLowerCase()]
+  );
+  assert.ok(layer, `Expected route ${method.toUpperCase()} ${routePath}`);
+  const handlers = layer.route.stack.map((s) => s.handle);
+  let idx = 0;
+  const next = async (err) => {
+    if (err) throw err;
+    const fn = handlers[idx++];
+    if (!fn) return;
+    await fn(req, res, next);
+  };
+  await next();
+}
+
+test('Tier 3: Single-source byte parity between lumiProExporters.cjs and v18-pro-exporters-local.js', (t) => {
+  const bePath = new URL('../server/utils/lumiProExporters.cjs', import.meta.url);
+  const fePath = new URL('../../tools/led-stage-studio/js/modules/v18-pro-exporters-local.js', import.meta.url);
+  const beBytes = fs.readFileSync(bePath);
+  assert.ok(beBytes.length > 0);
+  if (!fs.existsSync(fePath)) {
+    t.skip('Sibling tools/led-stage-studio repo not present in standalone checkout');
+    return;
+  }
+  const feBytes = fs.readFileSync(fePath);
+  const beSha = crypto.createHash('sha256').update(beBytes).digest('hex');
+  const feSha = crypto.createHash('sha256').update(feBytes).digest('hex');
+  assert.equal(beSha, feSha, 'Backend lumiProExporters.cjs must remain byte-for-byte identical to tools/led-stage-studio/js/modules/v18-pro-exporters-local.js');
+});
+
+test('Tier 3: POST /exports/{dxf,mvr,gma-xml,engineering-dossier} enforce auth + active PRO, validate bounds/no-base64, and render valid artifacts', async () => {
+  const origUserFindById = User.findById;
+  const freeUser = {
+    _id: 'u_free_t3',
+    role: 'student',
+    lumiStage: { plan: 'free', expiresAt: null, freeAiCreditsRemaining: 50 }
+  };
+  const expiredProUser = {
+    _id: 'u_exp_t3',
+    role: 'student',
+    lumiStage: { plan: 'lumi_pro_monthly', expiresAt: new Date(Date.now() - 60_000), freeAiCreditsRemaining: 50 }
+  };
+  const activeProUser = {
+    _id: 'u_pro_t3',
+    role: 'student',
+    lumiStage: { plan: 'lumi_pro_monthly', expiresAt: new Date(Date.now() + 15 * 86400_000), freeAiCreditsRemaining: 50 }
+  };
+  const partnerUser = {
+    _id: 'u_partner_t3',
+    role: 'partner',
+    lumiStage: { plan: 'free', expiresAt: null, freeAiCreditsRemaining: 50 }
+  };
+  const usersById = new Map([
+    [freeUser._id, freeUser],
+    [expiredProUser._id, expiredProUser],
+    [activeProUser._id, activeProUser],
+    [partnerUser._id, partnerUser]
+  ]);
+  User.findById = (id) => Promise.resolve(usersById.get(String(id)) || null);
+
+  const sampleSurface = {
+    id: 's1',
+    name: 'LED_MAIN',
+    w: 1920,
+    h: 1080,
+    pitchMm: 3.91,
+    physicalWidthM: 6,
+    physicalHeightM: 3,
+    cabCols: 12,
+    cabRows: 6,
+    pos: [0, 2.8, -2]
+  };
+  const sampleLight = {
+    id: 'l1',
+    fixId: 101,
+    name: 'Beam #01',
+    type: 'beam',
+    oflModel: 'Robe Pointe 280W',
+    dmxChannels: 16,
+    dmxUniverse: 1,
+    dmxAddress: 1,
+    pos: [-2, 6, -1],
+    target: [-2, 0, 2]
+  };
+
+  try {
+    // 1. Unauthenticated -> 401 across all 4 routes
+    for (const p of ['/exports/dxf', '/exports/mvr', '/exports/gma-xml', '/exports/engineering-dossier']) {
+      const r = makeRes();
+      await runRouteMiddlewareChain('post', p, { headers: {}, cookies: {}, body: {} }, r);
+      assert.equal(r.statusCode, 401, `${p} must reject unauthenticated requests with 401`);
+    }
+
+    // 2. Free user & Expired PRO user -> 403 PRO_REQUIRED across all 4 routes
+    for (const u of [freeUser, expiredProUser]) {
+      for (const p of ['/exports/dxf', '/exports/mvr', '/exports/gma-xml', '/exports/engineering-dossier']) {
+        const handlers = ledStudioRouter.stack.find((l) => l.route?.path === p && l.route.methods.post).route.stack.map((s) => s.handle);
+        const r = makeRes();
+        let idx = 1; // skip authMiddleware stub to supply pre-authenticated req.user
+        const next = async () => {
+          const fn = handlers[idx++];
+          if (fn) await fn({ user: u, body: { surfaces: [sampleSurface], lights: [sampleLight] } }, r, next);
+        };
+        await next();
+        assert.equal(r.statusCode, 403, `${p} must reject ${u._id} with 403`);
+        assert.equal(r.body.code, 'PRO_REQUIRED');
+      }
+    }
+
+    const callAsUser = async (routePath, userObj, body) => {
+      const handlers = ledStudioRouter.stack.find((l) => l.route?.path === routePath && l.route.methods.post).route.stack.map((s) => s.handle);
+      const r = makeRes();
+      let idx = 1;
+      const next = async () => {
+        const fn = handlers[idx++];
+        if (fn) await fn({ user: userObj, body }, r, next);
+      };
+      await next();
+      return r;
+    };
+
+    // 3. Input bounds validation: > 128 surfaces -> 400; base64 data URI injection -> 400
+    const resTooManySurfaces = await callAsUser('/exports/dxf', activeProUser, {
+      surfaces: Array.from({ length: 129 }, (_, i) => ({ ...sampleSurface, id: `s_${i}` })),
+      lights: [sampleLight]
+    });
+    assert.equal(resTooManySurfaces.statusCode, 400);
+
+    const resBase64Blob = await callAsUser('/exports/engineering-dossier', activeProUser, {
+      kind: 'quote',
+      previewDataUrl: 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAUA',
+      surfaces: [sampleSurface]
+    });
+    assert.equal(resBase64Blob.statusCode, 400, 'Must reject base64 image blobs on server export route');
+
+    // 4. Active PRO user -> 200 on all 4 routes with valid CAD/MVR/GMA/HTML payloads & zero watermark
+    const resDxf = await callAsUser('/exports/dxf', activeProUser, {
+      stageW: 16,
+      stageD: 8,
+      surfaces: [sampleSurface],
+      lights: [sampleLight],
+      sfxUnits: [{ id: 'sfx1', type: 'cold_spark_fountain', pos: [-2, 0.8, 1.8] }]
+    });
+    assert.equal(resDxf.statusCode, 200);
+    assert.match(resDxf.body.data.dxf, /WIRING_DATA/);
+    assert.match(resDxf.body.data.dxf, /PANEL_OUTLINE/);
+    assert.match(resDxf.body.data.dxf, /SAFETY_CLEARANCE/);
+    assert.doesNotMatch(resDxf.body.data.dxf, /WATERMARK/, 'PRO DXF must not contain Free watermark layer');
+
+    const resMvr = await callAsUser('/exports/mvr', activeProUser, {
+      surfaces: [sampleSurface],
+      lights: [sampleLight]
+    });
+    assert.equal(resMvr.statusCode, 200);
+    const mvrBuf = Buffer.from(resMvr.body.data.zipBase64, 'base64');
+    assert.equal(mvrBuf[0], 0x50);
+    assert.equal(mvrBuf[1], 0x4b);
+    assert.ok(mvrBuf.includes(Buffer.from('GeneralSceneDescription.xml')), 'MVR PKZIP must embed GeneralSceneDescription.xml');
+
+    const resGma = await callAsUser('/exports/gma-xml', partnerUser, {
+      version: 'ma3',
+      layerName: 'Festival_Main',
+      lights: [sampleLight]
+    });
+    assert.equal(resGma.statusCode, 200, 'Partner role must also pass PRO gate');
+    assert.match(resGma.body.data.xml, /<GMA3 DataVersion="1\.9\.7\.0">/);
+    assert.match(resGma.body.data.xml, /FixId="101"/);
+
+    const resQuoteHtml = await callAsUser('/exports/engineering-dossier', activeProUser, {
+      kind: 'tech',
+      modelName: 'Arena_2026',
+      companyProfile: { companyName: 'ALPHA PRO EVENT', clientName: 'ACME CORP' },
+      quoteConfig: { clientName: 'ACME CORP', rentalDays: 2, vatMode: '10' },
+      bomRows: [{ category: 'LED', name: 'ROE BP2V2', spec: '500x500', unit: 'm2', qty: 18, unitPriceVnd: 950000 }],
+      summary: { stageW: 16, stageD: 8, stageAreaM2: 128, totalLedAreaM2: 18, totalPixels: 2073600 },
+      surfaces: [sampleSurface],
+      lights: [sampleLight],
+      proposalText: 'Phương án kỹ thuật đạt chuẩn TCVN.'
+    });
+    assert.equal(resQuoteHtml.statusCode, 200);
+    assert.match(resQuoteHtml.body.data.html, /ALPHA PRO EVENT/);
+    assert.match(resQuoteHtml.body.data.html, /<!--LUMI_STAGE_PREVIEW_SLOT-->/);
+    assert.doesNotMatch(resQuoteHtml.body.data.html, /LUMISTAGE FREE/);
+
+    const resCrewHtml = await callAsUser('/exports/engineering-dossier', activeProUser, {
+      kind: 'crew',
+      role: 'CREW_2_LED_POWER',
+      lang: 'vi',
+      companyProfile: { companyName: 'ALPHA PRO EVENT', clientName: 'ACME CORP' },
+      surfaces: [sampleSurface],
+      lights: [sampleLight]
+    });
+    assert.equal(resCrewHtml.statusCode, 200);
+    assert.match(resCrewHtml.body.data.html, /CREW 2: LED &amp; POWER/);
+
+    // 5. Security regressions: reject unbounded cabCols/cabRows DoS, reject base64 past index 32, and strip summary.structureSvg XSS
+    const resHugeCabGrid = await callAsUser('/exports/dxf', activeProUser, {
+      surfaces: [{ ...sampleSurface, cabCols: 1_000_000, cabRows: 10 }],
+      lights: [sampleLight]
+    });
+    assert.equal(resHugeCabGrid.statusCode, 400, 'Must reject unbounded cabCols/cabRows before O(cols*rows) loop');
+
+    const resHugePhysical = await callAsUser('/exports/engineering-dossier', activeProUser, {
+      kind: 'tech',
+      surfaces: [{ id: 's_huge', physicalWidthM: 5000, physicalHeightM: 2000 }],
+      lights: []
+    });
+    assert.equal(resHugePhysical.statusCode, 400, 'Must reject unbounded physical dimensions');
+
+    const bomWithLateBase64 = Array.from({ length: 40 }, (_, i) => ({
+      category: 'LED',
+      name: i === 38 ? 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAUA' : `Item_${i}`,
+      spec: '500x500',
+      unit: 'm2',
+      qty: 1,
+      unitPriceVnd: 1000
+    }));
+    const resLateBase64 = await callAsUser('/exports/engineering-dossier', activeProUser, {
+      kind: 'quote',
+      bomRows: bomWithLateBase64,
+      surfaces: [sampleSurface]
+    });
+    assert.equal(resLateBase64.statusCode, 400, 'Must detect base64 data URI past element 32');
+
+    const resXssSvg = await callAsUser('/exports/engineering-dossier', activeProUser, {
+      kind: 'tech',
+      summary: { stageW: 16, stageD: 8, structureSvg: '<svg onload="alert(1)"><script>evil()</script></svg>' },
+      surfaces: [sampleSurface],
+      lights: [sampleLight]
+    });
+    assert.equal(resXssSvg.statusCode, 200);
+    assert.doesNotMatch(resXssSvg.body.data.html, /onload=|evil\(\)/, 'Must never inject raw req.body.summary.structureSvg');
+    assert.match(resXssSvg.body.data.html, /<svg xmlns="http:\/\/www\.w3\.org\/2000\/svg"/, 'Must render safe server-built SVG');
+
+    const { computeEngineeringRider, exportLightingMvr18 } = await import('../server/utils/lumiProExporters.js');
+    const clampedRider = computeEngineeringRider({
+      surfaces: [{ id: 's_clamp', cabCols: 500_000, cabRows: 500_000 }],
+      lights: []
+    });
+    assert.ok(clampedRider.totalActiveCabs <= 64 * 48, 'Direct wrapper call must also clamp cabCols/cabRows');
+    const clampedMvr = exportLightingMvr18({
+      lights: [{ name: 'BadDmx', dmxChannels: Infinity, dmxUniverse: -5, dmxAddress: -10 }],
+      surfaces: []
+    });
+    assert.doesNotMatch(clampedMvr.xml, /Infinity|-\d+<\/Address>/);
+  } finally {
+    User.findById = origUserFindById;
+  }
+});
+
+test('Security: POST /session-ticket blocks X-Forwarded-For spoofing and caps per-shareToken password failures', async () => {
+  const { restore } = mockProjectStore();
+  const origSecret = process.env.LUMI_STUDIO_TICKET_SECRET;
+  const origUserFindById = User.findById;
+  process.env.LUMI_STUDIO_TICKET_SECRET = 'test-only-lumi-ticket-secret-32b!!';
+
+  const owner = {
+    _id: 'u_owner_sec_pwd',
+    role: 'student',
+    lumiStage: {
+      plan: 'lumi_pro_monthly',
+      expiresAt: new Date(Date.now() + 10 * 86400_000),
+      freeAiCreditsRemaining: 50
+    }
+  };
+  User.findById = () => ({ select: () => ({ lean: async () => owner }) });
+
+  try {
+    const postProjects = getRouteHandler('post', '/projects');
+    const postShare = getRouteHandler('post', '/projects/:id/share');
+    const postTicket = getRouteHandler('post', '/session-ticket');
+
+    const resProj = makeRes();
+    await postProjects({ user: owner, body: { title: 'BruteForce Guard', projectJson: makeValidStagePayload('Guard.glb') } }, resProj);
+    const projId = resProj.body.data.project._id;
+
+    const resShare = makeRes();
+    await postShare({ user: owner, params: { id: projId }, body: { enabled: true, untilPro: true, password: 'correct-horse-battery' } }, resShare);
+    const shareToken = resShare.body.data.shareToken;
+
+    let hit429 = false;
+    for (let i = 0; i < 15; i++) {
+      const r = makeRes();
+      await postTicket(
+        {
+          headers: { 'x-forwarded-for': `198.51.100.${i}, 203.0.113.55` },
+          body: { shareToken, password: `wrong-guess-${i}` },
+          ip: '10.0.0.5'
+        },
+        r
+      );
+      if (r.statusCode === 429) {
+        hit429 = true;
+        break;
+      }
+    }
+    assert.equal(hit429, true, 'Must rate-limit repeated wrong passwords on a shareToken despite spoofed leftmost X-Forwarded-For');
+  } finally {
+    if (origSecret === undefined) delete process.env.LUMI_STUDIO_TICKET_SECRET;
+    else process.env.LUMI_STUDIO_TICKET_SECRET = origSecret;
     User.findById = origUserFindById;
     restore();
   }
