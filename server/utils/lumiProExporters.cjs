@@ -1069,6 +1069,15 @@
     return out;
   }
 
+  function resolveDmxChannels18(l) {
+    const raw =
+      +l?.dmxChannelCount ||
+      (Array.isArray(l?.dmxChannels) ? l.dmxChannels.length : +l?.dmxChannels) ||
+      +l?.channels ||
+      16;
+    return Math.max(1, Math.min(512, Math.round(raw)));
+  }
+
   function exportLightingMvr18(opts = {}) {
     const eng = opts?.eng || root?.STUDIO?.engine || root?.engine || null;
     const rawLights = Array.isArray(opts?.lights) ? opts.lights : (Array.isArray(eng?.lights) ? eng.lights : []);
@@ -1081,9 +1090,9 @@
         const xMm = Math.round((Number(l.pos?.[0] ?? l.x) || 0) * 1000);
         const yMm = Math.round(-(Number(l.pos?.[2] ?? l.z) || 0) * 1000);
         const zMm = Math.round((Number(l.pos?.[1] ?? l.y) || 0) * 1000);
-        const uni = Number(l.dmxUniverse) || (Math.floor(idx / 32) + 1);
-        const addr = Number(l.dmxAddress) || ((idx % 32) * 16 + 1);
-        const chCount = Number(l.dmxChannels) || 16;
+        const uni = Number(l.dmxUniverse ?? l.universe) || (Math.floor(idx / 32) + 1);
+        const addr = Number(l.dmxAddress ?? l.address) || ((idx % 32) * 16 + 1);
+        const chCount = resolveDmxChannels18(l);
         const gdtfName = escapeXml12(l.fixtureModel18 || l.oflModel || l.name || `Fixture_${idx + 1}`);
         const uuid = `00000000-0000-4000-8000-${String(idx + 1).padStart(12, '0')}`;
         return (
@@ -1116,7 +1125,7 @@
 
     const xml =
       `<?xml version="1.0" encoding="UTF-8"?>\n` +
-      `<GeneralSceneDescription verMajor="1" verMinor="6" provider="ALPHA Creative LED Studio" providerVersion="1.8">\n` +
+      `<GeneralSceneDescription verMajor="1" verMinor="6" provider="Alpha LED Studio" providerVersion="1.8">\n` +
       `  <Scene>\n` +
       `    <Layers>\n` +
       `      <Layer name="LumiStage_Rigging_And_Lighting" uuid="00000000-0000-4000-7000-000000000001">\n` +
@@ -1141,7 +1150,7 @@
     let cursorUni = 1;
     let cursorAddr = 1;
     const patched = list.map((l, idx) => {
-      const chCount = Math.max(1, Math.min(512, Math.round(+(l?.dmxChannelCount || l?.dmxChannels || l?.channels || 16))));
+      const chCount = resolveDmxChannels18(l);
       let reqUni = Math.max(1, Math.round(+(l?.dmxUniverse || l?.universe || cursorUni)));
       let reqAddr = Math.max(1, Math.round(+(l?.dmxAddress || l?.address || cursorAddr)));
       if (reqAddr + chCount - 1 > 512) {
@@ -1193,7 +1202,7 @@
       return [
         `<?xml version="1.0" encoding="utf-8"?>`,
         `<MA xmlns="http://schemas.malighting.de/grandma2/xml/MA" major_vers="3" minor_vers="9" stream_vers="60">`,
-        `  <Info datetime="${new Date().toISOString()}" showfile="ALPHA_Creative_LED_Studio" />`,
+        `  <Info datetime="${new Date().toISOString()}" showfile="Alpha_LED_Studio" />`,
         `  <FixtureLayer index="0" name="${layerName}">`,
         ma2Fixtures,
         `  </FixtureLayer>`,
