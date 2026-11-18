@@ -340,32 +340,21 @@ export async function callOpenClaw(content, sessionId) {
  * Tên không có trong map → gửi nguyên (fallback an toàn).
  */
 const GCLI_MODEL_CODE_MAP = {
-    // Tên model UI hiện tại → mã 假流式 / upstream.
+    // Tên model UI hiện tại → mã 假流式 / upstream (bỏ gemini-3.1-pro và gemini-3.5-flash).
     'gemini-3.8-flash': '假流式-agy-gemini-3.8-flash-low', // Gemini 3.8 Flash Low (mới nhất)
     'gemini-3.8-flash-low': '假流式-agy-gemini-3.8-flash-low',
     'gemini-3.8-flash-medium': '假流式-agy-gemini-3.8-flash-medium',
     'gemini-3.8-flash-high': '假流式-agy-gemini-3.8-flash-high',
-    'gemini-3.1-flash-lite': '假流式-agy-gemini-3.1-flash-lite', // Gemini 3.1 Flash Lite
-    'gemini-2.5-flash': '假流式-agy-gemini-2.5-flash-low', // cũ: 'gemini-2.5-flash'
-    'gemini-3-flash': '假流式-agy-gemini-3-flash-low',     // cũ: 'gemini-3-flash-preview'
-    'gemini-3.5-flash': '假流式-agy-gemini-3.5-flash-low', // mới
-    'gemini-3.1-pro': '假流式-agy-gemini-3.1-pro-low',     // cũ: 'gemini-3.1-pro-preview'
+    'gemini-3.1-flash-lite': '假流式-agy-gemini-3.1-flash-lite', // Gemini 3.1 Flash Lite (mặc định nhanh & tiết kiệm)
+    // Legacy aliases -> route an toàn sang 2 model chuẩn
+    'gemini-2.5-flash': '假流式-agy-gemini-3.1-flash-lite',
+    'gemini-3-flash': '假流式-agy-gemini-3.1-flash-lite',
+    'gemini-3.5-flash': '假流式-agy-gemini-3.8-flash-low',
+    'gemini-3.1-pro': '假流式-agy-gemini-3.8-flash-low',
 };
 
-function resolveGcliModelCode(model, options = {}) {
-    const disableFallback = options.disableLowModelFallback === true || options.enableLowModelFallback === false;
-    if (!disableFallback) {
-        if (model === 'gemini-3-flash-preview') {
-            if (Math.random() < 0.2) {
-                return '假流式-agy-gemini-3-flash-low';
-            }
-        } else if (model === 'gemini-3.1-pro-preview') {
-            if (Math.random() < 0.2) {
-                return '假流式-agy-gemini-3.1-pro-low';
-            }
-        }
-    }
-    return GCLI_MODEL_CODE_MAP[model] || model;
+function resolveGcliModelCode(model) {
+    return GCLI_MODEL_CODE_MAP[model] || GCLI_MODEL_CODE_MAP['gemini-3.8-flash'];
 }
 
 /**

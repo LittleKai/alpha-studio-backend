@@ -35,6 +35,15 @@ import { ensureDraft as ensureInteriorDraft } from '../tools/interior/common.js'
 import { buildTerminalAgentUpdate } from '../retention/terminalUpdates.js';
 import { decrypt } from '../utils/encryption.js';
 import {
+    AI_ALLOWED_MODELS,
+    AI_DEFAULT_BALANCED_MODEL,
+    AI_DEFAULT_CHATBOT_MODEL,
+    AI_MIN_CHARGE_CREDITS,
+    calculateAiTokenCredits,
+    normalizeAiModel,
+    roundCredits
+} from '../utils/aiPricing.js';
+import {
     archiveInteriorVersions,
     deleteStorageObjects,
     hydrateInteriorVersions,
@@ -85,8 +94,7 @@ async function presignImageUrls(urls) {
 
 const router = express.Router();
 
-const INTERIOR_AI_CREDIT_COST = 10;
-const INTERIOR_AGENT_CREDIT_COST = 20;
+const INTERIOR_MIN_CREDITS = AI_MIN_CHARGE_CREDITS;
 const MAX_USER_PROMPT_CHARS = 8000;
 const MAX_VERSIONS_PER_PROJECT = 300;
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -792,15 +800,16 @@ async function findOwnedProject(projectId, userId) {
     return InteriorProject.findOne({ _id: projectId, userId, isDeleted: false });
 }
 
-async function deductInteriorCredit(user, cost = INTERIOR_AI_CREDIT_COST) {
-    if (isUnlimited(user.role)) return { charged: false, balance: user.balance ?? 0 };
+async function deductInteriorCredit(user, cost = INTERIOR_MIN_CREDITS) {
+    const cleanCost = roundCredits(Math.max(0, Number(cost) || 0));
+    if (isUnlimited(user.role) || cleanCost <= 0) return { charged: false, cost: 0, balance: roundCredits(user.balance ?? 0) };
     const updated = await User.findOneAndUpdate(
-        { _id: user._id, balance: { $gte: cost } },
-        { $inc: { balance: -cost } },
+        { _id: user._id, balance: { $gte: cleanCost } },
+        { $inc: { balance: -cleanCost } },
         { new: true }
     ).select('balance');
-    if (!updated) return { charged: false, rejected: true, balance: user.balance ?? 0 };
-    return { charged: true, balance: updated.balance };
+    if (!updated) return { charged: false, rejected: true, cost: cleanCost, balance: roundCredits(user.balance ?? 0) };
+    return { charged: true, cost: cleanCost, balance: roundCredits(updated.balance) };
 }
 
 async function buildAgentInitialPrompt({ message, refImageUrls, baseModel }) {
@@ -1285,16 +1294,11 @@ router.delete('/projects/:id', authMiddleware, async (req, res) => {
     }
 });
 
-const INTERIOR_ALLOWED_MODELS = ['gemini-3.1-flash-lite', 'gemini-3.8-flash', 'gemini-3.5-flash', 'gemini-3.1-pro', 'gemini-3-flash'];
-// Default Pro for /chat apply: cabinet model synthesis needs strong reasoning to
-// (a) pick the right template + style from catalog, (b) compose valid DSL for
-// tplNew, (c) avoid silent fallback to ugly raw boxes. Flash remains opt-in via
-// frontend model selector for quick low-stakes edits. /analyze-image (image
-// summarization) keeps Flash default — see ANALYZE_DEFAULT_MODEL below.
-const INTERIOR_DEFAULT_MODEL = 'gemini-3.1-pro';
+const INTERIOR_ALLOWED_MODELS = AI_ALLOWED_MODELS;
+const INTERIOR_DEFAULT_MODEL = AI_DEFAULT_BALANCED_MODEL;
 
-const FLASH_MODEL = 'gemini-3.1-flash-lite';
-const PRO_MODEL = 'gemini-3.1-pro';
+const FLASH_MODEL = AI_DEFAULT_CHATBOT_MODEL;
+const PRO_MODEL = AI_DEFAULT_BALANCED_MODEL;
 const FLASH_DELEGATE_DEFAULT = process.env.INTERIOR_AGENT_FLASH_DELEGATE === 'true';
 // Tool names that are mechanical state mutations — safe to delegate to Flash
 // when primary model is Pro. Reads, terminals, and any error step force the
@@ -1376,6 +1380,19 @@ async function runInteriorAgentSession({
                 const resolvedModel = ai.model && isAllowedModel(ai.model) ? ai.model : turnModel;
                 ctx.aiModel = resolvedModel;
                 ctx.usage = ai.usage || ctx.usage;
+                if (ai.usage) {
+                    const pTok = Number(ai.usage.promptTokens || ai.usage.prompt_tokens || 0) || 0;
+                    const cTok = Number(ai.usage.completionTokens || ai.usage.completion_tokens || 0) || 0;
+                    const tTok = Number(ai.usage.totalTokens || ai.usage.total_tokens || (pTok + cTok)) || 0;
+                    const bucketKey = normalizeAiModel(resolvedModel, selectedModel);
+                    if (!ctx.tokenUsageByModel) ctx.tokenUsageByModel = {};
+                    const prev = ctx.tokenUsageByModel[bucketKey] || { promptTokens: 0, completionTokens: 0, totalTokens: 0 };
+                    ctx.tokenUsageByModel[bucketKey] = {
+                        promptTokens: prev.promptTokens + pTok,
+                        completionTokens: prev.completionTokens + cTok,
+                        totalTokens: prev.totalTokens + tTok
+                    };
+                }
                 ctx.lastMessages = messages; // snapshot for persistence
                 return ai;
             },
@@ -1439,7 +1456,7 @@ async function runInteriorAgentSession({
                     version: serialized.versions.find((version) => version.index === data.versionIndex),
                     totalSteps: steps.filter(Boolean).length,
                     totalTokens: ctx.totalTokens || 0,
-                    cost: isUnlimited(req.user.role) ? 0 : INTERIOR_AGENT_CREDIT_COST,
+                    cost: isUnlimited(req.user.role) ? 0 : (credit.cost ?? 0),
                     balance: credit.balance
                 });
             },
@@ -1501,6 +1518,25 @@ async function runInteriorAgentSession({
     }
 }
 
+function computeInteriorAgentCredits(ctx, fallbackModel) {
+    const entries = Object.entries(ctx.tokenUsageByModel || {});
+    if (entries.length > 0) {
+        let total = 0;
+        for (const [modelId, usage] of entries) {
+            total = roundCredits(total + calculateAiTokenCredits(usage, {
+                model: modelId,
+                fallbackPromptTokens: 1500,
+                fallbackCompletionTokens: 600
+            }).credits);
+        }
+        return Math.max(INTERIOR_MIN_CREDITS, total);
+    }
+    return calculateAiTokenCredits(
+        { promptTokens: ctx.promptTokens, completionTokens: ctx.completionTokens, totalTokens: ctx.totalTokens },
+        { model: fallbackModel, fallbackPromptTokens: 2500, fallbackCompletionTokens: 1200 }
+    ).credits;
+}
+
 router.post('/projects/:id/agent', authMiddleware, async (req, res) => {
     const startedAt = new Date();
     let project = null;
@@ -1512,15 +1548,15 @@ router.post('/projects/:id/agent', authMiddleware, async (req, res) => {
             : (typeof req.body?.refImageUrl === 'string' ? [req.body.refImageUrl] : []);
         const refImageUrls = rawRefImageUrls.filter((url) => typeof url === 'string' && url.trim()).map((url) => url.trim()).slice(0, 5);
         const requestedModel = typeof req.body?.model === 'string' ? req.body.model.trim() : '';
-        const selectedModel = INTERIOR_ALLOWED_MODELS.includes(requestedModel) ? requestedModel : INTERIOR_DEFAULT_MODEL;
+        const selectedModel = normalizeAiModel(requestedModel, INTERIOR_DEFAULT_MODEL);
         const delegateFlash = typeof req.body?.delegateFlash === 'boolean' ? req.body.delegateFlash : FLASH_DELEGATE_DEFAULT;
         if (!message) return res.status(400).json({ success: false, message: 'Vui lĂ²ng nháº­p yĂªu cáº§u thiáº¿t káº¿.' });
         if (message.length > MAX_USER_PROMPT_CHARS) return res.status(400).json({ success: false, message: `YĂªu cáº§u quĂ¡ dĂ i, tá»‘i Ä‘a ${MAX_USER_PROMPT_CHARS} kĂ½ tá»±.` });
-        if (!isUnlimited(req.user.role) && (req.user.balance || 0) < INTERIOR_AGENT_CREDIT_COST) {
+        if (!isUnlimited(req.user.role) && (req.user.balance || 0) < INTERIOR_MIN_CREDITS) {
             return res.status(402).json({
                 success: false,
-                message: `Cáº§n ${INTERIOR_AGENT_CREDIT_COST} credit Ä‘á»ƒ cháº¡y agent, hiá»‡n cĂ³ ${req.user.balance || 0}.`,
-                data: { cost: INTERIOR_AGENT_CREDIT_COST, balance: req.user.balance || 0 }
+                message: `Cáº§n tá»‘i thiá»ƒu ${INTERIOR_MIN_CREDITS} credit Ä‘á»ƒ cháº¡y agent, hiá»‡n cĂ³ ${req.user.balance || 0}.`,
+                data: { cost: INTERIOR_MIN_CREDITS, balance: req.user.balance || 0 }
             });
         }
         project = await findOwnedProject(req.params.id, req.user._id);
@@ -1559,14 +1595,17 @@ router.post('/projects/:id/agent', authMiddleware, async (req, res) => {
             refImageUrls,
             aiModel: selectedModel,
             usage: null,
+            promptTokens: 0,
+            completionTokens: 0,
             totalTokens: 0,
             beforeCommit: async () => {
                 if (ctx.agentCredit) return { ok: true };
-                const credit = await deductInteriorCredit(req.user, INTERIOR_AGENT_CREDIT_COST);
+                const requiredCredits = computeInteriorAgentCredits(ctx, selectedModel);
+                const credit = await deductInteriorCredit(req.user, requiredCredits);
                 if (credit.rejected) {
                     return {
                         ok: false,
-                        error: `Cáº§n ${INTERIOR_AGENT_CREDIT_COST} credit Ä‘á»ƒ lÆ°u phiĂªn báº£n agent, hiá»‡n cĂ³ ${credit.balance}.`
+                        error: `Cần ${requiredCredits} credit để lưu phiên bản agent, hiện có ${credit.balance}.`
                     };
                 }
                 ctx.agentCredit = credit;
@@ -1607,14 +1646,14 @@ router.post('/projects/:id/agent/runs/:runId/resume', authMiddleware, async (req
         if (!Array.isArray(log.messages) || log.messages.length === 0) {
             return res.status(400).json({ success: false, message: 'PhiĂªn nĂ y khĂ´ng cĂ³ dá»¯ liá»‡u Ä‘á»ƒ tiáº¿p tá»¥c.' });
         }
-        if (!isUnlimited(req.user.role) && (req.user.balance || 0) < INTERIOR_AGENT_CREDIT_COST) {
+        if (!isUnlimited(req.user.role) && (req.user.balance || 0) < INTERIOR_MIN_CREDITS) {
             return res.status(402).json({
                 success: false,
-                message: `Cáº§n ${INTERIOR_AGENT_CREDIT_COST} credit Ä‘á»ƒ tiáº¿p tá»¥c agent, hiá»‡n cĂ³ ${req.user.balance || 0}.`
+                message: `Cáº§n tá»‘i thiá»ƒu ${INTERIOR_MIN_CREDITS} credit Ä‘á»ƒ tiáº¿p tá»¥c agent, hiá»‡n cĂ³ ${req.user.balance || 0}.`
             });
         }
 
-        const selectedModel = INTERIOR_ALLOWED_MODELS.includes(log.selectedModel) ? log.selectedModel : INTERIOR_DEFAULT_MODEL;
+        const selectedModel = normalizeAiModel(log.selectedModel, INTERIOR_DEFAULT_MODEL);
         const delegateFlash = !!log.delegateFlash;
         const maxSteps = Math.min(Math.max(Number(req.body?.maxSteps) || 30, 1), 60);
         const initialStepIndex = (log.steps?.length) || 0;
@@ -1630,14 +1669,17 @@ router.post('/projects/:id/agent/runs/:runId/resume', authMiddleware, async (req
             refImageUrls: log.refImageUrls || [],
             aiModel: selectedModel,
             usage: null,
+            promptTokens: 0,
+            completionTokens: 0,
             totalTokens: log.totalTokens || 0,
             beforeCommit: async () => {
                 if (ctx.agentCredit) return { ok: true };
-                const credit = await deductInteriorCredit(req.user, INTERIOR_AGENT_CREDIT_COST);
+                const requiredCredits = computeInteriorAgentCredits(ctx, selectedModel);
+                const credit = await deductInteriorCredit(req.user, requiredCredits);
                 if (credit.rejected) {
                     return {
                         ok: false,
-                        error: `Cáº§n ${INTERIOR_AGENT_CREDIT_COST} credit Ä‘á»ƒ lÆ°u phiĂªn báº£n agent, hiá»‡n cĂ³ ${credit.balance}.`
+                        error: `Cần ${requiredCredits} credit để lưu phiên bản agent, hiện có ${credit.balance}.`
                     };
                 }
                 ctx.agentCredit = credit;
@@ -1719,9 +1761,7 @@ router.post('/projects/:id/chat', authMiddleware, async (req, res) => {
             ? req.body.expectedCurrentVersionIndex
             : null;
         const requestedModel = typeof req.body?.model === 'string' ? req.body.model.trim() : '';
-        const selectedModel = INTERIOR_ALLOWED_MODELS.includes(requestedModel)
-            ? requestedModel
-            : INTERIOR_DEFAULT_MODEL;
+        const selectedModel = normalizeAiModel(requestedModel, INTERIOR_DEFAULT_MODEL);
         const stage = req.body?.stage === 'proposal' ? 'proposal' : 'apply';
         const proposalContext = typeof req.body?.proposalText === 'string'
             ? req.body.proposalText.trim().slice(0, 4000)
@@ -1731,11 +1771,11 @@ router.post('/projects/:id/chat', authMiddleware, async (req, res) => {
         if (message.length > MAX_USER_PROMPT_CHARS) {
             return res.status(400).json({ success: false, message: `YĂªu cáº§u quĂ¡ dĂ i, tá»‘i Ä‘a ${MAX_USER_PROMPT_CHARS} kĂ½ tá»±.` });
         }
-        if (!isUnlimited(req.user.role) && (req.user.balance || 0) < INTERIOR_AI_CREDIT_COST) {
+        if (!isUnlimited(req.user.role) && (req.user.balance || 0) < INTERIOR_MIN_CREDITS) {
             return res.status(402).json({
                 success: false,
-                message: `Cáº§n ${INTERIOR_AI_CREDIT_COST} credit Ä‘á»ƒ gá»i AI, hiá»‡n cĂ³ ${req.user.balance || 0}.`,
-                data: { cost: INTERIOR_AI_CREDIT_COST, balance: req.user.balance || 0 }
+                message: `Cần tối thiểu ${INTERIOR_MIN_CREDITS} credit để gọi AI, hiện có ${req.user.balance || 0}.`,
+                data: { cost: INTERIOR_MIN_CREDITS, balance: req.user.balance || 0 }
             });
         }
 
@@ -1825,12 +1865,17 @@ router.post('/projects/:id/chat', authMiddleware, async (req, res) => {
                 status: 'ok', errorMessage: ''
             });
 
-            const credit = await deductInteriorCredit(req.user);
+            const proposalBill = calculateAiTokenCredits(proposalUsage || {}, {
+                model: proposalModel,
+                fallbackPromptTokens: 1500,
+                fallbackCompletionTokens: 600
+            });
+            const credit = await deductInteriorCredit(req.user, proposalBill.credits);
             if (credit.rejected) {
                 return res.status(402).json({
                     success: false,
-                    message: `Cáº§n ${INTERIOR_AI_CREDIT_COST} credit Ä‘á»ƒ gá»i AI, hiá»‡n cĂ³ ${credit.balance}.`,
-                    data: { cost: INTERIOR_AI_CREDIT_COST, balance: credit.balance }
+                    message: `Cần ${proposalBill.credits} credit để gọi AI, hiện có ${credit.balance}.`,
+                    data: { cost: proposalBill.credits, balance: credit.balance }
                 });
             }
             return res.json({
@@ -1843,7 +1888,7 @@ router.post('/projects/:id/chat', authMiddleware, async (req, res) => {
                     message,
                     aiModel: proposalModel,
                     usage: proposalUsage,
-                    cost: isUnlimited(req.user.role) ? 0 : INTERIOR_AI_CREDIT_COST,
+                    cost: isUnlimited(req.user.role) ? 0 : credit.cost,
                     balance: credit.balance
                 }
             });
@@ -1923,6 +1968,13 @@ router.post('/projects/:id/chat', authMiddleware, async (req, res) => {
                     buildGeometryRepairPrompt(aiText, preparedModel.geometryWarnings),
                     { model: actualModel, images: aiImageUrls }
                 );
+                if (repair.usage) {
+                    aiUsage = {
+                        promptTokens: (Number(aiUsage?.promptTokens) || 0) + (Number(repair.usage.promptTokens) || 0),
+                        completionTokens: (Number(aiUsage?.completionTokens) || 0) + (Number(repair.usage.completionTokens) || 0),
+                        totalTokens: (Number(aiUsage?.totalTokens) || 0) + (Number(repair.usage.totalTokens) || 0)
+                    };
+                }
                 const repairText = repair.text || '';
                 const repairPayload = normalizeAiPayload(extractJsonObject(repairText));
                 const repairedModel = await prepareAiCabinetModel(repairPayload.cabinetModel);
@@ -1948,12 +2000,17 @@ router.post('/projects/:id/chat', authMiddleware, async (req, res) => {
         const newInlineTemplateIds = preparedModel.inlineResult.newInlineIds;
         const droppedTemplates = preparedModel.inlineResult.droppedTemplates;
 
-        const credit = await deductInteriorCredit(req.user);
+        const applyBill = calculateAiTokenCredits(aiUsage || {}, {
+            model: actualModel,
+            fallbackPromptTokens: 2500,
+            fallbackCompletionTokens: 1200
+        });
+        const credit = await deductInteriorCredit(req.user, applyBill.credits);
         if (credit.rejected) {
             return res.status(402).json({
                 success: false,
-                message: `Cáº§n ${INTERIOR_AI_CREDIT_COST} credit Ä‘á»ƒ gá»i AI, hiá»‡n cĂ³ ${credit.balance}.`,
-                data: { cost: INTERIOR_AI_CREDIT_COST, balance: credit.balance }
+                message: `Cần ${applyBill.credits} credit để gọi AI, hiện có ${credit.balance}.`,
+                data: { cost: applyBill.credits, balance: credit.balance }
             });
         }
 
@@ -1998,7 +2055,7 @@ router.post('/projects/:id/chat', authMiddleware, async (req, res) => {
                 stage: 'apply',
                 project: serialized,
                 version: serialized.versions.find((version) => version.index === nextIndex),
-                cost: isUnlimited(req.user.role) ? 0 : INTERIOR_AI_CREDIT_COST,
+                cost: isUnlimited(req.user.role) ? 0 : credit.cost,
                 balance: credit.balance,
                 meta: {
                     newInlineTemplates: newInlineTemplateIds,
@@ -2025,8 +2082,8 @@ router.post('/projects/:id/chat', authMiddleware, async (req, res) => {
 
 const ANALYZE_MAX_HINTS = 1000;
 const ANALYZE_MAX_REPAIRS = 2;
-const ANALYZE_DEFAULT_MODEL = 'gemini-3.1-flash-lite';
-const ANALYZE_ESCALATE_MODEL = 'gemini-3.1-pro';
+const ANALYZE_DEFAULT_MODEL = AI_DEFAULT_CHATBOT_MODEL;
+const ANALYZE_ESCALATE_MODEL = AI_DEFAULT_BALANCED_MODEL;
 
 function sha256Hex(input) {
     return crypto.createHash('sha256').update(input).digest('hex');

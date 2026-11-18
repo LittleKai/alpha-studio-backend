@@ -33,7 +33,7 @@ const crmSubscriptionSchema = new mongoose.Schema({
     },
     includedAiLimit: {
         type: Number,
-        default: 500
+        default: 200
     },
     includedAiUsed: {
         type: Number,

@@ -47,7 +47,14 @@ export async function runAgentLoop({
         try {
             const response = await aiCall({ messages, systemPrompt });
             aiText = typeof response === 'string' ? response : (response?.text || '');
-            if (response?.usage) ctx.totalTokens = (ctx.totalTokens || 0) + (response.usage.totalTokens || response.usage.total_tokens || 0);
+            if (response?.usage) {
+                const pTok = Number(response.usage.promptTokens || response.usage.prompt_tokens || 0) || 0;
+                const cTok = Number(response.usage.completionTokens || response.usage.completion_tokens || 0) || 0;
+                const tTok = Number(response.usage.totalTokens || response.usage.total_tokens || (pTok + cTok)) || 0;
+                ctx.promptTokens = (ctx.promptTokens || 0) + pTok;
+                ctx.completionTokens = (ctx.completionTokens || 0) + cTok;
+                ctx.totalTokens = (ctx.totalTokens || 0) + tTok;
+            }
         } catch (error) {
             // Don't fire onError here: frontend treats 'error' SSE event as fatal
             // (throws + exits stream). Upstream gcli errors (524, network) are

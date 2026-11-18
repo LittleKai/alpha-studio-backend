@@ -1,5 +1,12 @@
 import express from 'express';
 import { callGcliDirect } from '../utils/aiProvider.js';
+import {
+    AI_MIN_CHARGE_CREDITS,
+    CREDIT_UNIT_VND,
+    calculateAiTokenCredits,
+    normalizeAiModel,
+    roundCredits
+} from '../utils/aiPricing.js';
 import { authMiddleware } from '../middleware/auth.js';
 import { VocabAiUsage } from '../models/Vocab.js';
 import User from '../models/User.js';
@@ -10,13 +17,8 @@ const router = express.Router();
 const DAILY_FREE_LIMIT = 1;
 
 const AI_CARD_MODELS = {
-    flash: { id: 'gemini-3.1-flash-lite', cost: 5, allowsDailyFree: true },
-    'gemini-3.1-flash-lite': { id: 'gemini-3.1-flash-lite', cost: 5, allowsDailyFree: true },
-    'gemini-3.8-flash': { id: 'gemini-3.8-flash', cost: 5, allowsDailyFree: true },
-    'gemini-3-flash': { id: 'gemini-3-flash', cost: 5, allowsDailyFree: true },
-    pro: { id: 'gemini-3.1-pro', cost: 10, allowsDailyFree: false },
-    'gemini-3.1-pro': { id: 'gemini-3.1-pro', cost: 10, allowsDailyFree: false },
-    'gemini-3.5-flash': { id: 'gemini-3.5-flash', cost: 10, allowsDailyFree: false },
+    'gemini-3.1-flash-lite': { id: 'gemini-3.1-flash-lite', allowsDailyFree: true },
+    'gemini-3.8-flash': { id: 'gemini-3.8-flash', allowsDailyFree: false }
 };
 
 function todayUtcKey() {
@@ -24,7 +26,8 @@ function todayUtcKey() {
 }
 
 function normalizeAiCardModel(model) {
-    return AI_CARD_MODELS[model || 'gemini-3.1-flash-lite'] || null;
+    const resolvedId = normalizeAiModel(model, 'gemini-3.1-flash-lite');
+    return AI_CARD_MODELS[resolvedId] || null;
 }
 
 function dailyFreeRemaining(usage) {
@@ -190,31 +193,10 @@ router.post('/generate-cards', authMiddleware, async (req, res) => {
             }
         }
 
-        if (!reservedFreeUse) {
-            chargeCost = modelConfig.cost;
-            chargedUser = await User.findOneAndUpdate(
-                { _id: userId, balance: { $gte: chargeCost } },
-                { $inc: { balance: -chargeCost } },
-                { new: true }
-            );
-
-            if (!chargedUser) {
-                return res.status(400).json({
-                    error: `Insufficient balance. This model requires ${chargeCost} credits.`,
-                });
-            }
-
-            transactionDetails = {
-                userId: chargedUser._id,
-                type: 'spend',
-                serviceType: 'other',
-                amount: chargeCost,
-                credits: chargeCost,
-                status: 'completed',
-                transactionCode: 'AI_CARD_' + Date.now() + '_' + Math.random().toString(36).substring(2, 7).toUpperCase(),
-                paymentMethod: 'system',
-                description: `VocabFlip AI Card Generator spend (${modelConfig.id})`,
-            };
+        if (!reservedFreeUse && (user.balance || 0) < AI_MIN_CHARGE_CREDITS) {
+            return res.status(400).json({
+                error: `Insufficient balance. Minimum ${AI_MIN_CHARGE_CREDITS} credits required.`
+            });
         }
 
         // Generate Cards using LLM
@@ -238,6 +220,40 @@ Output ONLY a valid JSON object with the following structure (no markdown, no ex
         const llmResponse = await callGcliDirect(promptText, { model: modelConfig.id });
         const parsedData = parseLLMResponse(llmResponse.text);
 
+        const tokenBill = calculateAiTokenCredits(llmResponse.usage || {}, {
+            model: modelConfig.id,
+            byok: reservedFreeUse,
+            fallbackPromptTokens: Math.max(150, Math.ceil(promptText.length / 4)),
+            fallbackCompletionTokens: Math.max(200, Math.ceil(String(llmResponse.text || '').length / 4))
+        });
+
+        if (!reservedFreeUse) {
+            chargeCost = tokenBill.credits;
+            chargedUser = await User.findOneAndUpdate(
+                { _id: userId, balance: { $gte: chargeCost } },
+                { $inc: { balance: -chargeCost } },
+                { new: true }
+            );
+
+            if (!chargedUser) {
+                return res.status(400).json({
+                    error: `Insufficient balance. This generation requires ${chargeCost} credits.`
+                });
+            }
+
+            transactionDetails = {
+                userId: chargedUser._id,
+                type: 'spend',
+                serviceType: 'other',
+                amount: Math.max(1, Math.round(chargeCost * CREDIT_UNIT_VND)),
+                credits: chargeCost,
+                status: 'completed',
+                transactionCode: 'AI_CARD_' + Date.now() + '_' + Math.random().toString(36).substring(2, 7).toUpperCase(),
+                paymentMethod: 'system',
+                description: `VocabFlip AI Card Generator (${modelConfig.id}, ${tokenBill.totalTokens} tokens)`
+            };
+        }
+
         if (transactionDetails) {
             await Transaction.create(transactionDetails);
         }
@@ -248,7 +264,13 @@ Output ONLY a valid JSON object with the following structure (no markdown, no ex
             success: true,
             cards: parsedData.cards || [],
             freeUsesRemaining: dailyFreeRemaining(usage),
-            creditBalance: chargedUser ? chargedUser.balance : user.balance,
+            creditBalance: roundCredits(chargedUser ? chargedUser.balance : user.balance),
+            creditsCharged: chargeCost,
+            usage: {
+                promptTokens: tokenBill.promptTokens,
+                completionTokens: tokenBill.completionTokens,
+                totalTokens: tokenBill.totalTokens
+            }
         });
     } catch (error) {
         if (reservedFreeUse) {

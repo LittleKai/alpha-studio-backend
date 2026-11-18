@@ -82,12 +82,12 @@ Alpha Studio không chỉ cung cấp nền tảng tự động hóa mà còn tr�
   - **Bảo mật Local-First**: Dữ liệu tin nhắn được lưu trữ an toàn ngay trên máy tính của bạn, không lưu trữ nội dung nhạy cảm lên cloud.
   - **Ứng dụng đi kèm**: Bản cài đặt trên máy tính Windows và ứng dụng di động Android kết nối tài khoản dễ dàng qua mã QR.
 - **Chính sách gói cước & Quản lý (/studio/crm/subscription)**:
-  - **Dùng thử**: Đăng ký mới nhận ngay **1 tháng (30 ngày) dùng thử miễn phí** kèm 100 lượt yêu cầu AI.
-  - **Gói gia hạn duy trì**: **100.000đ/tháng** (hoặc 1.050 credits) bao gồm 100 lượt AI mỗi tháng.
-  - **Gói nạp thêm lượt AI vĩnh viễn (không hết hạn)**:
-    - Gói +200 lượt: 100.000đ (1.000 credits).
-    - Gói +1.000 lượt: 500.000đ (5.000 credits).
-    - Gói +2.000 lượt: 1.000.000đ (10.000 credits).
+  - **Dùng thử**: Đăng ký mới nhận ngay **1 tháng (30 ngày) dùng thử miễn phí** kèm **100 AI Credits** (tính theo token · 1/2 giá Gemini gốc).
+  - **Gói gia hạn duy trì**: **100.000đ/tháng** (hoặc **1.000 Credits**) bao gồm **200 AI Credits** mỗi tháng (tính theo token).
+  - **Gói nạp thêm AI Credits vĩnh viễn (không hết hạn khi gói chính còn hạn)**:
+    - Gói 500 AI Credits: 50.000đ (500 Credits).
+    - Gói 2.200 AI Credits (+10% ưu đãi): 200.000đ (2.000 Credits).
+    - Gói 4.000 AI Credits (+14% ưu đãi): 350.000đ (3.500 Credits).
   - Quản lý gói cước và gia hạn nhanh tại: `/studio/crm/subscription`.
 
 ---

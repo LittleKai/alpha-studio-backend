@@ -4,8 +4,11 @@ import {
     consumeQuota,
     consumeQuotaUnits,
     hasQuota,
+    refundCrmAiCreditsAtomic,
     refundQuota,
-    refundQuotaUnits
+    refundQuotaUnits,
+    reserveCrmAiCreditsAtomic,
+    settleCrmAiCreditsAtomic
 } from './crmQuota.js';
 
 test('CRM Quota Utilities', (t) => {
@@ -109,7 +112,7 @@ test('CRM Quota Utilities', (t) => {
     assert.strictEqual(proMixedSub.includedAiUsed, 9);
     assert.strictEqual(proMixedSub.extraAiRemaining, 3);
 
-    // 10. Test two-unit Pro model rejects if only one quota remains
+    // 10. Test two-unit consumption rejects if only one credit remains (unless allowPartial)
     const proInsufficientSub = {
         status: 'active',
         includedAiLimit: 10,
@@ -123,4 +126,167 @@ test('CRM Quota Utilities', (t) => {
         included: 0,
         extra: 0
     });
+
+    // 11. Test fractional token-based Credit consumption & partial bridge without float drift
+    const fractionalSub = {
+        status: 'active',
+        includedAiLimit: 100,
+        includedAiUsed: 99.85,
+        extraAiRemaining: 5.5
+    };
+    assert.strictEqual(hasQuota(fractionalSub, 0.01), true);
+    const fracConsumed = consumeQuotaUnits(fractionalSub, 0.4, { allowPartial: true });
+    assert.deepStrictEqual(fracConsumed, {
+        bucket: 'mixed',
+        units: 0.4,
+        included: 0.15,
+        extra: 0.25
+    });
+    assert.strictEqual(fractionalSub.includedAiUsed, 100);
+    assert.strictEqual(fractionalSub.extraAiRemaining, 5.25);
+    assert.strictEqual(refundQuotaUnits(fractionalSub, fracConsumed), true);
+    assert.strictEqual(fractionalSub.includedAiUsed, 99.85);
+    assert.strictEqual(fractionalSub.extraAiRemaining, 5.5);
+});
+
+function createAtomicMockModels({ subState, userState }) {
+    const CrmSubscription = {
+        async findById(id) {
+            return subState._id === id ? { ...subState } : null;
+        },
+        async findOneAndUpdate(filter, update) {
+            if (filter._id !== subState._id) return null;
+            if (filter.status && subState.status !== filter.status) return null;
+            if (filter.$expr && filter.$expr.$gte) {
+                const reqInc = filter.$expr.$gte[1];
+                if (subState.includedAiLimit - subState.includedAiUsed < reqInc) return null;
+            }
+            if (filter.includedAiUsed && filter.includedAiUsed.$gte !== undefined) {
+                if (subState.includedAiUsed < filter.includedAiUsed.$gte) return null;
+            }
+            if (filter.extraAiRemaining && filter.extraAiRemaining.$gte !== undefined) {
+                if (subState.extraAiRemaining < filter.extraAiRemaining.$gte) return null;
+            }
+            if (update.$inc) {
+                if (update.$inc.includedAiUsed !== undefined) {
+                    subState.includedAiUsed = subState.includedAiUsed + update.$inc.includedAiUsed;
+                }
+                if (update.$inc.extraAiRemaining !== undefined) {
+                    subState.extraAiRemaining = subState.extraAiRemaining + update.$inc.extraAiRemaining;
+                }
+            }
+            return { ...subState };
+        }
+    };
+
+    const User = {
+        async findById(id) {
+            return userState._id === id ? { ...userState } : null;
+        },
+        async findOneAndUpdate(filter, update) {
+            if (filter._id !== userState._id) return null;
+            if (filter.balance && filter.balance.$gte !== undefined) {
+                if (userState.balance < filter.balance.$gte) return null;
+            }
+            if (update.$inc && update.$inc.balance !== undefined) {
+                userState.balance = userState.balance + update.$inc.balance;
+            }
+            return { ...userState };
+        }
+    };
+
+    return { CrmSubscription, User };
+}
+
+test('Atomic CRM AI reserve-settle-refund blocks low-balance big prompt & prevents concurrent double-spend', async () => {
+    // 1. Big prompt estimate rejected when sub + wallet < estimatedCredits (and rolls back partial sub debit)
+    const lowSub = { _id: 'sub1', status: 'active', includedAiLimit: 100, includedAiUsed: 99.5, extraAiRemaining: 0 };
+    const lowUser = { _id: 'u1', balance: 0.2 };
+    const lowModels = createAtomicMockModels({ subState: lowSub, userState: lowUser });
+
+    const rejected = await reserveCrmAiCreditsAtomic({
+        ...lowModels,
+        subscriptionId: 'sub1',
+        userId: 'u1',
+        estimatedCredits: 2.5
+    });
+    assert.strictEqual(rejected.ok, false);
+    assert.strictEqual(rejected.statusCode, 403);
+    assert.strictEqual(lowSub.includedAiUsed, 99.5); // rolled back cleanly
+    assert.strictEqual(lowUser.balance, 0.2);
+
+    // 2. Concurrent reservations compete atomically for remaining wallet + subscription credits
+    const concSub = { _id: 'sub2', status: 'active', includedAiLimit: 10, includedAiUsed: 9, extraAiRemaining: 0 };
+    const concUser = { _id: 'u2', balance: 0.5 };
+    const concModels = createAtomicMockModels({ subState: concSub, userState: concUser });
+
+    const [r1, r2] = await Promise.all([
+        reserveCrmAiCreditsAtomic({ ...concModels, subscriptionId: 'sub2', userId: 'u2', estimatedCredits: 1.0 }),
+        reserveCrmAiCreditsAtomic({ ...concModels, subscriptionId: 'sub2', userId: 'u2', estimatedCredits: 1.0 })
+    ]);
+    assert.strictEqual([r1.ok, r2.ok].filter(Boolean).length, 1);
+    assert.strictEqual(concSub.includedAiUsed, 10);
+    assert.strictEqual(concUser.balance, 0.5);
+
+    // 3. Settlement refunds excess reserve (wallet first, then extra, then included)
+    const settleSub = { _id: 'sub3', status: 'active', includedAiLimit: 10, includedAiUsed: 9.5, extraAiRemaining: 1.0 };
+    const settleUser = { _id: 'u3', balance: 5.0 };
+    const settleModels = createAtomicMockModels({ subState: settleSub, userState: settleUser });
+
+    const resv = await reserveCrmAiCreditsAtomic({
+        ...settleModels,
+        subscriptionId: 'sub3',
+        userId: 'u3',
+        estimatedCredits: 2.0
+    });
+    assert.strictEqual(resv.ok, true);
+    assert.strictEqual(resv.subIncluded, 0.5);
+    assert.strictEqual(resv.subExtra, 1.0);
+    assert.strictEqual(resv.walletReserved, 0.5);
+
+    const settled = await settleCrmAiCreditsAtomic({
+        ...settleModels,
+        subscriptionId: 'sub3',
+        userId: 'u3',
+        reservation: resv,
+        actualCredits: 0.75
+    });
+    assert.strictEqual(settled.chargedCredits, 0.75);
+    assert.strictEqual(settled.walletSpent, 0);
+    assert.strictEqual(settled.bucketUsed, 'mixed');
+    assert.strictEqual(settleUser.balance, 5.0);
+    assert.strictEqual(settleSub.extraAiRemaining, 0.75);
+    assert.strictEqual(settleSub.includedAiUsed, 10);
+
+    // 4. Upstream failure refunds entire reservation
+    const failResv = await reserveCrmAiCreditsAtomic({
+        ...settleModels,
+        subscriptionId: 'sub3',
+        userId: 'u3',
+        estimatedCredits: 1.25
+    });
+    assert.strictEqual(failResv.ok, true);
+    await refundCrmAiCreditsAtomic({
+        ...settleModels,
+        subscriptionId: 'sub3',
+        userId: 'u3',
+        reservation: failResv
+    });
+    assert.strictEqual(settleSub.extraAiRemaining, 0.75);
+    assert.strictEqual(settleUser.balance, 5.0);
+
+    // 5. Float drift case (100 - 99.7 === 0.29999999999999716 < 0.3) without mock tolerance
+    const driftSub = { _id: 'sub4', status: 'active', includedAiLimit: 100, includedAiUsed: 99.7, extraAiRemaining: 0 };
+    const driftUser = { _id: 'u4', balance: 0 };
+    const driftModels = createAtomicMockModels({ subState: driftSub, userState: driftUser });
+
+    const driftResv = await reserveCrmAiCreditsAtomic({
+        ...driftModels,
+        subscriptionId: 'sub4',
+        userId: 'u4',
+        estimatedCredits: 0.3
+    });
+    assert.strictEqual(driftResv.ok, true);
+    assert.strictEqual(driftResv.subIncluded, 0.3);
+    assert.strictEqual(Math.round(driftSub.includedAiUsed * 10000) / 10000, 100);
 });

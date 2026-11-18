@@ -567,19 +567,21 @@ test('admin.js collectReferencedKeys includes LedStudioProject.b2FileKey and Led
   assert.ok(adminSrc.includes('b2AssetKey'), 'admin.js must collect b2AssetKey');
 });
 
-test('LumiStage catalog calculates token credits at 1/3 official Gemini price and 0 credit for BYOK', () => {
+test('LumiStage catalog calculates token credits at 1/2 official Gemini price and 0 credit for BYOK', () => {
   assert.equal(LUMI_BRAND.name, 'LumiStage');
   assert.equal(LUMI_BRAND.legalEntity, 'CÔNG TY TNHH MTV GROUPLIFE');
-  assert.equal(LUMI_TOKEN_PRICING.inputCreditsPerMillion, 25);
-  assert.equal(LUMI_TOKEN_PRICING.outputCreditsPerMillion, 210);
+  assert.equal(LUMI_FREE_AI_CREDITS, 100);
+  assert.equal(LUMI_TOKEN_PRICING.inputCreditsPerMillion, 38);
+  assert.equal(LUMI_TOKEN_PRICING.outputCreditsPerMillion, 318);
+  assert.equal(LUMI_TOKEN_PRICING.officialReference.discountRatio, '1/2');
 
-  // 1,000,000 input + 1,000,000 output = 25 + 210 = 235 Credits
+  // 1,000,000 input + 1,000,000 output = 38 + 318 = 356 Credits
   const fullMillion = calculateLumiTokenCredits({ promptTokens: 1_000_000, completionTokens: 1_000_000 });
-  assert.equal(fullMillion.totalCredits, 235);
+  assert.equal(fullMillion.totalCredits, 356);
 
-  // Typical medium Stage AI call: 1,500 input + 1,500 output = 0.0375 + 0.315 = 0.3525 Credits (~35 VND)
+  // Typical medium Stage AI call: 1,500 input + 1,500 output = 0.057 + 0.477 = 0.534 Credits
   const mediumCall = calculateLumiTokenCredits({ promptTokens: 1500, completionTokens: 1500 });
-  assert.equal(mediumCall.totalCredits, 0.3525);
+  assert.equal(mediumCall.totalCredits, 0.534);
 
   // BYOK is always 0 Credit
   const byokCall = calculateLumiTokenCredits({ promptTokens: 50_000, completionTokens: 20_000 }, { byok: true });
@@ -761,19 +763,19 @@ test('LumiStage credit billing, project unlock, Pro upgrade, and Stage AI token 
       usage: { promptTokens: 2000, completionTokens: 2000, totalTokens: 4000 }
     }));
 
-    // 2000 input * 25/1M = 0.05 Cr; 2000 output * 210/1M = 0.42 Cr -> Total = 0.47 Cr
-    // User has 0.20 freeAiCreditsRemaining -> uses 0.20 free + 0.27 from wallet balance (1800 -> 1799.73)
+    // 2000 input * 38/1M = 0.076 Cr; 2000 output * 318/1M = 0.636 Cr -> Total = 0.712 Cr (1/2 official pricing)
+    // User has 0.20 freeAiCreditsRemaining -> uses 0.20 free + 0.512 from wallet balance (1800 -> 1799.488)
     const resAiWeb = makeRes();
     await postStageAi({
       user: mockUser,
       body: { prompt: 'Dựng sân khấu hội nghị 500 khách', effort: 'medium' }
     }, resAiWeb);
     assert.equal(resAiWeb.statusCode, 200);
-    assert.equal(resAiWeb.body.data.billing.creditCharged, 0.47);
+    assert.equal(resAiWeb.body.data.billing.creditCharged, 0.712);
     assert.equal(resAiWeb.body.data.billing.usedFreeCredits, 0.2);
-    assert.equal(resAiWeb.body.data.billing.usedWalletCredits, 0.27);
+    assert.equal(resAiWeb.body.data.billing.usedWalletCredits, 0.512);
     assert.equal(mockUser.lumiStage.freeAiCreditsRemaining, 0);
-    assert.equal(mockUser.balance, 1799.73);
+    assert.equal(mockUser.balance, 1799.488);
 
     // 5. Stage AI call with BYOK charges 0 Credits
     const resAiByok = makeRes();
@@ -787,7 +789,7 @@ test('LumiStage credit billing, project unlock, Pro upgrade, and Stage AI token 
     assert.equal(resAiByok.statusCode, 200);
     assert.equal(resAiByok.body.data.billing.byok, true);
     assert.equal(resAiByok.body.data.billing.creditCharged, 0);
-    assert.equal(mockUser.balance, 1799.73);
+    assert.equal(mockUser.balance, 1799.488);
 
     // 6. Upgrade to LumiStage Pro Monthly (1490 Credits) grants +300 bonus AI Credits
     const resPro = makeRes();
@@ -798,7 +800,7 @@ test('LumiStage credit billing, project unlock, Pro upgrade, and Stage AI token 
     assert.equal(resPro.statusCode, 200);
     assert.equal(resPro.body.data.subscription.proActive, true);
     assert.equal(mockUser.lumiStage.freeAiCreditsRemaining, 300);
-    assert.equal(mockUser.balance, 309.73);
+    assert.equal(mockUser.balance, 309.488);
   } finally {
     // 7. Phase 2 Opt-in Telemetry (Nghị định 13/2023): ignored when optIn !== true, recorded when optIn === true
     const postTelemetry = getRouteHandler('post', '/telemetry');
@@ -1039,12 +1041,12 @@ test('C4 & Phase 4: Curated Default Preset Pack, platform preset fallback, lumi_
   }
 });
 
-test('Free AI credits default to 50 and share links enforce 7-day cap for fixed expiry + active Pro gate for untilPro links', async () => {
-  assert.equal(LUMI_FREE_AI_CREDITS, 50);
+test('Free AI credits default to 100 and share links enforce 7-day cap for fixed expiry + active Pro gate for untilPro links', async () => {
+  assert.equal(LUMI_FREE_AI_CREDITS, 100);
   assert.equal(FREE_SHARE_MAX_HOURS, 168);
-  assert.equal(normalizeUserLumiState({}).freeAiCreditsRemaining, 50);
-  const freshUser = new User({ email: 'fresh50@grouplife.vn', name: 'Fresh User', password: 'Password123!' });
-  assert.equal(freshUser.lumiStage.freeAiCreditsRemaining, 50);
+  assert.equal(normalizeUserLumiState({}).freeAiCreditsRemaining, 100);
+  const freshUser = new User({ email: 'fresh100@grouplife.vn', name: 'Fresh User', password: 'Password123!' });
+  assert.equal(freshUser.lumiStage.freeAiCreditsRemaining, 100);
 
   const { restore } = mockProjectStore();
   const origUserFindById = User.findById;

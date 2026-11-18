@@ -34,12 +34,22 @@ import { crmPairingLimiter, crmDeviceLimiter, crmAiLimiter, crmMessageSendLimite
 import { CRM_PLANS, CRM_AI_PACKS, getCrmProduct } from '../utils/crmCatalog.js';
 import { applySubscriptionEntitlement } from '../utils/crmBilling.js';
 import {
-    consumeQuota,
-    consumeQuotaUnits,
-    hasQuota,
-    refundQuota,
-    refundQuotaUnits
+    getRemainingSubscriptionCredits,
+    refundCrmAiCreditsAtomic,
+    reserveCrmAiCreditsAtomic,
+    settleCrmAiCreditsAtomic
 } from '../utils/crmQuota.js';
+import {
+    AI_ALLOWED_MODELS,
+    AI_DEFAULT_BALANCED_MODEL,
+    AI_DEFAULT_CHATBOT_MODEL,
+    AI_MIN_CHARGE_CREDITS,
+    AI_TOKEN_MODEL_PRICING,
+    CREDIT_UNIT_VND,
+    calculateAiTokenCredits,
+    normalizeAiModel,
+    roundCredits
+} from '../utils/aiPricing.js';
 import { fulfillCrmBillingOrder } from '../utils/crmBilling.js';
 import { callConfiguredAiProvider } from '../utils/aiProvider.js';
 import { calculateCrmLeadScore } from '../utils/crmLeadScoring.js';
@@ -101,17 +111,13 @@ const sanitizeUpdate = (body, allowedFields) => {
 };
 
 const getChatbotSettingsKey = (userId) => `crmChatbotSettings:${userId}`;
-const CHATBOT_ALLOWED_AI_MODELS = ['gemini-3.1-flash-lite', 'gemini-3.8-flash', 'gemini-2.5-flash', 'gemini-3-flash'];
-const CHATBOT_DEFAULT_AI_MODEL = 'gemini-3.1-flash-lite';
-// Group AI summary supports a richer model choice than the chatbot.
-const SUMMARY_ALLOWED_AI_MODELS = ['gemini-3.1-pro', 'gemini-3.1-flash-lite', 'gemini-3.8-flash', 'gemini-3.5-flash'];
-const SUMMARY_DEFAULT_AI_MODEL = 'gemini-3.1-pro';
+const CHATBOT_ALLOWED_AI_MODELS = AI_ALLOWED_MODELS;
+const CHATBOT_DEFAULT_AI_MODEL = AI_DEFAULT_CHATBOT_MODEL;
+const SUMMARY_ALLOWED_AI_MODELS = AI_ALLOWED_MODELS;
+const SUMMARY_DEFAULT_AI_MODEL = AI_DEFAULT_BALANCED_MODEL;
 function normalizeSummaryAiModel(value) {
-    return SUMMARY_ALLOWED_AI_MODELS.includes(value) ? value : SUMMARY_DEFAULT_AI_MODEL;
+    return normalizeAiModel(value, SUMMARY_DEFAULT_AI_MODEL);
 }
-// Không còn model pro trong danh sách CRM → giữ giá trị cho getChatbotModelQuotaUnits;
-// không khớp model nào trong allowed list nên mọi model CRM tính 1 quota unit.
-const CHATBOT_PRO_AI_MODEL = 'gemini-3.1-pro';
 
 const defaultChatbotSettings = {
     enabled: true,
@@ -135,11 +141,7 @@ const defaultChatbotSettings = {
 };
 
 function normalizeChatbotAiModel(value) {
-    return CHATBOT_ALLOWED_AI_MODELS.includes(value) ? value : CHATBOT_DEFAULT_AI_MODEL;
-}
-
-function getChatbotModelQuotaUnits(model) {
-    return model === CHATBOT_PRO_AI_MODEL ? 2 : 1;
+    return normalizeAiModel(value, CHATBOT_DEFAULT_AI_MODEL);
 }
 
 async function getChatbotSettings(userId) {
@@ -188,15 +190,20 @@ async function saveChatbotSettings(userId, value) {
     return safeValue;
 }
 
-function getQuotaPayload(subscription, quotaBucket = 'none', quotaUnits = 0) {
-    const includedRemaining = Math.max(0, subscription.includedAiLimit - subscription.includedAiUsed);
+function getQuotaPayload(subscription, quotaBucket = 'none', unitsUsed = 0, creditBalance = null) {
+    const { includedRemaining, extraRemaining, totalRemaining } = getRemainingSubscriptionCredits(subscription);
     return {
+        billingUnit: 'credit',
+        creditUnitVnd: CREDIT_UNIT_VND,
         bucketUsed: quotaBucket,
-        unitsUsed: quotaUnits,
-        includedAiLimit: subscription.includedAiLimit,
-        includedAiUsed: subscription.includedAiUsed,
-        extraAiRemaining: subscription.extraAiRemaining,
-        totalRemaining: includedRemaining + subscription.extraAiRemaining
+        unitsUsed: roundCredits(unitsUsed),
+        creditsCharged: roundCredits(unitsUsed),
+        includedAiLimit: roundCredits(subscription?.includedAiLimit || 0),
+        includedAiUsed: roundCredits(subscription?.includedAiUsed || 0),
+        includedRemaining,
+        extraAiRemaining: extraRemaining,
+        totalRemaining,
+        ...(creditBalance !== null ? { creditBalance: roundCredits(creditBalance) } : {})
     };
 }
 
@@ -208,68 +215,138 @@ async function runCrmAiWithQuota(req, {
     systemPrompt,
     model,
     temperature,
-    forceGcliDirect = false,
-    quotaUnits = 1
+    forceGcliDirect = false
 }) {
     const startTime = Date.now();
     const sub = req.crmSubscription;
-    let quotaConsumption = { bucket: 'none', units: 0, included: 0, extra: 0 };
+    const resolvedModel = normalizeAiModel(model, AI_DEFAULT_CHATBOT_MODEL);
+    const userDoc = await User.findById(req.user._id).select('balance role');
+    const walletBalance = Math.max(0, Number(userDoc?.balance || 0));
+    const isUnlimitedRole = ['admin', 'partner'].includes(userDoc?.role);
 
-    if (!hasQuota(sub, quotaUnits)) {
-        const error = new Error('Het han muc AI quota. Vui long mua them goi AI top-up.');
-        error.statusCode = 403;
+    const estPromptChars = String(promptContent || '').length
+        + String(systemPrompt || '').length
+        + (Array.isArray(messages) ? messages.reduce((sum, m) => sum + String(m?.content || '').length, 0) : 0);
+    const estPromptTokens = Math.max(100, Math.ceil(estPromptChars / 4));
+    const estimatedCredits = calculateAiTokenCredits(
+        { promptTokens: estPromptTokens, completionTokens: 40 },
+        { model: resolvedModel }
+    ).credits;
+
+    const reservation = await reserveCrmAiCreditsAtomic({
+        CrmSubscription,
+        User,
+        subscriptionId: sub?._id,
+        userId: req.user._id,
+        estimatedCredits,
+        isUnlimitedRole
+    });
+    if (!reservation.ok) {
+        const error = new Error(reservation.message || 'Hết hạn mức AI Credit. Vui lòng nạp thêm Credit hoặc mua gói AI Top-up.');
+        error.statusCode = reservation.statusCode || 403;
         throw error;
     }
 
-    quotaConsumption = consumeQuotaUnits(sub, quotaUnits);
-    await sub.save();
-
+    let aiResponse;
     try {
-        const aiResponse = await callConfiguredAiProvider(promptContent, sessionId, {
+        aiResponse = await callConfiguredAiProvider(promptContent, sessionId, {
             messages,
             systemPrompt,
-            model,
+            model: resolvedModel,
             temperature,
             forceGcliDirect
         });
-        const usageDoc = await CrmAiUsage.create({
-            userId: req.user._id,
-            subscriptionId: sub._id,
-            requestType,
-            provider: 'gcli',
-            model: aiResponse.model,
-            status: 'succeeded',
-            quotaBucket: quotaConsumption.bucket,
-            quotaUnits: quotaConsumption.units,
-            tokens: {
-                promptTokens: aiResponse.usage?.promptTokens || 0,
-                completionTokens: aiResponse.usage?.completionTokens || 0,
-                totalTokens: aiResponse.usage?.totalTokens || 0
-            },
-            latencyMs: Date.now() - startTime
-        });
-
-        return {
-            aiResponse,
-            usageDoc,
-            quota: getQuotaPayload(sub, quotaConsumption.bucket, quotaConsumption.units)
-        };
     } catch (aiError) {
-        refundQuotaUnits(sub, quotaConsumption);
-        await sub.save();
+        await refundCrmAiCreditsAtomic({
+            CrmSubscription,
+            User,
+            subscriptionId: sub._id,
+            userId: req.user._id,
+            reservation
+        });
         await CrmAiUsage.create({
             userId: req.user._id,
             subscriptionId: sub._id,
             requestType,
             provider: 'gcli',
+            model: resolvedModel,
             status: 'failed',
-            quotaBucket: quotaConsumption.bucket,
-            quotaUnits: quotaConsumption.units || quotaUnits,
+            quotaBucket: 'none',
+            quotaUnits: 0,
+            creditsCharged: 0,
             latencyMs: Date.now() - startTime,
             errorMessage: aiError.message
         });
         throw aiError;
     }
+
+    const fallbackPromptTokens = estPromptTokens;
+    const fallbackCompletionTokens = Math.max(40, Math.ceil(String(aiResponse.text || '').length / 4));
+    const tokenBill = calculateAiTokenCredits(aiResponse.usage || {}, {
+        model: aiResponse.model || resolvedModel,
+        fallbackModel: resolvedModel,
+        fallbackPromptTokens,
+        fallbackCompletionTokens
+    });
+
+    const settlement = await settleCrmAiCreditsAtomic({
+        CrmSubscription,
+        User,
+        subscriptionId: sub._id,
+        userId: req.user._id,
+        reservation,
+        actualCredits: tokenBill.credits
+    });
+
+    if (settlement.walletSpent > 0) {
+        await Transaction.create({
+            userId: req.user._id,
+            type: 'spend',
+            amount: Math.max(1, Math.round(settlement.walletSpent * CREDIT_UNIT_VND)),
+            credits: settlement.walletSpent,
+            status: 'completed',
+            transactionCode: `CRM_AI_${Date.now()}_${crypto.randomBytes(3).toString('hex').toUpperCase()}`,
+            paymentMethod: 'system',
+            serviceType: 'alpha_crm_ai_pack',
+            serviceDetails: {
+                requestType,
+                model: tokenBill.model,
+                promptTokens: tokenBill.promptTokens,
+                completionTokens: tokenBill.completionTokens
+            },
+            description: `Alpha CRM AI (${tokenBill.model}, ${tokenBill.totalTokens} tokens)`
+        });
+    }
+
+    const bucketUsed = settlement.bucketUsed;
+    const chargedCredits = settlement.chargedCredits;
+    const finalSub = settlement.latestSub || sub;
+    const finalWalletBalance = settlement.latestWalletBalance ?? walletBalance;
+
+    const usageDoc = await CrmAiUsage.create({
+        userId: req.user._id,
+        subscriptionId: sub._id,
+        requestType,
+        provider: 'gcli',
+        model: aiResponse.model || tokenBill.model,
+        status: 'succeeded',
+        quotaBucket: bucketUsed,
+        quotaUnits: chargedCredits,
+        creditsCharged: chargedCredits,
+        tokens: {
+            promptTokens: tokenBill.promptTokens,
+            completionTokens: tokenBill.completionTokens,
+            totalTokens: tokenBill.totalTokens
+        },
+        latencyMs: Date.now() - startTime
+    });
+
+    return {
+        aiResponse,
+        usageDoc,
+        tokenBill,
+        quota: getQuotaPayload(finalSub, bucketUsed, chargedCredits, finalWalletBalance)
+    };
 }
 
 function normalizeThreadType(value) {
@@ -689,7 +766,11 @@ router.get('/catalog', (req, res) => {
         success: true,
         data: {
             plans: CRM_PLANS,
-            packs: CRM_AI_PACKS
+            packs: CRM_AI_PACKS,
+            billingUnit: 'credit',
+            creditUnitVnd: CREDIT_UNIT_VND,
+            allowedModels: AI_ALLOWED_MODELS,
+            aiPricing: AI_TOKEN_MODEL_PRICING
         }
     });
 });
@@ -735,6 +816,8 @@ router.get('/quota', authMiddleware, async (req, res) => {
                 success: true,
                 data: {
                     active: false,
+                    billingUnit: 'credit',
+                    creditUnitVnd: CREDIT_UNIT_VND,
                     includedAiLimit: 0,
                     includedAiUsed: 0,
                     extraAiRemaining: 0,
@@ -751,23 +834,27 @@ router.get('/quota', authMiddleware, async (req, res) => {
                 success: true,
                 data: {
                     active: false,
-                    includedAiLimit: sub.includedAiLimit,
-                    includedAiUsed: sub.includedAiUsed,
-                    extraAiRemaining: sub.extraAiRemaining,
-                    totalRemaining: sub.extraAiRemaining // Extra AI requests are still kept but inactive
+                    billingUnit: 'credit',
+                    creditUnitVnd: CREDIT_UNIT_VND,
+                    includedAiLimit: roundCredits(sub.includedAiLimit),
+                    includedAiUsed: roundCredits(sub.includedAiUsed),
+                    extraAiRemaining: roundCredits(sub.extraAiRemaining),
+                    totalRemaining: roundCredits(sub.extraAiRemaining) // Extra AI Credits are kept when expired
                 }
             });
         }
 
-        const includedRemaining = Math.max(0, sub.includedAiLimit - sub.includedAiUsed);
+        const includedRemaining = roundCredits(Math.max(0, sub.includedAiLimit - sub.includedAiUsed));
         res.json({
             success: true,
             data: {
                 active: true,
-                includedAiLimit: sub.includedAiLimit,
-                includedAiUsed: sub.includedAiUsed,
-                extraAiRemaining: sub.extraAiRemaining,
-                totalRemaining: includedRemaining + sub.extraAiRemaining
+                billingUnit: 'credit',
+                creditUnitVnd: CREDIT_UNIT_VND,
+                includedAiLimit: roundCredits(sub.includedAiLimit),
+                includedAiUsed: roundCredits(sub.includedAiUsed),
+                extraAiRemaining: roundCredits(sub.extraAiRemaining),
+                totalRemaining: roundCredits(includedRemaining + sub.extraAiRemaining)
             }
         });
     } catch (error) {
@@ -803,10 +890,10 @@ router.get('/dashboard/overview', authMiddleware, async (req, res) => {
                 periodEnd: sub.periodEnd
             };
 
-            includedAiLimit = sub.includedAiLimit;
-            includedAiUsed = sub.includedAiUsed;
-            extraAiRemaining = sub.extraAiRemaining;
-            totalAiRemaining = Math.max(0, includedAiLimit - includedAiUsed) + extraAiRemaining;
+            includedAiLimit = roundCredits(sub.includedAiLimit);
+            includedAiUsed = roundCredits(sub.includedAiUsed);
+            extraAiRemaining = roundCredits(sub.extraAiRemaining);
+            totalAiRemaining = roundCredits(Math.max(0, includedAiLimit - includedAiUsed) + extraAiRemaining);
         }
 
         const activeDevices = await CrmDevice.countDocuments({ userId: req.user._id, status: 'active' });
@@ -895,6 +982,8 @@ router.get('/dashboard/overview', authMiddleware, async (req, res) => {
             data: {
                 subscription: subSummary,
                 aiQuota: {
+                    billingUnit: 'credit',
+                    creditUnitVnd: CREDIT_UNIT_VND,
                     includedAiLimit,
                     includedAiUsed,
                     extraAiRemaining,
@@ -2850,98 +2939,42 @@ router.get('/execution-logs', authMiddleware, async (req, res) => {
 
 // POST /api/crm/ai/chat
 router.post('/ai/chat', crmAiLimiter, authMiddleware, requireActiveSubscription, async (req, res) => {
-    const startTime = Date.now();
-    let quotaBucket = 'none';
-    const sub = req.crmSubscription;
-
     try {
-        const { message, messages } = req.body;
+        const { message, messages, model } = req.body;
         const promptContent = message || (messages && messages[messages.length - 1]?.content);
 
         if (!promptContent) {
-            return res.status(400).json({ success: false, message: 'Ná»™i dung tin nháº¯n khĂ´ng Ä‘Æ°á»£c rá»—ng.' });
+            return res.status(400).json({ success: false, message: 'Nội dung tin nhắn không được rỗng.' });
         }
 
-        // Limit message length
         if (promptContent.length > 5000) {
-            return res.status(400).json({ success: false, message: 'Tin nháº¯n quĂ¡ dĂ i (tá»‘i Ä‘a 5000 kĂ½ tá»±).' });
+            return res.status(400).json({ success: false, message: 'Tin nhắn quá dài (tối đa 5000 ký tự).' });
         }
 
-        // 1. Quota check
-        if (!hasQuota(sub)) {
-            return res.status(403).json({
-                success: false,
-                message: 'Hết hạn mức AI quota. Vui lòng mua thêm gói AI top-up.'
-            });
-        }
-
-        // 2. Consume quota inline before the API call to avoid race conditions
-        quotaBucket = consumeQuota(sub);
-        await sub.save();
-
-        // 3. Forward AI request
-        const sessionId = `crm:${req.user._id}`;
-        let aiResponse;
-        try {
-            aiResponse = await callConfiguredAiProvider(promptContent, sessionId, { messages });
-        } catch (aiError) {
-            // Refund consumed quota if calling upstream fails
-            refundQuota(sub, quotaBucket);
-            await sub.save();
-
-            // Log failed usage
-            await CrmAiUsage.create({
-                userId: req.user._id,
-                subscriptionId: sub._id,
-                requestType: 'chat',
-                provider: 'gcli',
-                status: 'failed',
-                quotaBucket,
-                latencyMs: Date.now() - startTime,
-                errorMessage: aiError.message
-            });
-
-            return res.status(500).json({
-                success: false,
-                message: `Lá»—i AI: ${aiError.message}`
-            });
-        }
-
-        // 4. Save successful usage logs
-        const promptTokens = aiResponse.usage?.promptTokens || 0;
-        const completionTokens = aiResponse.usage?.completionTokens || 0;
-        const totalTokens = aiResponse.usage?.totalTokens || 0;
-
-        await CrmAiUsage.create({
-            userId: req.user._id,
-            subscriptionId: sub._id,
+        const { aiResponse, usageDoc, quota } = await runCrmAiWithQuota(req, {
+            promptContent,
+            sessionId: `crm:${req.user._id}`,
             requestType: 'chat',
-            provider: 'gcli',
-            model: aiResponse.model,
-            status: 'succeeded',
-            quotaBucket,
-            tokens: { promptTokens, completionTokens, totalTokens },
-            latencyMs: Date.now() - startTime
+            messages,
+            model: normalizeChatbotAiModel(model || CHATBOT_DEFAULT_AI_MODEL)
         });
-
-        const includedRemaining = Math.max(0, sub.includedAiLimit - sub.includedAiUsed);
 
         res.json({
             success: true,
             data: {
                 text: aiResponse.text,
-                quota: {
-                    bucketUsed: quotaBucket,
-                    includedAiLimit: sub.includedAiLimit,
-                    includedAiUsed: sub.includedAiUsed,
-                    extraAiRemaining: sub.extraAiRemaining,
-                    totalRemaining: includedRemaining + sub.extraAiRemaining
-                }
+                model: aiResponse.model,
+                usage: usageDoc.tokens,
+                creditsCharged: quota.creditsCharged,
+                quota
             }
         });
     } catch (error) {
         console.error('CRM AI Chat Error:', error);
-        res.status(500).json({ success: false, message: 'Lá»—i mĂ¡y chá»§ khi xá»­ lĂ½ AI Chat.' });
+        res.status(error.statusCode || 500).json({
+            success: false,
+            message: error.message || 'Lỗi máy chủ khi xử lý AI Chat.'
+        });
     }
 });
 
@@ -3640,7 +3673,6 @@ router.post(
                 ? `\n\nLich su hoi thoai gan day (cu -> moi):\n${historyTurns.join('\n')}`
                 : '';
             const promptContent = `${aiInstructions}${knowledge}${sendInstructions}${historyBlock}\n\nTin nhan khach hang: ${customerMessage}`;
-            const quotaUnits = getChatbotModelQuotaUnits(settings.aiModel);
             const { aiResponse, usageDoc, quota } = await runCrmAiWithQuota(req, {
                 promptContent,
                 sessionId: `crm-chatbot-agent:${userId}:${String(req.body.conversationKey || '')}`,
@@ -3648,8 +3680,7 @@ router.post(
                 systemPrompt: aiInstructions,
                 model: settings.aiModel,
                 temperature: settings.temperature,
-                forceGcliDirect: true,
-                quotaUnits
+                forceGcliDirect: true
             });
             const { reply, attachments } = resolveChatbotReplyAttachments(
                 aiResponse.text,
@@ -3974,7 +4005,6 @@ router.post('/chatbot/test', crmAiLimiter, authMiddleware, requireActiveSubscrip
         ].filter(Boolean).join('\n\n');
         const knowledge = settings.knowledgeSnippets?.length ? `\n\nKien thuc noi bo:\n${settings.knowledgeSnippets.join('\n---\n')}` : '';
         const promptContent = `${aiInstructions}${knowledge}\n\nTin nhan khach hang: ${message}`;
-        const quotaUnits = getChatbotModelQuotaUnits(settings.aiModel);
         const { aiResponse, usageDoc, quota } = await runCrmAiWithQuota(req, {
             promptContent,
             sessionId: `crm-chatbot-test:${req.user._id}`,
@@ -3982,8 +4012,7 @@ router.post('/chatbot/test', crmAiLimiter, authMiddleware, requireActiveSubscrip
             systemPrompt: aiInstructions,
             model: settings.aiModel,
             temperature: settings.temperature,
-            forceGcliDirect: true,
-            quotaUnits
+            forceGcliDirect: true
         });
         const log = await CrmChatbotLog.create({
             userId: req.user._id,
@@ -4000,7 +4029,9 @@ router.post('/chatbot/test', crmAiLimiter, authMiddleware, requireActiveSubscrip
                 mode: 'ai',
                 text: aiResponse.text,
                 model: aiResponse.model || settings.aiModel,
-                quotaCost: quotaUnits,
+                quotaCost: quota.creditsCharged,
+                creditsCharged: quota.creditsCharged,
+                usage: usageDoc.tokens,
                 log,
                 quota
             }
@@ -4255,15 +4286,12 @@ router.post('/groups/:id/summarize', crmAiLimiter, authMiddleware, requireActive
             priorSummary: priorSummary?.summaryText || '',
             openItems
         });
-        // Model is a client-side (local) tab preference sent in the body; pro
-        // models cost 1 quota units.
         const aiModel = normalizeSummaryAiModel(req.body.aiModel);
         const { aiResponse, usageDoc, quota } = await runCrmAiWithQuota(req, {
             promptContent,
             sessionId: `crm-group-summary:${req.user._id}:${group._id}`,
             requestType: 'group_summary',
-            model: aiModel,
-            quotaUnits: 1
+            model: aiModel
         });
 
         const parsed = parseGroupSummaryJson(aiResponse.text);

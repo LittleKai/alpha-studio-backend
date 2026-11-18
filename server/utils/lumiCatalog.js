@@ -1,7 +1,13 @@
 import crypto from 'crypto';
+import {
+    CREDIT_UNIT_VND,
+    AI_MIN_CHARGE_CREDITS,
+    AI_TOKEN_MODEL_PRICING,
+    calculateAiTokenCredits
+} from './aiPricing.js';
 
 /**
- * LumiStage (by Alpha Studio) — Commercial Catalog, Token Pricing (= 1/3 Official Gemini) & License Signer
+ * LumiStage (by Alpha Studio) — Commercial Catalog, Token Pricing (= 1/2 Official Gemini) & License Signer
  * Legal Entity: CÔNG TY TNHH MTV GROUPLIFE
  */
 
@@ -10,26 +16,28 @@ export const LUMI_BRAND = {
     productName: 'LumiStage',
     fullName: 'LumiStage — by Alpha Studio',
     legalEntity: 'CÔNG TY TNHH MTV GROUPLIFE',
-    creditUnitVnd: 100,
+    creditUnitVnd: CREDIT_UNIT_VND,
     taxNote: 'Sản phẩm/dịch vụ phần mềm thuộc đối tượng không chịu thuế GTGT (KCT).'
 };
 
 /**
- * Giá Token của Web LumiStage (qua gcli) = đúng 1/3 giá Gemini Flash chính thức:
+ * Giá Token của Web LumiStage (qua gcli) = đúng 1/2 giá Gemini Flash chính thức:
  * - Google Gemini Flash chính thức: $0.30 / 1M Input (~76.2 Credits) | $2.50 / 1M Output (~635 Credits)
- * - LumiStage (1/3 chính thức):     25 Credits / 1M Input (2.500đ)   | 210 Credits / 1M Output (21.000đ)
- * Quy chuẩn hệ thống: 1 Credit = 100 VNĐ.
+ * - LumiStage (1/2 chính thức):     38 Credits / 1M Input (3.800đ)   | 318 Credits / 1M Output (31.800đ)
+ * Quy chuẩn hệ thống: 1 Credit = 100 VNĐ. Trial miễn phí: 100 AI Credits.
  */
-export const LUMI_FREE_AI_CREDITS = 50;
+export const LUMI_FREE_AI_CREDITS = 100;
+
+const _lumiFlashPricing = AI_TOKEN_MODEL_PRICING['gemini-3.8-flash'];
 
 export const LUMI_TOKEN_PRICING = {
-    inputCreditsPerMillion: 25,
-    outputCreditsPerMillion: 210,
-    minChargeCredits: 0.01,
+    inputCreditsPerMillion: _lumiFlashPricing.inputCreditsPerMillion,
+    outputCreditsPerMillion: _lumiFlashPricing.outputCreditsPerMillion,
+    minChargeCredits: AI_MIN_CHARGE_CREDITS,
     officialReference: {
-        inputCreditsPerMillion: 76.2,
-        outputCreditsPerMillion: 635,
-        discountRatio: '1/3'
+        inputCreditsPerMillion: _lumiFlashPricing.officialReference.inputCreditsPerMillion,
+        outputCreditsPerMillion: _lumiFlashPricing.officialReference.outputCreditsPerMillion,
+        discountRatio: '1/2'
     }
 };
 
@@ -243,51 +251,16 @@ export function getLumiProduct(productId) {
  * Tính số Credit cần trừ theo số token thực tế trả về từ model.
  * - Nếu người dùng bật BYOK (dùng API Key cá nhân): thu 0 Credit.
  * - Nếu dùng model của Web (gemini-3.8-flash 3 effort qua gcli):
- *   Credits = (promptTokens * 25 + completionTokens * 210) / 1_000_000
+ *   Credits = (promptTokens * 38 + completionTokens * 318) / 1_000_000
  */
 export function calculateLumiTokenCredits(usage = {}, options = {}) {
-    if (options.byok === true) {
-        const promptTokens = Number(usage?.promptTokens) || 0;
-        const completionTokens = Number(usage?.completionTokens) || 0;
-        const totalTokens = Number(usage?.totalTokens) || (promptTokens + completionTokens);
-        return {
-            credits: 0,
-            totalCredits: 0,
-            vndEquivalent: 0,
-            promptTokens,
-            completionTokens,
-            totalTokens,
-            byok: true
-        };
-    }
-
-    const promptTokens = Math.max(0, Number(usage?.promptTokens) || 0);
-    const completionTokens = Math.max(0, Number(usage?.completionTokens) || 0);
-    const totalTokens = Math.max(promptTokens + completionTokens, Number(usage?.totalTokens) || 0);
-
-    // Fallback ước lượng nếu upstream không trả về usage object
-    const effPrompt = promptTokens > 0 ? promptTokens : 2500;
-    const effCompletion = completionTokens > 0 ? completionTokens : 800;
-
-    const rawCredits = (
-        effPrompt * LUMI_TOKEN_PRICING.inputCreditsPerMillion +
-        effCompletion * LUMI_TOKEN_PRICING.outputCreditsPerMillion
-    ) / 1_000_000;
-
-    const credits = Math.max(
-        LUMI_TOKEN_PRICING.minChargeCredits,
-        Math.round(rawCredits * 10000) / 10000
-    );
-
-    return {
-        credits,
-        totalCredits: credits,
-        vndEquivalent: Math.round(credits * LUMI_BRAND.creditUnitVnd),
-        promptTokens: effPrompt,
-        completionTokens: effCompletion,
-        totalTokens: totalTokens || (effPrompt + effCompletion),
-        byok: false
-    };
+    return calculateAiTokenCredits(usage, {
+        model: options.model || 'gemini-3.8-flash',
+        byok: options.byok === true,
+        fallbackPromptTokens: 2500,
+        fallbackCompletionTokens: 800,
+        minChargeCredits: LUMI_TOKEN_PRICING.minChargeCredits
+    });
 }
 
 function getLicenseSecret() {
