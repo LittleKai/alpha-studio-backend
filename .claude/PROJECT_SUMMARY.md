@@ -28,11 +28,11 @@
 | Lao Cai + image-to-3D articles | ✅ | Article data + `publish_image_only_articles.mjs` | Hai bài Việt–Anh, 9 + 4 ảnh WebP, không tệp; API/ảnh đạt, browser review chưa có |
 | Binh luan & luot xem bai viet | ✅ | `server/routes/comments.js`, `server/models/Comment.js`, `server/utils/viewCooldown.js` | Comment `targetType` `article`; `viewCooldown.js` dùng chung cho EventLibrary và Article `/services` |
 | Cloud Desktop + agents | ✅ | `server/routes/cloud.js`, models HostMachine/CloudSession | Contract cheo host/flow |
-| CRM + analytics | ✅ | `server/routes/crm.js`, `server/utils/crmCatalog.js`, `server/utils/crmQuota.js` | SSE hello/device.status có app/agent version; AI billing Credit theo token (1/2 giá gốc, Trial 100, Monthly 1000 Cr = 200 AI Cr) |
+| CRM + analytics | ✅ | `server/routes/crm.js`, `server/utils/crmCatalog.js`, `server/utils/crmQuota.js`, `server/utils/crmRelease.js` | `/releases/latest` đọc B2 `crm-app/version.json?t=` trước rồi cache `SystemSetting` (fallback offline); AI Credit theo token (1/2 giá gốc) |
 | AI pricing & models | ✅ | `server/utils/aiPricing.js`, `aiProvider.js`, `lumiCatalog.js`, `routes/{ai,interior,ledStudio}.js` | Chỉ còn `gemini-3.1-flash-lite` (13/51 Cr) và `gemini-3.8-flash` (38/318 Cr); Lumi free trial 100 Cr; Interior & Vocab tính Credit theo token (BYOK 0 Cr) |
 | Tool/file download tracking & streaming | ✅ | `server/routes/toolDownloads.js`, `server/routes/articles.js` | GET attachment download chỉ bài published, tự `$inc`; tên tải lấy basename gốc từ `fileKey` (bỏ tiền tố timestamp), tách khỏi nhãn biên tập; `versions` key đổi `.`→`_`; admin trả `serviceDownloads`; `downloadCount` select:false (ẩn khỏi API công khai) |
-| B2 orphan/retention/migrations | ✅ | `server/routes/admin.js`, `server/retention/`, `server/migrations/` | DELETE đối chiếu cả Article attachments |
-| Automated tests | ✅ | `test/*.test.js`, `server/**/*.test.*` | 297 tests + syntax check đạt |
+| B2 orphan/retention/migrations | ✅ | `server/routes/admin.js`, `server/retention/`, `server/migrations/` | DELETE đối chiếu cả Article attachments; `APP_RELEASE_PREFIXES` bảo vệ `vocabflip-app/`, `vietyaku-app/`, `crm-app/` |
+| Automated tests | ✅ | `test/*.test.js`, `server/**/*.test.*` | 307 tests + syntax check đạt |
 | CRM Windows packaging | ✅ | `scripts/release-to-b2.js` | Remove all smoke-test .data before ZIP; CRM artifact guard rejects .data/.env |
 | VocabFlip private FSRS state | ✅ | `server/models/Vocab.js`, `server/routes/vocab.js` | Optional FSRS fields persist; lazy legacy normalization; no DB backfill |
 | XML sitemap | ✅ | `server/routes/sitemap.js`, `test/sitemap.test.js` | Chỉ public/indexable (57 URL cốt lõi gồm `/studio/led-studio`, bỏ `/studio/ai-skills/:slug`); news 3 bài có mô tả |

@@ -761,11 +761,11 @@ export function extractB2KeysFromHtml(html) {
     return [...keys];
 }
 
-// Desktop app releases (VocabFlip, VietYaku) live on B2 but are never referenced
-// from MongoDB — their `version.json` manifest is the source of truth, published
-// by each app's build-and-release skill. Treat them as referenced so they are
-// never listed as orphaned and deleted, which would 404 the /studio download links.
-const APP_RELEASE_PREFIXES = ['vocabflip-app/', 'vietyaku-app/'];
+// Desktop app releases (VocabFlip, VietYaku, Alpha CRM) live on B2 and their
+// `version.json` manifest is the source of truth, published by each app's
+// build-and-release skill. Treat them as referenced so they are never listed
+// as orphaned and deleted, which would 404 the /studio download links.
+const APP_RELEASE_PREFIXES = ['vocabflip-app/', 'vietyaku-app/', 'crm-app/'];
 const isAppReleaseKey = (key) => APP_RELEASE_PREFIXES.some(prefix => key.startsWith(prefix));
 
 /**
