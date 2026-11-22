@@ -1,6 +1,6 @@
 # PROJECT SUMMARY - Alpha Studio Backend
 
-**Last Updated:** 2026-11-19 · **Session:** 29
+**Last Updated:** 2026-11-22 · **Session:** 30
 
 > Trang thai hien tai, khong phai changelog. Sau moi task: cap nhat ngay/session; doi bang trang thai va TODO; cap nhat `DATABASE.md` khi schema doi. Bug quan trong vao `IMPORTANT_FIXED_BUGS.md`. Ban v1 nam trong `archive/PROJECT_SUMMARY_v1.md` va khong duoc dung lam huong dan hien tai.
 
@@ -31,13 +31,12 @@
 | CRM + analytics | ✅ | `server/routes/crm.js`, `server/utils/crmCatalog.js`, `server/utils/crmQuota.js`, `server/utils/crmRelease.js` | `/releases/latest` đọc B2 `crm-app/version.json?t=` trước rồi cache `SystemSetting` (fallback offline); AI Credit theo token (1/2 giá gốc) |
 | AI pricing & models | ✅ | `server/utils/aiPricing.js`, `aiProvider.js`, `lumiCatalog.js`, `routes/{ai,interior,ledStudio}.js` | Chỉ còn `gemini-3.1-flash-lite` (13/51 Cr) và `gemini-3.8-flash` (38/318 Cr); Lumi free trial 100 Cr; Interior & Vocab tính Credit theo token (BYOK 0 Cr) |
 | Tool/file download tracking & streaming | ✅ | `server/routes/toolDownloads.js`, `server/routes/articles.js` | GET attachment download chỉ bài published, tự `$inc`; tên tải lấy basename gốc từ `fileKey` (bỏ tiền tố timestamp), tách khỏi nhãn biên tập; `versions` key đổi `.`→`_`; admin trả `serviceDownloads`; `downloadCount` select:false (ẩn khỏi API công khai) |
-| B2 orphan/retention/migrations | ✅ | `server/routes/admin.js`, `server/retention/`, `server/migrations/` | DELETE đối chiếu cả Article attachments; `APP_RELEASE_PREFIXES` bảo vệ `vocabflip-app/`, `vietyaku-app/`, `crm-app/` |
-| Automated tests | ✅ | `test/*.test.js`, `server/**/*.test.*` | 307 tests + syntax check đạt |
+| B2 orphan/retention/migrations | ✅ | `server/routes/admin.js`, `server/retention/`, `server/migrations/` | Bảo vệ Article attachments, `APP_RELEASE_PREFIXES`, `LedStudioPreset.b2Assets.*` & `galleryUrls` |
+| Automated tests | ✅ | `test/*.test.js`, `server/**/*.test.*` | 309/309 pass (`led-studio-routes.test.js` 21/21) + syntax check đạt |
 | CRM Windows packaging | ✅ | `scripts/release-to-b2.js` | Remove all smoke-test .data before ZIP; CRM artifact guard rejects .data/.env |
-| VocabFlip private FSRS state | ✅ | `server/models/Vocab.js`, `server/routes/vocab.js` | Optional FSRS fields persist; lazy legacy normalization; no DB backfill |
 | XML sitemap | ✅ | `server/routes/sitemap.js`, `test/sitemap.test.js` | Chỉ public/indexable (57 URL cốt lõi gồm `/studio/led-studio`, bỏ `/studio/ai-skills/:slug`); news 3 bài có mô tả |
 | News publishing | ✅ | `server/models/Article.js`, `server/routes/articles.js` | Tin published cần nội dung vi/media; create/update/publish chạy validation; lỗi trả 400 |
-| Creative LED Stage Studio (LumiStage) Cloud, Share, Billing, Stage AI & PRO Exports | ✅ | `server/routes/ledStudio.js`, `server/utils/lumiCatalog.js`, `server/utils/lumiProExporters.js`, `server/utils/lumiProExporters.cjs`, `test/led-studio-routes.test.js` | Cookie vé phiên HMAC `/session-ticket`, xuất PRO `/exports/{dxf,mvr,gma-xml,engineering-dossier}`, Share, Credit & Stage AI |
+| Creative LED Stage Studio (LumiStage) Cloud, Share, StagePack & PRO | ✅ | `server/routes/ledStudio.js`, `LedStudioPreset.js`, `lumiProExporters.*`, `scripts/publish-stagepack.mjs` | Vé phiên HMAC, xuất PRO, Share, `stage_pack` B2 tách phần (`?parts=core,audio,video`, `PRO_REQUIRED`, CLI `--dry-run`) |
 
 ## 3. Gia dinh dang giu
 

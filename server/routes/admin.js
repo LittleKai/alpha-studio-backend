@@ -910,10 +910,10 @@ export async function collectReferencedKeys() {
             }
         }
 
-        // LED Stage Studio projects & presets (b2FileKey / b2AssetKey / thumbnailUrl)
+        // LED Stage Studio projects & presets (b2FileKey / b2AssetKey / b2Assets / thumbnailUrl / galleryUrls)
         const [ledProjects, ledPresets] = await Promise.all([
             LedStudioProject.find({}, 'b2FileKey thumbnailUrl title createdAt').lean(),
-            LedStudioPreset.find({}, 'b2AssetKey thumbnailUrl title createdAt').lean()
+            LedStudioPreset.find({}, 'b2AssetKey b2Assets thumbnailUrl galleryUrls title createdAt').lean()
         ]);
         for (const p of ledProjects) {
             if (p.b2FileKey) {
@@ -930,18 +930,33 @@ export async function collectReferencedKeys() {
             if (thumbKey) usedKeys.add(thumbKey);
         }
         for (const pr of ledPresets) {
-            if (pr.b2AssetKey) {
-                usedKeys.add(pr.b2AssetKey);
-                if (!docKeyMap.has(pr.b2AssetKey)) {
-                    docKeyMap.set(pr.b2AssetKey, {
-                        uploader: pr.title?.vi || 'LED Studio Preset',
+            const presetLabel = pr.title?.vi || 'LED Studio Preset';
+            const recordPresetKey = (key) => {
+                if (typeof key !== 'string' || !key.trim()) return;
+                usedKeys.add(key);
+                if (!docKeyMap.has(key)) {
+                    docKeyMap.set(key, {
+                        uploader: presetLabel,
                         uploadedAt: pr.createdAt || null,
                         source: 'led-studio-preset'
                     });
                 }
+            };
+            recordPresetKey(pr.b2AssetKey);
+            if (pr.b2Assets && typeof pr.b2Assets === 'object') {
+                for (const k of [pr.b2Assets.coreKey, pr.b2Assets.audioKey, pr.b2Assets.videoKey, pr.b2Assets.thumbnailKey]) {
+                    recordPresetKey(k);
+                }
+                if (Array.isArray(pr.b2Assets.galleryKeys)) {
+                    for (const gk of pr.b2Assets.galleryKeys) recordPresetKey(gk);
+                }
             }
-            const thumbKey = extractB2Key(pr.thumbnailUrl);
-            if (thumbKey) usedKeys.add(thumbKey);
+            recordPresetKey(extractB2Key(pr.thumbnailUrl));
+            if (Array.isArray(pr.galleryUrls)) {
+                for (const gu of pr.galleryUrls) {
+                    recordPresetKey(extractB2Key(gu));
+                }
+            }
         }
 
     return { usedKeys, docKeyMap };

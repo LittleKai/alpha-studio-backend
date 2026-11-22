@@ -255,8 +255,9 @@ export async function downloadFile(key) {
  * @param {string} contentType - MIME type
  * @returns {{ key: string, publicUrl: string }}
  */
-export async function uploadFile(key, body, contentType) {
+export async function uploadFile(key, body, contentType, extra = {}) {
     await getS3().send(new PutObjectCommand({
+        ...(extra && typeof extra === 'object' && !Array.isArray(extra) ? extra : {}),
         Bucket: process.env.B2_BUCKET_NAME,
         Key: key,
         Body: body,

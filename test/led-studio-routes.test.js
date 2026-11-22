@@ -2,10 +2,32 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { S3Client } from '@aws-sdk/client-s3';
 import LedStudioProject from '../server/models/LedStudioProject.js';
 import LedStudioPreset from '../server/models/LedStudioPreset.js';
 import User from '../server/models/User.js';
 import Transaction from '../server/models/Transaction.js';
+import WorkflowDocument from '../server/models/WorkflowDocument.js';
+import WorkflowProject from '../server/models/WorkflowProject.js';
+import EventLibraryItem from '../server/models/EventLibraryItem.js';
+import Article from '../server/models/Article.js';
+import Course from '../server/models/Course.js';
+import Prompt from '../server/models/Prompt.js';
+import StudioGeneration from '../server/models/StudioGeneration.js';
+import InteriorAnalysis from '../server/models/InteriorAnalysis.js';
+import InteriorRender from '../server/models/InteriorRender.js';
+import { uploadFile } from '../server/utils/b2Storage.js';
+import { collectReferencedKeys } from '../server/routes/admin.js';
+import {
+  assertValidSlug,
+  parseCliArgs,
+  resolvePackRelPath,
+  validatePublishSafety,
+  isRemoteMongoUri,
+  buildPublishPlan
+} from '../scripts/publish-stagepack.mjs';
 import { validateUrlSafety } from '../server/utils/aiProvider.js';
 import ledStudioRouter, {
   FREE_SHARE_MAX_HOURS,
@@ -357,7 +379,7 @@ test('POST/GET /presets allow ordinary users to publish Vietnamese personal pres
   const origFindOne = LedStudioPreset.findOne;
 
   LedStudioPreset.create = async (doc) => {
-    const saved = { ...doc, _id: 'preset_' + (presetStore.length + 1), createdAt: new Date() };
+    const saved = { ...doc, _id: `507f1f77bcf86cd79943000${presetStore.length + 1}`, createdAt: new Date() };
     presetStore.push(saved);
     return saved;
   };
@@ -438,24 +460,27 @@ test('POST/GET /presets allow ordinary users to publish Vietnamese personal pres
     // GET /presets/:id enforces private preset ownership and allows owner access
     const getPresetById = getRouteHandler('get', '/presets/:id');
     const getPresetAsset = getRouteHandler('get', '/presets/asset');
+    const createdPresetId = resCreatePrivate.body.data._id;
     const resPrivateOther = makeRes();
     await getPresetById({
       user: { _id: 'user-stranger', role: 'user' },
-      params: { id: 'preset_1' }
+      params: { id: createdPresetId }
     }, resPrivateOther);
     assert.equal(resPrivateOther.statusCode, 403);
 
     const resPrivateOwner = makeRes();
     await getPresetById({
       user: { _id: 'user-ordinary', role: 'user' },
-      params: { id: 'preset_1' }
+      params: { id: createdPresetId }
     }, resPrivateOwner);
     assert.equal(resPrivateOwner.statusCode, 200);
     assert.equal(resPrivateOwner.body.data.payloadJson.effect, 'rainbowChase');
 
     // B2-backed public and private presets resolve downloadUrl on both /presets/:id and /presets/asset (I6)
+    const publicB2PresetId = '507f1f77bcf86cd799430010';
+    const privateB2PresetId = '507f1f77bcf86cd799430011';
     const publicB2Preset = {
-      _id: 'preset_b2_pub',
+      _id: publicB2PresetId,
       authorId: 'user-ordinary',
       createdBy: 'user-ordinary',
       ownership: 'community',
@@ -468,7 +493,7 @@ test('POST/GET /presets allow ordinary users to publish Vietnamese personal pres
       payloadJson: null
     };
     const privateB2Preset = {
-      _id: 'preset_b2_priv',
+      _id: privateB2PresetId,
       authorId: 'user-ordinary',
       createdBy: 'user-ordinary',
       ownership: 'community',
@@ -493,7 +518,7 @@ test('POST/GET /presets allow ordinary users to publish Vietnamese personal pres
       process.env.B2_SECRET_ACCESS_KEY = 'test-secret-key';
 
       const resPubById = makeRes();
-      await getPresetById({ params: { id: 'preset_b2_pub' }, headers: {} }, resPubById);
+      await getPresetById({ params: { id: publicB2PresetId }, headers: {} }, resPubById);
       assert.equal(resPubById.statusCode, 200);
       assert.ok(
         typeof resPubById.body?.data?.downloadUrl === 'string' &&
@@ -516,7 +541,7 @@ test('POST/GET /presets allow ordinary users to publish Vietnamese personal pres
       const resPrivOwnerById = makeRes();
       await getPresetById({
         user: { _id: 'user-ordinary', role: 'user' },
-        params: { id: 'preset_b2_priv' },
+        params: { id: privateB2PresetId },
         headers: {}
       }, resPrivOwnerById);
       assert.equal(resPrivOwnerById.statusCode, 200);
@@ -1486,7 +1511,7 @@ test('Tier 3: POST /exports/{dxf,mvr,gma-xml,engineering-dossier} enforce auth +
     assert.equal(resQuoteHtml.statusCode, 200);
     assert.match(resQuoteHtml.body.data.html, /ALPHA PRO EVENT/);
     assert.match(resQuoteHtml.body.data.html, /<!--LUMI_STAGE_PREVIEW_SLOT-->/);
-    assert.doesNotMatch(resQuoteHtml.body.data.html, /LUMISTAGE FREE/);
+    assert.doesNotMatch(resQuoteHtml.body.data.html, /ALPHA LED STUDIO FREE|LUMISTAGE FREE/);
 
     const resCrewHtml = await callAsUser('/exports/engineering-dossier', activeProUser, {
       kind: 'crew',
@@ -1606,5 +1631,365 @@ test('Security: POST /session-ticket blocks X-Forwarded-For spoofing and caps pe
     else process.env.LUMI_STUDIO_TICKET_SECRET = origSecret;
     User.findById = origUserFindById;
     restore();
+  }
+});
+
+function matchMongoFilter(doc, filter) {
+  if (!filter || typeof filter !== 'object') return true;
+  for (const [k, cond] of Object.entries(filter)) {
+    if (k === '$and') {
+      if (!Array.isArray(cond) || !cond.every(sub => matchMongoFilter(doc, sub))) return false;
+      continue;
+    }
+    if (k === '$or') {
+      if (!Array.isArray(cond) || !cond.some(sub => matchMongoFilter(doc, sub))) return false;
+      continue;
+    }
+    const parts = k.split('.');
+    let val = doc;
+    for (const part of parts) {
+      val = val && typeof val === 'object' ? val[part] : undefined;
+    }
+    if (cond instanceof RegExp) {
+      if (Array.isArray(val)) {
+        if (!val.some(item => cond.test(String(item || '')))) return false;
+      } else if (!cond.test(String(val || ''))) {
+        return false;
+      }
+    } else if (String(val) !== String(cond)) {
+      return false;
+    }
+  }
+  return true;
+}
+
+test('StagePack API: /presets filtering (search, staff private visibility, B2 thumbnail signing) and /presets/:id (?parts=..., slug fallback, Pro gate)', async () => {
+  const getPresets = getRouteHandler('get', '/presets');
+  const getPresetById = getRouteHandler('get', '/presets/:id');
+  const origFind = LedStudioPreset.find;
+  const origFindOne = LedStudioPreset.findOne;
+  const prevEnv = {
+    B2_BUCKET_NAME: process.env.B2_BUCKET_NAME,
+    B2_ENDPOINT: process.env.B2_ENDPOINT,
+    B2_ACCESS_KEY_ID: process.env.B2_ACCESS_KEY_ID,
+    B2_SECRET_ACCESS_KEY: process.env.B2_SECRET_ACCESS_KEY
+  };
+
+  const store = [
+    {
+      _id: '507f1f77bcf86cd799439011',
+      slug: 'ateez-bad-private',
+      category: 'stage_pack',
+      presetType: 'stage_pack',
+      ownership: 'platform',
+      visibility: 'private',
+      isPublic: false,
+      accessLevel: 'free',
+      distribution: 'internal_only',
+      tags: ['ateez', '5-dancers', 'internal'],
+      title: { vi: 'ATEEZ BAD (Nội bộ)', en: 'ATEEZ BAD (Internal)' },
+      summary: '5 dancers mocap',
+      summaryEn: '5 dancers mocap',
+      thumbnailUrl: '',
+      galleryUrls: [],
+      b2AssetKey: 'led-studio/stage-packs/ateez-bad-private/core.json.gz',
+      b2Assets: {
+        coreKey: 'led-studio/stage-packs/ateez-bad-private/core.json.gz',
+        audioKey: 'led-studio/stage-packs/ateez-bad-private/audio.mp3',
+        videoKey: 'led-studio/stage-packs/ateez-bad-private/video.mp4',
+        thumbnailKey: 'led-studio/stage-packs/ateez-bad-private/preview.webp',
+        galleryKeys: ['led-studio/stage-packs/ateez-bad-private/gallery_01.webp']
+      }
+    },
+    {
+      _id: '507f1f77bcf86cd799439012',
+      slug: 'demo-pro-concert',
+      category: 'stage_pack',
+      presetType: 'stage_pack',
+      ownership: 'platform',
+      visibility: 'public',
+      isPublic: true,
+      accessLevel: 'pro',
+      distribution: 'commercial-ok',
+      tags: ['concert', 'pro'],
+      title: { vi: 'Concert Pro Pack', en: 'Concert Pro Pack' },
+      b2AssetKey: 'led-studio/stage-packs/demo-pro-concert/core.json.gz',
+      b2Assets: {
+        coreKey: 'led-studio/stage-packs/demo-pro-concert/core.json.gz',
+        audioKey: 'led-studio/stage-packs/demo-pro-concert/audio.mp3',
+        videoKey: '',
+        thumbnailKey: 'led-studio/stage-packs/demo-pro-concert/preview.webp',
+        galleryKeys: []
+      }
+    },
+    {
+      _id: '507f1f77bcf86cd799439013',
+      slug: 'normal-stage-template',
+      category: 'stage_template',
+      presetType: 'stage_template',
+      ownership: 'platform',
+      visibility: 'public',
+      isPublic: true,
+      title: { vi: 'Sân khấu Gala', en: 'Gala Stage' }
+    }
+  ];
+
+  LedStudioPreset.find = (filter) => {
+    const matched = store.filter(doc => matchMongoFilter(doc, filter));
+    return {
+      sort() { return this; },
+      limit() { return this; },
+      lean: async () => matched.map(d => structuredClone(d))
+    };
+  };
+  LedStudioPreset.findOne = (filter) => ({
+    lean: async () => {
+      if (filter && Object.prototype.hasOwnProperty.call(filter, '_id') && !/^[0-9a-f]{24}$/i.test(String(filter._id || ''))) {
+        const castErr = new Error(`Cast to ObjectId failed for value "${filter._id}" at path "_id"`);
+        castErr.name = 'CastError';
+        throw castErr;
+      }
+      const hit = store.find(doc => matchMongoFilter(doc, filter));
+      return hit ? structuredClone(hit) : null;
+    }
+  });
+
+  process.env.B2_BUCKET_NAME = 'test-bucket';
+  process.env.B2_ENDPOINT = 'https://s3.us-west-004.backblazeb2.com';
+  process.env.B2_ACCESS_KEY_ID = 'test-key';
+  process.env.B2_SECRET_ACCESS_KEY = 'test-secret';
+  setPresignedDownloadUrlGenerator(async (key) => `https://presigned.example/${key}`);
+
+  try {
+    // 1. Anonymous user sees only public stage_pack
+    const resAnon = makeRes();
+    await getPresets({ query: { category: 'stage_pack' }, headers: {} }, resAnon);
+    assert.equal(resAnon.statusCode, 200);
+    assert.deepEqual(resAnon.body.data.map(x => x.slug), ['demo-pro-concert']);
+    assert.equal(resAnon.body.data[0].thumbnailUrl, 'https://presigned.example/led-studio/stage-packs/demo-pro-concert/preview.webp');
+
+    // 2. Ordinary user with scope=all does NOT see private platform stage_pack
+    const freeUser = { _id: 'user-free-1', role: 'user', lumiStage: { plan: 'free' } };
+    const resFreeList = makeRes();
+    await getPresets({ user: freeUser, query: { category: 'stage_pack', scope: 'all' }, headers: {} }, resFreeList);
+    assert.deepEqual(resFreeList.body.data.map(x => x.slug), ['demo-pro-concert']);
+
+    // 3. Partner/Admin with scope=all + ?q=ateez sees private platform stage_pack with signed preview & gallery
+    const partnerUser = { _id: 'user-partner-1', role: 'partner' };
+    const resPartner = makeRes();
+    await getPresets({ user: partnerUser, query: { category: 'stage_pack', scope: 'all', q: 'ateez' }, headers: {} }, resPartner);
+    assert.equal(resPartner.body.data.length, 1);
+    assert.equal(resPartner.body.data[0].slug, 'ateez-bad-private');
+    assert.equal(resPartner.body.data[0].galleryUrls[0], 'https://presigned.example/led-studio/stage-packs/ateez-bad-private/gallery_01.webp');
+
+    // 4. GET /presets/:id by slug with default ?parts -> core only (no audio/video signed)
+    const adminUser = { _id: 'user-admin-1', role: 'admin' };
+    const resCoreOnly = makeRes();
+    await getPresetById({ user: adminUser, params: { id: 'ateez-bad-private' }, query: {}, headers: {} }, resCoreOnly);
+    assert.equal(resCoreOnly.statusCode, 200);
+    assert.equal(resCoreOnly.body.data.downloadUrls.core, 'https://presigned.example/led-studio/stage-packs/ateez-bad-private/core.json.gz');
+    assert.equal(resCoreOnly.body.data.downloadUrls.audio, undefined);
+    assert.equal(resCoreOnly.body.data.downloadUrls.video, undefined);
+    assert.equal(resCoreOnly.body.data.downloadUrl, resCoreOnly.body.data.downloadUrls.core);
+
+    // 5. GET /presets/:id with ?parts=core,audio,video signs all 3
+    const resAllParts = makeRes();
+    await getPresetById({ user: adminUser, params: { id: '507f1f77bcf86cd799439011' }, query: { parts: 'core,audio,video' }, headers: {} }, resAllParts);
+    assert.equal(resAllParts.statusCode, 200);
+    assert.equal(resAllParts.body.data.downloadUrls.core, 'https://presigned.example/led-studio/stage-packs/ateez-bad-private/core.json.gz');
+    assert.equal(resAllParts.body.data.downloadUrls.audio, 'https://presigned.example/led-studio/stage-packs/ateez-bad-private/audio.mp3');
+    assert.equal(resAllParts.body.data.downloadUrls.video, 'https://presigned.example/led-studio/stage-packs/ateez-bad-private/video.mp4');
+
+    // 6. Pro gating: free user gets 403 PRO_REQUIRED, active Pro subscriber gets 200
+    const resFreeDenied = makeRes();
+    await getPresetById({ user: freeUser, params: { id: 'demo-pro-concert' }, query: { parts: 'core,audio' }, headers: {} }, resFreeDenied);
+    assert.equal(resFreeDenied.statusCode, 403);
+    assert.equal(resFreeDenied.body.code, 'PRO_REQUIRED');
+
+    const proUser = { _id: 'user-pro-1', role: 'user', lumiStage: { plan: 'pro_monthly', expiresAt: new Date(Date.now() + 86400_000).toISOString() } };
+    const resProOk = makeRes();
+    await getPresetById({ user: proUser, params: { id: 'demo-pro-concert' }, query: { parts: 'core,audio' }, headers: {} }, resProOk);
+    assert.equal(resProOk.statusCode, 200);
+    assert.equal(resProOk.body.data.downloadUrls.core, 'https://presigned.example/led-studio/stage-packs/demo-pro-concert/core.json.gz');
+    assert.equal(resProOk.body.data.downloadUrls.audio, 'https://presigned.example/led-studio/stage-packs/demo-pro-concert/audio.mp3');
+
+    // 7. Default pack fallback works without Mongoose CastError on non-ObjectId IDs, and ?includePlatform=1&q=... filters platform pack
+    const resDefaultPack = makeRes();
+    await getPresetById({ params: { id: 'lumi_pack_stage_wedding_luxury' }, query: {}, headers: {} }, resDefaultPack);
+    assert.equal(resDefaultPack.statusCode, 200);
+    assert.equal(resDefaultPack.body.data.preset._id, 'lumi_pack_stage_wedding_luxury');
+
+    const resPlatformSearch = makeRes();
+    await getPresets({ query: { includePlatform: '1', q: 'wedding' }, headers: {} }, resPlatformSearch);
+    assert.equal(resPlatformSearch.statusCode, 200);
+    assert.ok(resPlatformSearch.body.data.length >= 1);
+    assert.ok(resPlatformSearch.body.data.every(p => /wedding/i.test(`${p.title?.en || ''} ${p.title?.vi || ''} ${p.summary || ''} ${p.summaryEn || ''}`)));
+
+    // 8. downloadCount increment preserves updatedAt via { timestamps: false }
+    const routeSrc = fs.readFileSync(new URL('../server/routes/ledStudio.js', import.meta.url), 'utf8');
+    assert.match(routeSrc, /\$inc:\s*\{\s*downloadCount:\s*1\s*\}[\s\S]{0,60}timestamps:\s*false/);
+  } finally {
+    setPresignedDownloadUrlGenerator(null);
+    LedStudioPreset.find = origFind;
+    LedStudioPreset.findOne = origFindOne;
+    for (const [k, v] of Object.entries(prevEnv)) {
+      if (v === undefined) delete process.env[k];
+      else process.env[k] = v;
+    }
+  }
+});
+
+test('StagePack B2 uploadFile ContentEncoding forwarding, admin collectReferencedKeys orphan protection, and publish-stagepack safety guards', async () => {
+  // 1. uploadFile forwards extra S3 params (ContentEncoding/CacheControl)
+  const origSend = S3Client.prototype.send;
+  const prevEnv = {
+    B2_BUCKET_NAME: process.env.B2_BUCKET_NAME,
+    B2_ENDPOINT: process.env.B2_ENDPOINT,
+    B2_ACCESS_KEY_ID: process.env.B2_ACCESS_KEY_ID,
+    B2_SECRET_ACCESS_KEY: process.env.B2_SECRET_ACCESS_KEY,
+    CDN_BASE_URL: process.env.CDN_BASE_URL
+  };
+  let capturedInput = null;
+  S3Client.prototype.send = async (cmd) => {
+    capturedInput = cmd.input;
+    return {};
+  };
+  process.env.B2_BUCKET_NAME = 'test-bucket';
+  process.env.B2_ENDPOINT = 'https://s3.us-west-004.backblazeb2.com';
+  process.env.B2_ACCESS_KEY_ID = 'test-key';
+  process.env.B2_SECRET_ACCESS_KEY = 'test-secret';
+  process.env.CDN_BASE_URL = 'https://cdn.example.com';
+
+  try {
+    await uploadFile('led-studio/stage-packs/demo/pack.core.json.gz', Buffer.from('gz-bytes'), 'application/json', {
+      ContentEncoding: 'gzip',
+      CacheControl: 'public, max-age=31536000, immutable'
+    });
+    assert.equal(capturedInput.ContentEncoding, 'gzip');
+    assert.equal(capturedInput.CacheControl, 'public, max-age=31536000, immutable');
+    assert.equal(capturedInput.ContentType, 'application/json');
+  } finally {
+    S3Client.prototype.send = origSend;
+    for (const [k, v] of Object.entries(prevEnv)) {
+      if (v === undefined) delete process.env[k];
+      else process.env[k] = v;
+    }
+  }
+
+  // 2. collectReferencedKeys protects all b2Assets.* and galleryUrls keys
+  const emptyCursor = () => ({
+    populate() { return this; },
+    sort() { return this; },
+    limit() { return this; },
+    lean: async () => []
+  });
+  const models = [WorkflowDocument, WorkflowProject, EventLibraryItem, Article, Course, Prompt, StudioGeneration, InteriorAnalysis, InteriorRender, LedStudioProject];
+  const origFinds = models.map(m => [m, m.find]);
+  const origPresetFind = LedStudioPreset.find;
+  for (const m of models) m.find = emptyCursor;
+  LedStudioPreset.find = () => ({
+    lean: async () => [{
+      title: { vi: 'Demo StagePack' },
+      b2AssetKey: 'led-studio/stage-packs/demo/core.json.gz',
+      b2Assets: {
+        coreKey: 'led-studio/stage-packs/demo/core.json.gz',
+        audioKey: 'led-studio/stage-packs/demo/audio.mp3',
+        videoKey: 'led-studio/stage-packs/demo/video.mp4',
+        thumbnailKey: 'led-studio/stage-packs/demo/preview.webp',
+        galleryKeys: ['led-studio/stage-packs/demo/gallery_01.webp']
+      },
+      galleryUrls: ['https://f005.backblazeb2.com/file/alpha-bucket/led-studio/stage-packs/demo/legacy_gallery.webp']
+    }]
+  });
+  try {
+    process.env.B2_BUCKET_NAME = 'alpha-bucket';
+    const { usedKeys, docKeyMap } = await collectReferencedKeys();
+    for (const expectedKey of [
+      'led-studio/stage-packs/demo/core.json.gz',
+      'led-studio/stage-packs/demo/audio.mp3',
+      'led-studio/stage-packs/demo/video.mp4',
+      'led-studio/stage-packs/demo/preview.webp',
+      'led-studio/stage-packs/demo/gallery_01.webp',
+      'led-studio/stage-packs/demo/legacy_gallery.webp'
+    ]) {
+      assert.ok(usedKeys.has(expectedKey), `collectReferencedKeys must keep ${expectedKey}`);
+    }
+    assert.equal(docKeyMap.get('led-studio/stage-packs/demo/video.mp4')?.source, 'led-studio-preset');
+  } finally {
+    if (prevEnv.B2_BUCKET_NAME === undefined) delete process.env.B2_BUCKET_NAME;
+    else process.env.B2_BUCKET_NAME = prevEnv.B2_BUCKET_NAME;
+    for (const [m, fn] of origFinds) m.find = fn;
+    LedStudioPreset.find = origPresetFind;
+  }
+
+  // 3. publish-stagepack safety guards + plan alignment with stagepack-hub metadata
+  assert.throws(() => validatePublishSafety({
+    visibility: 'public',
+    access: 'free',
+    distribution: 'internal_only',
+    packMeta: { provenance: { status: 'canonical' } }
+  }), /commercial-ok/i);
+  assert.throws(() => validatePublishSafety({
+    visibility: 'public',
+    access: 'free',
+    distribution: 'commercial-ok',
+    packMeta: { provenance: { status: 'scratch_draft', sourceDir: 'D:/pjs/x/_scratch/out' } }
+  }), /_scratch/i);
+
+  assert.throws(() => validatePublishSafety({
+    visibility: 'public',
+    access: 'free',
+    distribution: 'commercial-ok',
+    packMeta: { provenance: { status: 'canonical', sourceStagePack: 'D:/proj/canon/out.json', sourceDir: 'D:/pjs/x/_scratch/out' } }
+  }), /_scratch/i);
+
+  assert.equal(isRemoteMongoUri('mongodb+srv://user:pass@cluster0.mongodb.net/app'), true);
+  assert.equal(isRemoteMongoUri('mongodb+srv://localhost_admin:pass@cluster0.mongodb.net/app'), true);
+  assert.equal(isRemoteMongoUri('mongodb://user:pass@prod.db.example:27017/app?appName=localhost'), true);
+  assert.equal(isRemoteMongoUri('mongodb://127.0.0.1:27017/app'), false);
+  assert.equal(isRemoteMongoUri('mongodb://localhost:27017/app'), false);
+  assert.equal(isRemoteMongoUri('mongodb://[::1]:27017/app'), false);
+
+  // Path traversal & CLI option safety guards
+  assert.throws(() => assertValidSlug('../../etc'), /Invalid --slug/i);
+  assert.throws(() => resolvePackRelPath('/stagepacks', 'demo-canon', '../../.env'), /Unsafe StagePack relative path/i);
+  assert.throws(() => resolvePackRelPath('/stagepacks', 'demo-canon', 'C:/Windows/win.ini'), /Unsafe StagePack relative path/i);
+  assert.throws(() => parseCliArgs(['publish', '--slug', 'demo-canon', '--dryrun']), /Unknown option/i);
+  assert.throws(() => parseCliArgs(['publish', '--slug', 'demo-canon', '--author-email', '--dry-run']), /Missing value/i);
+
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pub-stagepack-'));
+  try {
+    const packDir = path.join(tmpDir, 'demo-canon');
+    fs.mkdirSync(packDir, { recursive: true });
+    fs.writeFileSync(path.join(packDir, 'pack.core.json.gz'), Buffer.from('gzip-core'));
+    fs.writeFileSync(path.join(packDir, 'audio.mp3'), Buffer.from('mp3-data'));
+    fs.writeFileSync(path.join(packDir, 'preview.webp'), Buffer.from('RIFF\x00\x00\x00\x00WEBP'));
+    fs.writeFileSync(path.join(packDir, 'pack.meta.json'), JSON.stringify({
+      slug: 'demo-canon',
+      format: 'ALPHA_STAGE_PACK/1.0',
+      title: { vi: 'Demo', en: 'Demo' },
+      distribution: 'commercial-ok',
+      provenance: { status: 'canonical', sourceDir: 'D:/proj/canonical/export' },
+      stats: { duration: 10, bpm: 120, performerCount: 2, hasAudio: true, hasVideo: false },
+      files: {
+        core: { file: 'demo-canon/pack.core.json.gz', rawBytes: 2048, sha256: 'abc' },
+        audio: { file: 'demo-canon/audio.mp3', name: 'audio.mp3', mime: 'audio/mpeg', bytes: 8 },
+        video: null
+      },
+      preview: { file: 'demo-canon/preview.webp' },
+      gallery: []
+    }));
+    const plan = buildPublishPlan({
+      slug: 'demo-canon',
+      stagepacksDir: tmpDir,
+      visibility: 'public',
+      access: 'free',
+      distribution: 'commercial-ok'
+    });
+    assert.equal(plan.coreItem.extra.ContentEncoding, 'gzip');
+    assert.ok(plan.audioItem && plan.thumbItem);
+    assert.equal(plan.videoItem, null);
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
   }
 });

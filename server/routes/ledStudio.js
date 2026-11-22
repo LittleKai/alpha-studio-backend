@@ -1,5 +1,6 @@
 import express from 'express';
 import crypto from 'node:crypto';
+import mongoose from 'mongoose';
 import LedStudioProject from '../models/LedStudioProject.js';
 import LedStudioPreset, { PRESET_CATEGORIES, PRESET_TYPES } from '../models/LedStudioPreset.js';
 import User from '../models/User.js';
@@ -471,6 +472,25 @@ router.get('/presets/pack', async (req, res) => {
   return res.json({ success: true, message: 'OK', data: list });
 });
 
+async function hydratePresetMediaUrls(preset) {
+  if (!preset || typeof preset !== 'object' || !isB2Configured()) return preset;
+  const thumbKey = preset.b2Assets?.thumbnailKey;
+  const galleryKeys = Array.isArray(preset.b2Assets?.galleryKeys) ? preset.b2Assets.galleryKeys.filter(Boolean) : [];
+  if (!thumbKey && !galleryKeys.length) return preset;
+  const out = { ...preset };
+  if (thumbKey) {
+    const signedThumb = await resolveStorageDownloadUrl(thumbKey, 3600).catch(() => null);
+    if (signedThumb) out.thumbnailUrl = signedThumb;
+  }
+  if (galleryKeys.length) {
+    const signedGallery = (await Promise.all(
+      galleryKeys.map(k => resolveStorageDownloadUrl(k, 3600).catch(() => null))
+    )).filter(Boolean);
+    if (signedGallery.length) out.galleryUrls = signedGallery;
+  }
+  return out;
+}
+
 router.get('/presets', async (req, res) => {
   try {
     const scope = String(req.query?.scope || 'public');
@@ -484,7 +504,11 @@ router.get('/presets', async (req, res) => {
       }
       filter = { $or: [{ createdBy: user._id }, { authorId: user._id }] };
     } else if (scope === 'all' && user?._id) {
-      filter = { $or: [{ isPublic: true }, { visibility: 'public' }, { createdBy: user._id }, { authorId: user._id }] };
+      const orClauses = [{ isPublic: true }, { visibility: 'public' }, { createdBy: user._id }, { authorId: user._id }];
+      if (['admin', 'partner'].includes(user.role)) {
+        orClauses.push({ ownership: 'platform', visibility: 'private' });
+      }
+      filter = { $or: orClauses };
     }
 
     const cat = req.query?.category || req.query?.presetType;
@@ -492,14 +516,49 @@ router.get('/presets', async (req, res) => {
       filter.category = String(cat);
     }
 
-    const presets = scope === 'platform'
+    const q = String(req.query?.q || '').trim().slice(0, 100);
+    let searchRx = null;
+    if (q) {
+      const escaped = q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      searchRx = new RegExp(escaped, 'i');
+      const searchOr = [
+        { 'title.vi': searchRx },
+        { 'title.en': searchRx },
+        { slug: searchRx },
+        { tags: searchRx },
+        { summary: searchRx },
+        { summaryEn: searchRx }
+      ];
+      if (filter.$or) {
+        const baseFilter = { ...filter };
+        delete baseFilter.$or;
+        filter = { ...baseFilter, $and: [{ $or: filter.$or }, { $or: searchOr }] };
+      } else {
+        filter.$or = searchOr;
+      }
+    }
+
+    const rawPresets = scope === 'platform'
       ? []
       : await LedStudioPreset.find(filter).sort({ createdAt: -1 }).limit(100).lean();
+    const presets = isB2Configured()
+      ? await Promise.all(rawPresets.map(hydratePresetMediaUrls))
+      : rawPresets;
 
     if (includePlatform) {
-      const pack = cat && PRESET_TYPES.includes(String(cat))
+      let pack = cat && PRESET_TYPES.includes(String(cat))
         ? LUMI_DEFAULT_PRESET_PACK.filter(p => p.category === String(cat))
         : LUMI_DEFAULT_PRESET_PACK;
+      if (searchRx) {
+        pack = pack.filter(p => (
+          searchRx.test(String(p.title?.vi || '')) ||
+          searchRx.test(String(p.title?.en || '')) ||
+          searchRx.test(String(p.slug || '')) ||
+          (Array.isArray(p.tags) && p.tags.some(t => searchRx.test(String(t || '')))) ||
+          searchRx.test(String(p.summary || '')) ||
+          searchRx.test(String(p.summaryEn || ''))
+        ));
+      }
       const existingIds = new Set(presets.map(p => String(p._id)));
       const merged = [...pack.filter(p => !existingIds.has(String(p._id))), ...presets];
       return res.json({ success: true, message: 'OK', data: merged });
@@ -516,27 +575,64 @@ async function respondWithPresetDescriptor(req, res, preset) {
     return res.status(404).json({ success: false, message: 'Preset not found' });
   }
   const user = await resolveOptionalUser(req);
+  const isPlatformStaff = user?._id && ['admin', 'partner'].includes(user.role) && preset.ownership === 'platform';
   const isOwner = user?._id && (
     String(preset.authorId || '') === String(user._id) ||
     String(preset.createdBy || '') === String(user._id) ||
-    user.role === 'admin'
+    user.role === 'admin' ||
+    isPlatformStaff
   );
   const isPublicPreset = preset.isPublic !== false && preset.visibility !== 'private';
   if (!isPublicPreset && !isOwner) {
     return res.status(403).json({ success: false, message: 'Forbidden: private preset belongs to another user' });
   }
+  if (preset.accessLevel === 'pro' && !isOwner && !normalizeUserLumiState(user).proActive) {
+    return res.status(403).json({
+      success: false,
+      code: 'PRO_REQUIRED',
+      message: 'LumiStage Pro subscription required for this StagePack'
+    });
+  }
+  const hydratedPreset = await hydratePresetMediaUrls(preset);
   let downloadUrl = null;
-  if (preset.b2AssetKey && isB2Configured()) {
+  let downloadUrls;
+  if (preset.category === 'stage_pack') {
+    const rawParts = String(req.query?.parts || 'core')
+      .split(',')
+      .map(s => s.trim().toLowerCase())
+      .filter(Boolean);
+    const partsSet = new Set(rawParts.filter(p => p === 'core' || p === 'audio' || p === 'video'));
+    if (!partsSet.size) partsSet.add('core');
+    downloadUrls = {};
+    if (isB2Configured()) {
+      const coreKey = preset.b2Assets?.coreKey || preset.b2AssetKey;
+      if (partsSet.has('core') && coreKey) {
+        downloadUrls.core = await resolveStorageDownloadUrl(coreKey, 3600);
+      }
+      if (partsSet.has('audio') && preset.b2Assets?.audioKey) {
+        downloadUrls.audio = await resolveStorageDownloadUrl(preset.b2Assets.audioKey, 3600);
+      }
+      if (partsSet.has('video') && preset.b2Assets?.videoKey) {
+        downloadUrls.video = await resolveStorageDownloadUrl(preset.b2Assets.videoKey, 3600);
+      }
+    }
+    downloadUrl = downloadUrls.core || null;
+    if (partsSet.has('core') && mongoose.connection?.readyState === 1 && /^[0-9a-f]{24}$/i.test(String(preset._id || ''))) {
+      LedStudioPreset.updateOne({ _id: preset._id }, { $inc: { downloadCount: 1 } }, { timestamps: false }).catch(() => {});
+    }
+  } else if (preset.b2AssetKey && isB2Configured()) {
     downloadUrl = await resolveStorageDownloadUrl(preset.b2AssetKey, 3600);
   }
+  const responseData = {
+    preset: hydratedPreset,
+    payloadJson: hydratedPreset.payloadJson ?? hydratedPreset.payloadSummary ?? null,
+    downloadUrl
+  };
+  if (downloadUrls !== undefined) responseData.downloadUrls = downloadUrls;
   return res.json({
     success: true,
     message: 'OK',
-    data: {
-      preset,
-      payloadJson: preset.payloadJson ?? preset.payloadSummary ?? null,
-      downloadUrl
-    }
+    data: responseData
   });
 }
 
@@ -555,9 +651,17 @@ router.get('/presets/asset', async (req, res) => {
 
 router.get('/presets/:id', async (req, res) => {
   try {
-    const preset = (await LedStudioPreset.findOne({ _id: req.params.id }).lean()) ||
-      LUMI_DEFAULT_PRESET_PACK.find(p => String(p._id) === String(req.params.id)) ||
-      null;
+    const rawId = String(req.params.id || '').trim();
+    const isObjectId = /^[0-9a-f]{24}$/i.test(rawId);
+    let preset = null;
+    if (isObjectId) {
+      preset = (await LedStudioPreset.findOne({ _id: rawId }).lean()) || null;
+    } else if (rawId) {
+      preset = (await LedStudioPreset.findOne({ slug: rawId }).lean()) || null;
+    }
+    if (!preset && rawId) {
+      preset = LUMI_DEFAULT_PRESET_PACK.find(p => String(p._id) === rawId) || null;
+    }
     return await respondWithPresetDescriptor(req, res, preset);
   } catch (err) {
     return res.status(500).json({ success: false, message: err.message });

@@ -1,15 +1,15 @@
 /* ============================================================================
-   V18.0 LUMISTAGE PRO EXPORTERS — SINGLE SOURCE OF TRUTH (LOCAL FILE:// & BACKEND)
+   V18.0 ALPHA LED STUDIO PRO EXPORTERS — SINGLE SOURCE OF TRUTH (LOCAL FILE:// & BACKEND)
    Excluded from public web bundle (lumi-studio.min.js); executed on server for PRO.
    ============================================================================ */
 (function (root) {
   'use strict';
 
   const LUMI_EXPORTER_BRAND = {
-    name: 'LumiStage',
+    name: 'Alpha LED Studio',
     tagline: 'by Alpha Studio · GROUPLIFE',
     legalEntity: 'CÔNG TY TNHH MTV GROUPLIFE',
-    watermarkText: 'LUMISTAGE FREE · GROUPLIFE · LUMISTAGE.VN',
+    watermarkText: 'ALPHA LED STUDIO FREE · GROUPLIFE · ALPHASTUDIO.VN',
     taxNote: 'KCT (Phần mềm & dịch vụ thiết kế công nghệ không chịu thuế GTGT)'
   };
 
@@ -1128,7 +1128,7 @@
       `<GeneralSceneDescription verMajor="1" verMinor="6" provider="Alpha LED Studio" providerVersion="1.8">\n` +
       `  <Scene>\n` +
       `    <Layers>\n` +
-      `      <Layer name="LumiStage_Rigging_And_Lighting" uuid="00000000-0000-4000-7000-000000000001">\n` +
+      `      <Layer name="Alpha_LED_Studio_Rigging_And_Lighting" uuid="00000000-0000-4000-7000-000000000001">\n` +
       `        <ChildList>\n` +
       `${fixtureXml}\n` +
       `${videoScreenXml}\n` +
@@ -1307,7 +1307,7 @@
   function buildPrintableStageDocumentHtml18(opts = {}) {
     const mode = opts.mode === 'tech' ? 'tech' : 'quote';
     const watermark = Boolean(opts.watermark);
-    const modelName = String(opts.modelName || 'LumiStage').slice(0, 120);
+    const modelName = String(opts.modelName || 'Alpha LED Studio').slice(0, 120);
     const cp = opts.companyProfile || {};
     const q = opts.quoteConfig || {};
     const bomRows = Array.isArray(opts.bomRows) ? opts.bomRows : [];

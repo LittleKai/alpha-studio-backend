@@ -5,7 +5,8 @@ export const PRESET_CATEGORIES = [
   'matrix_fx_preset',
   'ofl_fixture',
   'ilda_laser',
-  'glb_prop'
+  'glb_prop',
+  'stage_pack'
 ];
 
 export const PRESET_TYPES = [
@@ -13,6 +14,27 @@ export const PRESET_TYPES = [
   'stage_3d',
   'matrix_cue'
 ];
+
+const stagePackB2AssetsSchema = new mongoose.Schema({
+  coreKey: { type: String, default: '' },
+  audioKey: { type: String, default: '' },
+  videoKey: { type: String, default: '' },
+  thumbnailKey: { type: String, default: '' },
+  galleryKeys: { type: [String], default: [] },
+  coreBytes: { type: Number, default: 0, min: 0 },
+  coreGzipBytes: { type: Number, default: 0, min: 0 },
+  audioBytes: { type: Number, default: 0, min: 0 },
+  videoBytes: { type: Number, default: 0, min: 0 },
+  coreSha256: { type: String, default: '' },
+  audioSha256: { type: String, default: '' },
+  videoSha256: { type: String, default: '' },
+  audioName: { type: String, default: '' },
+  audioMime: { type: String, default: '' },
+  videoName: { type: String, default: '' },
+  videoMime: { type: String, default: '' },
+  videoTargetRole: { type: String, default: '' },
+  videoFit: { type: Number, default: 0 }
+}, { _id: false });
 
 const ledStudioPresetSchema = new mongoose.Schema({
   authorId: {
@@ -76,6 +98,36 @@ const ledStudioPresetSchema = new mongoose.Schema({
   b2AssetKey: {
     type: String,
     default: ''
+  },
+  slug: {
+    type: String,
+    trim: true,
+    maxlength: 140,
+    index: true
+  },
+  tags: {
+    type: [String],
+    default: []
+  },
+  galleryUrls: {
+    type: [String],
+    default: []
+  },
+  accessLevel: {
+    type: String,
+    enum: ['free', 'pro'],
+    default: 'free',
+    index: true
+  },
+  distribution: {
+    type: String,
+    enum: ['commercial-ok', 'internal_only'],
+    default: 'commercial-ok',
+    index: true
+  },
+  b2Assets: {
+    type: stagePackB2AssetsSchema,
+    default: undefined
   },
   payloadJson: {
     type: mongoose.Schema.Types.Mixed,
