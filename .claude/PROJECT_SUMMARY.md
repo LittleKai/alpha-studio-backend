@@ -1,106 +1,79 @@
-# PROJECT SUMMARY - Alpha Studio Backend
+# PROJECT SUMMARY — Alpha Studio Backend
 
-**Last Updated:** 2026-11-22 · **Session:** 30
+**Last Updated:** 2026-11-22 · **Session:** 31 · **Setup baseline:** 2026-11-22 · **applied:** 2026-11-22 · **mode:** legacy
 
-> Trang thai hien tai, khong phai changelog. Sau moi task: cap nhat ngay/session; doi bang trang thai va TODO; cap nhat `DATABASE.md` khi schema doi. Bug quan trong vao `IMPORTANT_FIXED_BUGS.md`. Ban v1 nam trong `archive/PROJECT_SUMMARY_v1.md` va khong duoc dung lam huong dan hien tai.
+> Trạng thái hiện tại, không phải changelog (`archive/PROJECT_SUMMARY_v1.md` hết hiệu lực). **Chỉ cập nhật file này khi trạng thái đổi:** `Last Updated` + `Session`, Trạng thái (`⏳/🚧/✅`), Giả định/Cấu trúc/Phụ thuộc, xoá TODO xong (không giữ `[x]`), sửa drift theo code. **Giữ gọn:** `Ghi chú` ≤ ~120 ký tự (*cái gì* + symbol chính; quy ước/bẫy/schema theo `AGENTS.md`). Vượt ~6KB ⇒ dọn trước khi thêm.
 
-**Giữ gọn (file này nạp mỗi session):** ô `Details`/`Notes` ≤ ~120 ký tự — nói *cái gì*, không kể chi tiết nội bộ. *Cơ chế + vì sao* ⇒ `CONVENTIONS.md`; bẫy ⇒ `IMPORTANT_FIXED_BUGS.md`; chi tiết UI ⇒ không ghi (code + git đã có). Vượt ~6KB ⇒ dọn trước khi thêm.
+## 1. Tổng quan
 
-## 1. Tong quan
+- **Stack:** Node.js ESM (`>=18`), Express 5, Mongoose 8 (`npm`) → Fly.io (`alpha-studio-backend`).
+- **Xong khi:** `npm run check`, `npm test`, health + smoke (local/test).
+- **Contract & Storage:** JSON `{ success, message, data }`, JWT, CORS; MongoDB Atlas, Cloudinary, B2 (`.data/` local).
 
-- **Loai:** Node.js ESM, Express 5, Mongoose/MongoDB API.
-- **Artifact:** service production/Fly.io app.
-- **Bang chung xong:** `npm test`, `npm run check`, health/endpoint smoke voi env local/test.
-- **Contract:** JSON `{ success, message, data }`; JWT auth; CORS multi-origin.
-- **Storage:** MongoDB Atlas, Cloudinary, Backblaze B2.
+## 2. Trạng thái
 
-## 2. Trang thai
-
-| Hang muc | Trang thai | File chinh | Ghi chu |
+| Hạng mục | TT | File chính | Ghi chú |
 |---|---|---|---|
-| Auth, users, roles | 🔶 | `server/routes/auth.js`, `server/middleware/auth.js` | JWT version revocation; reset fields hidden; regression tests pending sandbox |
-| Content/course/job/partner/prompt | ✅ | `server/routes/`, `server/models/` | Noi dung `vi` bat buoc, `en` optional |
-| VietYaku release metadata | ✅ | `server/routes/vietyaku.js`, `test/vietyaku-release.test.js` | Suy ra link APK GitHub theo tag khi manifest B2 chỉ có ZIP Windows |
-| Workflow, event library, AI skills | ✅ | `server/routes/workflow.js`, `eventLibrary.js`, `skills.js`, `test/workflow-routes.test.js` | API cho frontend; phan quyen 2 tang project/doc, escape regex searchUsers |
-| Phan muc dich vu + bai dich vu co sections | ✅ | `server/routes/serviceCategories.js`, `server/models/ServiceCategory.js`, `server/models/contentSection.js`, `server/utils/contentSections.js`, `server/utils/articleViews.js` | Sections song ngữ; view backfill có transaction; trackView lọc bot/cooldown 6h, giữ ngày sửa bài |
-| Flower Street article | ✅ | Article data | Published /services case study with 20 WebP Cloudinary images, 4 galleries, and a B2 SketchUp attachment |
-| HOME + Nhà anh Thái articles | ✅ | Article data + skill sync scripts | HOME tách Blender/SketchUp; Nhà anh Thái: 11 render + ảnh BOM WebP, SKP B2; không đính kèm Excel |
-| Lao Cai + image-to-3D articles | ✅ | Article data + `publish_image_only_articles.mjs` | Hai bài Việt–Anh, 9 + 4 ảnh WebP, không tệp; API/ảnh đạt, browser review chưa có |
-| Binh luan & luot xem bai viet | ✅ | `server/routes/comments.js`, `server/models/Comment.js`, `server/utils/viewCooldown.js` | Comment `targetType` `article`; `viewCooldown.js` dùng chung cho EventLibrary và Article `/services` |
-| Cloud Desktop + agents | ✅ | `server/routes/cloud.js`, models HostMachine/CloudSession | Contract cheo host/flow |
-| CRM + analytics | ✅ | `server/routes/crm.js`, `server/utils/crmCatalog.js`, `server/utils/crmQuota.js`, `server/utils/crmRelease.js` | `/releases/latest` đọc B2 `crm-app/version.json?t=` trước rồi cache `SystemSetting` (fallback offline); AI Credit theo token (1/2 giá gốc) |
-| AI pricing & models | ✅ | `server/utils/aiPricing.js`, `aiProvider.js`, `lumiCatalog.js`, `routes/{ai,interior,ledStudio}.js` | Chỉ còn `gemini-3.1-flash-lite` (13/51 Cr) và `gemini-3.8-flash` (38/318 Cr); Lumi free trial 100 Cr; Interior & Vocab tính Credit theo token (BYOK 0 Cr) |
-| Tool/file download tracking & streaming | ✅ | `server/routes/toolDownloads.js`, `server/routes/articles.js` | GET attachment download chỉ bài published, tự `$inc`; tên tải lấy basename gốc từ `fileKey` (bỏ tiền tố timestamp), tách khỏi nhãn biên tập; `versions` key đổi `.`→`_`; admin trả `serviceDownloads`; `downloadCount` select:false (ẩn khỏi API công khai) |
-| B2 orphan/retention/migrations | ✅ | `server/routes/admin.js`, `server/retention/`, `server/migrations/` | Bảo vệ Article attachments, `APP_RELEASE_PREFIXES`, `LedStudioPreset.b2Assets.*` & `galleryUrls` |
-| Automated tests | ✅ | `test/*.test.js`, `server/**/*.test.*` | 309/309 pass (`led-studio-routes.test.js` 21/21) + syntax check đạt |
-| CRM Windows packaging | ✅ | `scripts/release-to-b2.js` | Remove all smoke-test .data before ZIP; CRM artifact guard rejects .data/.env |
-| XML sitemap | ✅ | `server/routes/sitemap.js`, `test/sitemap.test.js` | Chỉ public/indexable (57 URL cốt lõi gồm `/studio/led-studio`, bỏ `/studio/ai-skills/:slug`); news 3 bài có mô tả |
-| News publishing | ✅ | `server/models/Article.js`, `server/routes/articles.js` | Tin published cần nội dung vi/media; create/update/publish chạy validation; lỗi trả 400 |
-| Creative LED Stage Studio (LumiStage) Cloud, Share, StagePack & PRO | ✅ | `server/routes/ledStudio.js`, `LedStudioPreset.js`, `lumiProExporters.*`, `scripts/publish-stagepack.mjs` | Vé phiên HMAC, xuất PRO, Share, `stage_pack` B2 tách phần (`?parts=core,audio,video`, `PRO_REQUIRED`, CLI `--dry-run`) |
+| Auth, users, roles | 🔶 | `server/routes/auth.js`, `server/middleware/auth.js` | `tokenVersion` revocation, ẩn reset fields; chờ smoke sandbox |
+| CMS (Course/Job/Partner/Prompt), tin & dịch vụ | ✅ | `server/routes/{articles,serviceCategories}.js`, `server/utils/articleViews.js` | `vi` bắt buộc (`en` tùy chọn; publish thiếu trả 400); `contentSections` song ngữ; `/services` (Flower Street, HOME, Nhà anh Thái, Lào Cai, image-to-3D); backfill view transaction |
+| Bình luận, xem & tải | ✅ | `server/routes/{comments,toolDownloads}.js`, `server/utils/viewCooldown.js` | `Comment` `article`; `viewCooldown` 6h giữ `updatedAt`; tải published `$inc`, `getAttachmentDownloadFilename`, `versions` `.`→`_`, `serviceDownloads`, ẩn `downloadCount` |
+| VietYaku release | ✅ | `server/routes/vietyaku.js` | Suy link APK GitHub theo tag khi B2 chỉ có ZIP |
+| Workflow, event, skills | ✅ | `server/routes/{workflow,eventLibrary,skills}.js` | Phân quyền 2 tầng project/doc; escape regex `searchUsers` |
+| Cloud Desktop + agents | ✅ | `server/routes/cloud.js`, `server/models/{HostMachine,CloudSession}.js` | Contract chéo host/flow qua `x-agent-secret` |
+| CRM & đóng gói | ✅ | `server/routes/crm.js`, `server/utils/crmRelease.js`, `scripts/release-to-b2.js` | `resolveCrmLatestRelease` đọc B2 `version.json?t=` trước `SystemSetting`; `crmCatalog`/`crmQuota`; ZIP chặn `.data`/`.env` |
+| AI pricing & models | ✅ | `server/utils/{aiPricing,aiProvider,lumiCatalog}.js` | `gemini-3.1-flash-lite` (13/51 Cr), `gemini-3.8-flash` (38/318 Cr), trial 100 Cr, BYOK 0 Cr (`ai`, `interior`, `ledStudio`) |
+| B2 orphan & retention | ✅ | `server/routes/admin.js`, `server/{retention,migrations}/` | `collectReferencedKeys`: Article, `APP_RELEASE_PREFIXES`, `LedStudioPreset.{b2Assets,galleryUrls}` |
+| XML sitemap | ✅ | `server/routes/sitemap.js` | Public/indexable (gồm `/studio/led-studio`, bỏ `/studio/ai-skills/:slug`) |
+| LumiStage Cloud/PRO | ✅ | `server/routes/ledStudio.js`, `server/utils/lumiProExporters.js`, `scripts/publish-stagepack.mjs` | Vé HMAC, PRO, Share, `stage_pack` B2 (`?parts=core,audio,video`, `PRO_REQUIRED`, `--dry-run`) |
+| Automated tests | ✅ | `test/`, `server/` | 309 pass đủ deps (worktree thiếu deps: 77/105, 28 `ERR_MODULE_NOT_FOUND`); `npm run check` OK |
 
-## 3. Gia dinh dang giu
+## 3. Giả định đang giữ
 
-VocabFlip private-card contract: optional `lapses`, `stability`, `difficulty`,
-`fsrs_state`, `fsrs_step` round-trip through create/batch/PUT/read. Omitted fields
-preserve existing FSRS values on updates; explicit null clears nullable fields.
-Old records read as zero lapses and null FSRS values, then normalize lazily in
-the client on review. Deploy backend before clients; rollback ignores additive
-fields without deleting them. No index change or database backfill is required.
-
-| Gia dinh | Gia tri | Nguon |
+| Giả định | Giá trị | Nguồn |
 |---|---|---|
-| Env duoc nap truoc module doc env | `import 'dotenv/config'` dau `server/index.js` | bug env-load da xac minh |
-| Production schema index khong tu tao | `autoIndex: false`; index qua migration/audit | DB config + migration plan |
-| Frontend/agent parse response shape hien tai | `{ success, message, data }` | route/service contracts |
-| B2 URL trong HTML la reference that | quet bang `extractB2KeysFromHtml` | storage orphan tests |
+| Env ESM | `import 'dotenv/config'` đầu `server/index.js` | Bẫy hoisting |
+| Index prod | `autoIndex: false`; qua `db:m0:audit` / migration | `server/db/connection.js` |
+| B2 trong HTML | Quét bằng `extractB2KeysFromHtml` | `test/storage-orphan-html.test.js` |
+| VocabFlip FSRS | `lapses, stability, difficulty, fsrs_state, fsrs_step`: omit giữ, `null` xoá, bản cũ `0`/`null` (FE normalize); BE deploy trước, không index/backfill | `server/routes/vocab.js`, `test/vocab-fsrs.test.js` |
 
-## 4. Cau truc
+## 4. Cấu trúc
 
 ```text
-server/index.js        entrypoint, startup, cron
-server/routes/         HTTP boundaries
-server/models/         Mongoose schemas
-server/middleware/     auth, quota, rate limits
-server/utils/          shared helpers + KIT.md
-server/migrations/     index/data migrations
-server/retention/      retention policy
-test/                  integration/pure logic tests
+server/index.js   entrypoint, startup, cron
+server/{routes,models,middleware,utils}/  HTTP, schemas, auth, helpers + KIT.md
+server/{migrations,retention}/  migrations & retention
+scripts/ · test/  release/B2/M0 CLIs · node:test suites
 ```
 
-## 5. Kien truc va refresh
+## 5. Kiến trúc và refresh
 
-`Client -> route/middleware -> model/service -> MongoDB/storage`; host/flow agents auth bang `x-agent-secret`.
+`Client -> route/middleware -> model -> MongoDB/B2`; agents auth `x-agent-secret`.
 
-| Sau khi ghi | Phai refresh/invalidate | Quen thi bi |
-|---|---|---|
-| Doi auth/role | Token/permission response va client state | Quyen cu hoac 401 bat ngo |
-| Doi schema/index | `DATABASE.md` + migration/index audit | Production drift, query cham/TTL mat |
-| Them B2 URL field/HTML source | `collectReferencedKeys()` + test | File dang dung bi xoa nham |
-| Doi cloud/agent contract | Frontend/host/flow caller + test | Session/heartbeat treo |
-| Doi cacheable list/filter | Invalidate cache tai mutation | Counter/list cu |
+| Sau khi ghi | Refresh / invalidate | Cơ chế | Hậu quả quên |
+|---|---|---|---|
+| Auth/role | Token/permission & client | `tokenVersion` + client | Quyền cũ / 401 |
+| Schema/index | `DATABASE.md` + `db:m0:audit` | Thủ công | Drift, mất TTL/index |
+| B2 field/HTML | `collectReferencedKeys()` + test | Thủ công + test | Xoá nhầm file sống |
+| Cloud/agent API | FE + host/flow caller + test | Thủ công | Treo session |
+| Cache/release | Invalidate / B2 trước DB | `resolveCrmLatestRelease` / tay | Bản cũ / lệch đếm |
 
-## 6. Phu thuoc ngoai
+## 6. Phụ thuộc ngoài
 
-- MongoDB Atlas, Fly.io, Cloudinary, Backblaze B2, Casso, OpenClaw/GCLI.
-- Secret chi o `.env`/Fly secrets; docs chi ghi ten bien.
+- MongoDB Atlas, Fly.io, Cloudinary, B2, Casso, OpenClaw, GCLI; secret chỉ ở `.env` / Fly secrets (xem `.env.example`).
 
 ## 7. Known Issues & TODOs
 
 ### Cao
-- [ ] Dependency audit có 2 advisory critical (ngoài diff); cần đánh giá nâng dependency riêng.
-- [ ] View backfill transaction đã có regression giả lập; cần smoke trên MongoDB test trước deploy.
-- [ ] Input sanitization can duoc audit them tai cac public write route.
-- [ ] Can nhac `MONGODB_MIN_POOL_SIZE=2` tren Fly neu cold database handshake con gay latency.
+- [ ] Dependency audit còn 2 advisory critical (ngoài diff).
+- [ ] View backfill transaction: smoke trên MongoDB test trước deploy.
+- [ ] Audit input sanitization ở public write routes.
+- [ ] Cân nhắc `MONGODB_MIN_POOL_SIZE=2` trên Fly nếu cold handshake chậm.
 
-### Trung binh
-- [ ] Forgot-password va email verification chua co.
-- [ ] Auth security patch: run `test/auth-security.test.js`, full suite and endpoint smoke in an isolated sandbox.
-- [ ] Registration remains enumerable while immediate token issuance is retained; requires email-verification flow.
-- [x] Nâng cấp bot và backend model sang gemini-3.1-flash-lite (mặc định) và gemini-3.8-flash (假流式-agy-gemini-3.8-flash-low), thay thế gemini-2.5-flash và 3.0 sắp bị dừng. Đồng bộ venue.md toàn diện.
+### Trung bình
+- [ ] Thiếu forgot-password & email verification (register còn enumerable).
+- [ ] Auth patch: chạy `test/auth-security.test.js` + smoke trong sandbox đủ deps.
+- [ ] VocabFlip FSRS (live Mongo smoke) & bài Lào Cai / image-to-3D (browser review) chờ kiểm tay.
 
-### Thap
-- [ ] OpenAPI/Swagger chua co.
-- [ ] Chua co ESLint/Prettier config.
-
-- VocabFlip repair verification: mocked/local full suite 256 passed; syntax checks passed. Live Mongo/API smoke pending.
-- CRM packaging verification: 256 tests and syntax checks pass; rebuilt ZIP is clean, bundled Node/SQLite boot twice successfully. No API deploy.
+### Thấp
+- [ ] Chưa có OpenAPI/Swagger và ESLint/Prettier.
+- [ ] `server/utils/lumiCatalog.js` (`getLicenseSecret`, fallback=1): bỏ fallback `JWT_SECRET` ở task code riêng.
