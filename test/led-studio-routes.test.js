@@ -1943,8 +1943,8 @@ test('StagePack B2 uploadFile ContentEncoding forwarding, admin collectReference
     packMeta: { provenance: { status: 'canonical', sourceStagePack: 'D:/proj/canon/out.json', sourceDir: 'D:/pjs/x/_scratch/out' } }
   }), /_scratch/i);
 
-  assert.equal(isRemoteMongoUri('mongodb+srv://user:pass@cluster0.mongodb.net/app'), true);
-  assert.equal(isRemoteMongoUri('mongodb+srv://localhost_admin:pass@cluster0.mongodb.net/app'), true);
+  assert.equal(isRemoteMongoUri('mongodb+srv://user:pass@cluster0.example.invalid/app'), true);
+  assert.equal(isRemoteMongoUri('mongodb+srv://localhost_admin:pass@cluster0.example.invalid/app'), true);
   assert.equal(isRemoteMongoUri('mongodb://user:pass@prod.db.example:27017/app?appName=localhost'), true);
   assert.equal(isRemoteMongoUri('mongodb://127.0.0.1:27017/app'), false);
   assert.equal(isRemoteMongoUri('mongodb://localhost:27017/app'), false);
