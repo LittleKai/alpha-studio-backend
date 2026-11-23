@@ -34,6 +34,7 @@ export function buildSitemapXml({ courses = [], articles = [], eventItems = [] }
         ['/', { changefreq: 'weekly', priority: '1.0' }],
         ['/courses', { changefreq: 'daily', priority: '0.9' }],
         ['/about', { priority: '0.7' }], ['/services', { priority: '0.7' }],
+        ['/contact', { priority: '0.7' }],
         ['/news', { priority: '0.7' }], ['/studio', { priority: '0.8' }],
         ['/studio/ai-skills', { priority: '0.8' }], ['/studio/event-library', { priority: '0.8' }],
         ['/studio/led-studio', { changefreq: 'weekly', priority: '0.8' }],

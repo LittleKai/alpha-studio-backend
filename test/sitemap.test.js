@@ -17,6 +17,7 @@ test('buildSitemapXml emits canonical public URLs without duplicate hreflang', (
     });
 
     assert.match(xml, /<loc>https:\/\/giaiphapsangtao\.com\/news<\/loc>/);
+    assert.match(xml, /<loc>https:\/\/giaiphapsangtao\.com\/contact<\/loc>/);
     assert.match(xml, /\/studio\/ai-skills<\/loc>/);
     assert.match(xml, /\/studio\/event-library<\/loc>/);
     assert.match(xml, /\/studio\/vietyaku<\/loc>/);

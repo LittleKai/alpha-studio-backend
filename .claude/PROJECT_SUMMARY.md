@@ -1,6 +1,6 @@
 # PROJECT SUMMARY — Alpha Studio Backend
 
-**Last Updated:** 2026-11-22 · **Session:** 31 · **Setup baseline:** 2026-11-22 · **applied:** 2026-11-22 · **mode:** legacy
+**Last Updated:** 2026-11-24 · **Session:** 32 · **Setup baseline:** 2026-11-22 · **applied:** 2026-11-22 · **mode:** upgrade
 
 > Trạng thái hiện tại, không phải changelog (`archive/PROJECT_SUMMARY_v1.md` hết hiệu lực). **Chỉ cập nhật file này khi trạng thái đổi:** `Last Updated` + `Session`, Trạng thái (`⏳/🚧/✅`), Giả định/Cấu trúc/Phụ thuộc, xoá TODO xong (không giữ `[x]`), sửa drift theo code. **Giữ gọn:** `Ghi chú` ≤ ~120 ký tự (*cái gì* + symbol chính; quy ước/bẫy/schema theo `AGENTS.md`). Vượt ~6KB ⇒ dọn trước khi thêm.
 
@@ -23,7 +23,7 @@
 | CRM & đóng gói | ✅ | `server/routes/crm.js`, `server/utils/crmRelease.js`, `scripts/release-to-b2.js` | `resolveCrmLatestRelease` đọc B2 `version.json?t=` trước `SystemSetting`; `crmCatalog`/`crmQuota`; ZIP chặn `.data`/`.env` |
 | AI pricing & models | ✅ | `server/utils/{aiPricing,aiProvider,lumiCatalog}.js` | `gemini-3.1-flash-lite` (13/51 Cr), `gemini-3.8-flash` (38/318 Cr), trial 100 Cr, BYOK 0 Cr (`ai`, `interior`, `ledStudio`) |
 | B2 orphan & retention | ✅ | `server/routes/admin.js`, `server/{retention,migrations}/` | `collectReferencedKeys`: Article, `APP_RELEASE_PREFIXES`, `LedStudioPreset.{b2Assets,galleryUrls}` |
-| XML sitemap | ✅ | `server/routes/sitemap.js` | Public/indexable (gồm `/studio/led-studio`, bỏ `/studio/ai-skills/:slug`) |
+| XML sitemap | ✅ | `server/routes/sitemap.js` | Public/indexable (gồm `/contact`, `/studio/led-studio`, bỏ `/studio/ai-skills/:slug`) |
 | LumiStage Cloud/PRO | ✅ | `server/routes/ledStudio.js`, `server/utils/lumiProExporters.js`, `scripts/publish-stagepack.mjs` | Vé HMAC, PRO, Share, `stage_pack` B2 (`?parts=core,audio,video`, `PRO_REQUIRED`, `--dry-run`) |
 | Automated tests | ✅ | `test/`, `server/` | 309 pass đủ deps (worktree thiếu deps: 77/105, 28 `ERR_MODULE_NOT_FOUND`); `npm run check` OK |
 
