@@ -12,6 +12,7 @@ process.env.B2_BUCKET_NAME = 'alpha-bucket';
 const {
     extractB2Key,
     extractB2KeysFromHtml,
+    extractSectionB2Keys,
     blockedDeleteReason,
     DELETE_GUARD_TTL_MS
 } = await import('../server/routes/admin.js');
@@ -127,4 +128,66 @@ test('so khớp key chính xác, không so theo tiền tố', () => {
 test('cửa sổ cache của guard đủ ngắn để không che mất tham chiếu mới', () => {
     assert.ok(DELETE_GUARD_TTL_MS > 0, 'phải có cache — trang admin xoá hàng loạt tuần tự');
     assert.ok(DELETE_GUARD_TTL_MS <= 30_000, 'cache quá dài thì lại quay về đúng lỗi vừa sửa');
+});
+
+test('extractSectionB2Keys trích đúng fileKey/URL từ khối videos và richText trong sections', () => {
+    const sections = [
+        {
+            kind: 'videos',
+            videos: [
+                {
+                    url: `${CDN}/services/demo/123-preview.mp4`,
+                    fileKey: 'services/demo/123-preview.mp4',
+                    poster: 'https://res.cloudinary.com/demo/image/upload/v1/poster.webp'
+                },
+                {
+                    url: `${DIRECT}/services/demo/456-preview.mp4`,
+                    poster: `${CDN}/services/demo/poster.webp`
+                }
+            ]
+        },
+        {
+            kind: 'richText',
+            html: `<p><a href="${CDN}/services/demo/guide.pdf">PDF</a></p>`,
+            htmlEn: `<p><a href="${CDN}/services/demo/guide-en.pdf">PDF EN</a></p>`
+        }
+    ];
+    assert.deepEqual(extractSectionB2Keys(sections).sort(), [
+        'services/demo/123-preview.mp4',
+        'services/demo/456-preview.mp4',
+        'services/demo/guide-en.pdf',
+        'services/demo/guide.pdf',
+        'services/demo/poster.webp'
+    ]);
+    assert.deepEqual(extractSectionB2Keys(null), []);
+});
+
+test('extractSectionB2Keys giữ cả fileKey lẫn key từ url khi khác nhau và bỏ query/hash', () => {
+    assert.equal(
+        extractB2Key(`${CDN}/services/demo/live.mp4?v=2#t=1`),
+        'services/demo/live.mp4'
+    );
+    assert.equal(
+        extractB2Key(`${DIRECT}/services/demo/direct.mp4?token=abc`),
+        'services/demo/direct.mp4'
+    );
+    assert.deepEqual(
+        extractSectionB2Keys([
+            {
+                kind: 'videos',
+                videos: [
+                    {
+                        fileKey: 'services/demo/old.mp4',
+                        url: `${CDN}/services/demo/live.mp4?v=2#t=1`,
+                        poster: `${CDN}/services/demo/poster.webp?w=800`
+                    }
+                ]
+            }
+        ]).sort(),
+        [
+            'services/demo/live.mp4',
+            'services/demo/old.mp4',
+            'services/demo/poster.webp'
+        ]
+    );
 });

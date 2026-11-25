@@ -339,28 +339,99 @@ test('sanitizeSections chịu được đầu vào không phải mảng', () => 
     assert.deepEqual(sanitizeSections({ kind: 'richText' }), []);
 });
 
-test('sanitizeSections không truyền allowedKinds thì giữ cả 8 kind', () => {
+test('sanitizeSections truyền không truyền allowedKinds thì giữ cả 9 kind', () => {
     const out = sanitizeSections(
         SECTION_KINDS.map(kind => ({ kind, title: kind }))
     );
     assert.deepEqual(out.map(s => s.kind), [...SECTION_KINDS]);
 });
 
-test('sanitizeSections giới hạn theo allowedKinds — bài dịch vụ chỉ có 4 khối', () => {
+test('sanitizeSections giới hạn theo allowedKinds — bài dịch vụ gồm cả videos', () => {
     const out = sanitizeSections([
         { kind: 'richText', html: '<p>Giới thiệu</p>' },
         { kind: 'metrics', metrics: [{ label: 'Reach', value: '1M', note: '' }] },
         { kind: 'quote', quote: 'bỏ' },
-        { kind: 'steps', title: 'Quy trình', steps: [{ title: 'Khảo sát', desc: 'Đo hiện trạng' }], images: ['https://cdn.test/x.png'] }
+        { kind: 'steps', title: 'Quy trình', steps: [{ title: 'Khảo sát', desc: 'Đo hiện trạng' }], images: ['https://cdn.test/x.png'] },
+        {
+            kind: 'videos',
+            title: 'Video xem trước',
+            titleEn: 'Preview videos',
+            videos: [
+                {
+                    url: 'https://cdn.test/demo.mp4',
+                    fileKey: 'services/demo/demo.mp4',
+                    poster: 'https://res.cloudinary.com/demo/image/upload/v1/p.webp',
+                    title: 'Demo 1',
+                    titleEn: 'Demo 1 EN',
+                    caption: 'Mô tả',
+                    captionEn: 'Caption EN',
+                    duration: '0:41',
+                    extraField: 'drop-me'
+                },
+                { url: '   ', title: 'Missing URL must be dropped' }
+            ],
+            html: '<p>drop foreign field</p>'
+        }
     ], SERVICE_SECTION_KINDS);
 
-    assert.deepEqual(out.map(s => s.kind), ['richText', 'steps']);
+    assert.deepEqual(out.map(s => s.kind), ['richText', 'steps', 'videos']);
     // field của kind khác vẫn bị cắt
     assert.deepEqual(out[1], {
         kind: 'steps',
         title: 'Quy trình',
         steps: [{ title: 'Khảo sát', desc: 'Đo hiện trạng' }]
     });
+    assert.deepEqual(out[2], {
+        kind: 'videos',
+        title: 'Video xem trước',
+        titleEn: 'Preview videos',
+        videos: [{
+            url: 'https://cdn.test/demo.mp4',
+            fileKey: 'services/demo/demo.mp4',
+            poster: 'https://res.cloudinary.com/demo/image/upload/v1/p.webp',
+            title: 'Demo 1',
+            titleEn: 'Demo 1 EN',
+            caption: 'Mô tả',
+            captionEn: 'Caption EN',
+            duration: '0:41'
+        }]
+    });
+});
+
+test('sanitizeSections loại URL video/poster có scheme không an toàn', () => {
+    const out = sanitizeSections([
+        {
+            kind: 'videos',
+            title: 'Videos',
+            videos: [
+                { url: 'javascript:alert(1)', title: 'XSS' },
+                { url: 'data:text/html,<script>alert(1)</script>', title: 'Data URI' },
+                { url: '//evil.test/x.mp4', title: 'Protocol relative' },
+                { url: 'https://cdn.test/safe.mp4', poster: 'javascript:alert(1)', title: 'Safe video bad poster' },
+                { url: '/local/demo.mp4', poster: '/local/poster.webp', title: 'Local path' }
+            ]
+        }
+    ], SERVICE_SECTION_KINDS);
+
+    assert.equal(out.length, 1);
+    assert.deepEqual(out[0].videos, [
+        {
+            url: 'https://cdn.test/safe.mp4',
+            fileKey: '',
+            poster: '',
+            title: 'Safe video bad poster',
+            caption: '',
+            duration: ''
+        },
+        {
+            url: '/local/demo.mp4',
+            fileKey: '',
+            poster: '/local/poster.webp',
+            title: 'Local path',
+            caption: '',
+            duration: ''
+        }
+    ]);
 });
 
 // ─── tương tác: like & đánh giá ────────────────────────────────────────────

@@ -721,20 +721,22 @@ const SUPER_ADMIN_EMAIL = 'aduc5525@gmail.com';
 
 /** Extract B2 object key from a CDN or direct B2 URL */
 export function extractB2Key(url) {
-    if (!url) return null;
+    if (!url || typeof url !== 'string') return null;
+    const cleanUrl = url.trim().split(/[?#]/)[0];
     const cdnBase = process.env.CDN_BASE_URL;
-    if (cdnBase && url.startsWith(cdnBase)) {
+    if (cdnBase && cleanUrl.startsWith(cdnBase)) {
         const base = cdnBase.endsWith('/') ? cdnBase : cdnBase + '/';
-        return url.slice(base.length);
+        const key = cleanUrl.slice(base.length);
+        return key || null;
     }
     const bucket = process.env.B2_BUCKET_NAME;
     if (bucket) {
         const pattern = `.backblazeb2.com/file/${bucket}/`;
-        const idx = url.indexOf(pattern);
-        if (idx !== -1) return url.slice(idx + pattern.length);
+        const idx = cleanUrl.indexOf(pattern);
+        if (idx !== -1) return cleanUrl.slice(idx + pattern.length) || null;
         const filePattern = `/file/${bucket}/`;
-        const fileIdx = url.indexOf(filePattern);
-        if (fileIdx !== -1) return url.slice(fileIdx + filePattern.length);
+        const fileIdx = cleanUrl.indexOf(filePattern);
+        if (fileIdx !== -1) return cleanUrl.slice(fileIdx + filePattern.length) || null;
     }
     return null;
 }
@@ -757,6 +759,32 @@ export function extractB2KeysFromHtml(html) {
         const url = raw.replace(/&amp;/gi, '&').replace(/[.,;]+$/, '');
         const key = extractB2Key(url);
         if (key) keys.add(key);
+    }
+    return [...keys];
+}
+
+/**
+ * Trích mọi key B2 từ mảng `sections` (video xem trước, poster trên B2, hoặc URL B2 nhúng trong richText).
+ */
+export function extractSectionB2Keys(sections) {
+    if (!Array.isArray(sections)) return [];
+    const keys = new Set();
+    for (const section of sections) {
+        if (!section || typeof section !== 'object') continue;
+        if (Array.isArray(section.videos)) {
+            for (const video of section.videos) {
+                if (!video || typeof video !== 'object') continue;
+                const fileKey = typeof video.fileKey === 'string' ? video.fileKey.trim() : '';
+                if (fileKey) keys.add(fileKey);
+                const videoKey = extractB2Key(video.url);
+                if (videoKey) keys.add(videoKey);
+                const posterKey = extractB2Key(video.poster);
+                if (posterKey) keys.add(posterKey);
+            }
+        }
+        for (const html of [section.html, section.htmlEn]) {
+            for (const key of extractB2KeysFromHtml(html)) keys.add(key);
+        }
     }
     return [...keys];
 }
@@ -874,8 +902,8 @@ export async function collectReferencedKeys() {
             }
         }
 
-        // Event library attachments (tài liệu đính kèm case study / template)
-        const libraryItems = await EventLibraryItem.find({}, 'attachments owner')
+        // Event library attachments & section media (tài liệu đính kèm và video B2)
+        const libraryItems = await EventLibraryItem.find({}, 'attachments sections owner')
             .populate('owner', 'name')
             .lean();
         for (const item of libraryItems) {
@@ -891,14 +919,34 @@ export async function collectReferencedKeys() {
                     });
                 }
             }
+            for (const key of extractSectionB2Keys(item.sections)) {
+                usedKeys.add(key);
+                if (!docKeyMap.has(key)) {
+                    docKeyMap.set(key, {
+                        uploader: item.owner?.name || 'Unknown',
+                        uploadedAt: null,
+                        source: 'event-library'
+                    });
+                }
+            }
         }
 
-        // Service article attachments (for example a SketchUp source file)
-        const articles = await Article.find({}, 'attachments title.vi').lean();
+        // Service article attachments & section media (file .skp/.ledstudio và video xem trước trên B2)
+        const articles = await Article.find({}, 'attachments sections title.vi').lean();
         for (const article of articles) {
             for (const att of (article.attachments || [])) {
                 const key = att.fileKey || extractB2Key(att.url);
                 if (!key) continue;
+                usedKeys.add(key);
+                if (!docKeyMap.has(key)) {
+                    docKeyMap.set(key, {
+                        uploader: article.title?.vi || 'Service article',
+                        uploadedAt: null,
+                        source: 'service-article'
+                    });
+                }
+            }
+            for (const key of extractSectionB2Keys(article.sections)) {
                 usedKeys.add(key);
                 if (!docKeyMap.has(key)) {
                     docKeyMap.set(key, {

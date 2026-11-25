@@ -18,7 +18,7 @@ import mongoose from 'mongoose';
  * `En` là bản tiếng Anh tùy chọn, giữ tương thích với dữ liệu thư viện cũ.
  */
 export const SECTION_KINDS = [
-    'richText', 'keyValue', 'metrics', 'bulletGroups', 'steps', 'quote', 'gallery', 'linkedItems'
+    'richText', 'keyValue', 'metrics', 'bulletGroups', 'steps', 'quote', 'gallery', 'videos', 'linkedItems'
 ];
 
 export const sectionSchema = new mongoose.Schema({
@@ -105,6 +105,21 @@ export const sectionSchema = new mongoose.Schema({
 
     // kind: gallery — URL ảnh (Cloudinary)
     images: [{ type: String }],
+
+    // kind: videos — video xem trước phát trực tiếp (MP4/WebM trên B2)
+    videos: {
+        type: [new mongoose.Schema({
+            url: { type: String, default: '' },
+            fileKey: { type: String, default: '' },
+            poster: { type: String, default: '' },
+            title: { type: String, default: '' },
+            titleEn: { type: String, default: '' },
+            caption: { type: String, default: '' },
+            captionEn: { type: String, default: '' },
+            duration: { type: String, default: '' }
+        }, { _id: false })],
+        default: []
+    },
 
     // kind: linkedItems — trỏ sang mục khác trong thư viện theo slug
     links: {

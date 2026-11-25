@@ -1,8 +1,8 @@
 /**
  * Làm sạch mảng khối thân bài (`sections`) gửi lên từ trình đăng.
  *
- * Dùng chung cho `/api/event-library` (đủ 8 kind) và `/api/articles` với bài
- * dịch vụ (chỉ 4 kind giới thiệu) — xem `SERVICE_SECTION_KINDS`.
+ * Dùng chung cho `/api/event-library` (đủ 9 kind) và `/api/articles` với bài
+ * dịch vụ (chỉ 5 kind giới thiệu) — xem `SERVICE_SECTION_KINDS`.
  */
 
 // Số khối tối đa mỗi mục và số phần tử tối đa trong một khối — chặn payload
@@ -10,8 +10,8 @@
 export const MAX_SECTIONS = 30;
 export const MAX_ROWS = 50;
 
-/** Tập kind rút gọn cho bài dịch vụ: chỉ vài khối giới thiệu. */
-export const SERVICE_SECTION_KINDS = ['richText', 'bulletGroups', 'steps', 'gallery'];
+/** Tập kind rút gọn cho bài dịch vụ: các khối giới thiệu, ảnh và video xem trước. */
+export const SERVICE_SECTION_KINDS = ['richText', 'bulletGroups', 'steps', 'gallery', 'videos'];
 
 function asArray(value) {
     return Array.isArray(value) ? value.slice(0, MAX_ROWS) : [];
@@ -19,6 +19,14 @@ function asArray(value) {
 
 function str(value) {
     return typeof value === 'string' ? value : (value == null ? '' : String(value));
+}
+
+function safeMediaUrl(value) {
+    const trimmed = str(value).trim();
+    if (!trimmed) return '';
+    if (/^https?:\/\//i.test(trimmed)) return trimmed;
+    if (trimmed.startsWith('/') && !trimmed.startsWith('//')) return trimmed;
+    return '';
 }
 
 /** Chỉ giữ lại field thuộc về `kind` của khối; bỏ mọi thứ khác. */
@@ -48,6 +56,25 @@ const SECTION_FIELDS = {
     }),
     quote: (s) => ({ quote: str(s.quote), quoteBy: str(s.quoteBy), ...(s.quoteEn ? { quoteEn: str(s.quoteEn) } : {}), ...(s.quoteByEn ? { quoteByEn: str(s.quoteByEn) } : {}) }),
     gallery: (s) => ({ images: asArray(s.images).map(str).filter(Boolean) }),
+    videos: (s) => ({
+        videos: asArray(s.videos)
+            .map(v => {
+                if (!v || typeof v !== 'object') return null;
+                const url = safeMediaUrl(v.url);
+                if (!url) return null;
+                return {
+                    url,
+                    fileKey: str(v.fileKey).trim(),
+                    poster: safeMediaUrl(v.poster),
+                    title: str(v.title).trim(),
+                    ...(str(v.titleEn).trim() ? { titleEn: str(v.titleEn).trim() } : {}),
+                    caption: str(v.caption).trim(),
+                    ...(str(v.captionEn).trim() ? { captionEn: str(v.captionEn).trim() } : {}),
+                    duration: str(v.duration).trim()
+                };
+            })
+            .filter(Boolean)
+    }),
     linkedItems: (s) => ({
         links: asArray(s.links).map(l => ({ slug: str(l.slug), label: str(l.label) })),
         ...(Array.isArray(s.linksEn) && s.linksEn.length ? { linksEn: asArray(s.linksEn).map(l => ({ slug: str(l.slug), label: str(l.label) })) } : {})
@@ -59,7 +86,7 @@ const SECTION_FIELDS = {
  * truyền vào), cắt field không thuộc kind đó, và giới hạn kích thước.
  *
  * @param {unknown} sections
- * @param {string[]|null} allowedKinds  null = cho phép cả 8 kind.
+ * @param {string[]|null} allowedKinds  null = cho phép cả 9 kind.
  */
 export function sanitizeSections(sections, allowedKinds = null) {
     const allowed = Array.isArray(allowedKinds) ? new Set(allowedKinds) : null;
