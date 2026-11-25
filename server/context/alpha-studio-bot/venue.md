@@ -41,13 +41,6 @@ Alpha Studio không chỉ cung cấp nền tảng tự động hóa mà còn tr�
 
 ---
 
-### 🧠 Thư Viện Kỹ Năng AI (/studio/ai-skills)
-- **Mục đích**: Kho tổng hợp các kỹ năng, kịch bản mẫu và AI Agent Skills giúp người dùng tối ưu hóa trợ lý AI, thiết lập các tác tử tự động hóa công việc và hỗ trợ lập trình thông minh.
-- **Nội dung**: Hướng dẫn chi tiết từng bước, mẫu câu lệnh và cách kích hoạt nhanh chóng.
-- **Đường dẫn**: `/studio/ai-skills` (đường dẫn cũ `/studio/skills` tự động chuyển tiếp về đây).
-
----
-
 ### 🌐 VietYaku — Dịch Thuật Chuyên Sâu Nhật/Trung → Việt (/studio/vietyaku)
 - **Mục đích**: Công cụ dịch thuật chuyên sâu từ tiếng Nhật và tiếng Trung sang tiếng Việt mượt mà, chuẩn văn phong và chuẩn ngữ cảnh văn bản/truyện tranh.
 - **Tính năng nổi bật**:

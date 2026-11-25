@@ -36,7 +36,7 @@ export function buildSitemapXml({ courses = [], articles = [], eventItems = [] }
         ['/about', { priority: '0.7' }], ['/services', { priority: '0.7' }],
         ['/contact', { priority: '0.7' }],
         ['/news', { priority: '0.7' }], ['/studio', { priority: '0.8' }],
-        ['/studio/ai-skills', { priority: '0.8' }], ['/studio/event-library', { priority: '0.8' }],
+        ['/studio/event-library', { priority: '0.8' }],
         ['/studio/led-studio', { changefreq: 'weekly', priority: '0.8' }],
         ['/studio/vietyaku', { priority: '0.7' }], ['/studio/crm', { priority: '0.7' }],
         ['/studio/vocab', { priority: '0.7' }],

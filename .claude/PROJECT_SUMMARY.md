@@ -1,6 +1,6 @@
 # PROJECT SUMMARY — Alpha Studio Backend
 
-**Last Updated:** 2026-11-25 · **Session:** 33 · **Setup baseline:** 2026-11-22 · **applied:** 2026-11-22 · **mode:** upgrade
+**Last Updated:** 2026-11-25 · **Session:** 34 · **Setup baseline:** 2026-11-22 · **applied:** 2026-11-22 · **mode:** upgrade
 
 > Trạng thái hiện tại, không phải changelog (`archive/PROJECT_SUMMARY_v1.md` hết hiệu lực). **Chỉ cập nhật file này khi trạng thái đổi:** `Last Updated` + `Session`, Trạng thái (`⏳/🚧/✅`), Giả định/Cấu trúc/Phụ thuộc, xoá TODO xong (không giữ `[x]`), sửa drift theo code. **Giữ gọn:** `Ghi chú` ≤ ~120 ký tự (*cái gì* + symbol chính; quy ước/bẫy/schema theo `AGENTS.md`). Vượt ~6KB ⇒ dọn trước khi thêm.
 
@@ -18,14 +18,14 @@
 | CMS (Course/Job/Partner/Prompt), tin & dịch vụ | ✅ | `server/routes/{articles,serviceCategories}.js`, `server/utils/articleViews.js` | `vi` bắt buộc (`en` tùy chọn); `contentSections` 9 kind (gồm `videos` xem trước MP4/WebM); `/services` (Flower Street, HOME, Nhà anh Thái, Lào Cai, image-to-3D, Video-to-3D LED) |
 | Bình luận, xem & tải | ✅ | `server/routes/{comments,toolDownloads}.js`, `server/utils/viewCooldown.js` | `Comment` `article`; `viewCooldown` 6h giữ `updatedAt`; tải published `$inc`, `getAttachmentDownloadFilename`, `versions` `.`→`_`, `serviceDownloads`, ẩn `downloadCount` |
 | VietYaku release | ✅ | `server/routes/vietyaku.js` | Suy link APK GitHub theo tag khi B2 chỉ có ZIP |
-| Workflow, event, skills | ✅ | `server/routes/{workflow,eventLibrary,skills}.js` | Phân quyền 2 tầng project/doc; escape regex `searchUsers` |
+| Workflow & event library | ✅ | `server/routes/{workflow,eventLibrary}.js` | Phân quyền 2 tầng project/doc; escape regex `searchUsers` (AI Skills Library đã gỡ) |
 | Cloud Desktop + agents | ✅ | `server/routes/cloud.js`, `server/models/{HostMachine,CloudSession}.js` | Contract chéo host/flow qua `x-agent-secret` |
 | CRM & đóng gói | ✅ | `server/routes/crm.js`, `server/utils/crmRelease.js`, `scripts/release-to-b2.js` | `resolveCrmLatestRelease` đọc B2 `version.json?t=` trước `SystemSetting`; `crmCatalog`/`crmQuota`; ZIP chặn `.data`/`.env` |
 | AI pricing & models | ✅ | `server/utils/{aiPricing,aiProvider,lumiCatalog}.js` | `gemini-3.1-flash-lite` (13/51 Cr), `gemini-3.8-flash` (38/318 Cr), trial 100 Cr, BYOK 0 Cr (`ai`, `interior`, `ledStudio`) |
 | B2 orphan & retention | ✅ | `server/routes/admin.js`, `server/{retention,migrations}/` | `collectReferencedKeys` + `extractSectionB2Keys`: Article (`attachments` + `sections`), `APP_RELEASE_PREFIXES`, `LedStudioPreset` |
-| XML sitemap | ✅ | `server/routes/sitemap.js` | Public/indexable (gồm `/contact`, `/studio/led-studio`, bỏ `/studio/ai-skills/:slug`) |
+| XML sitemap | ✅ | `server/routes/sitemap.js` | Public/indexable (gồm `/contact`, `/studio/led-studio`; `/studio/ai-skills` đã gỡ) |
 | LumiStage Cloud/PRO | ✅ | `server/routes/ledStudio.js`, `server/utils/lumiProExporters.js`, `scripts/publish-stagepack.mjs` | Vé HMAC, PRO, Share, `stage_pack` B2 (`?parts=core,audio,video`, `PRO_REQUIRED`, `--dry-run`) |
-| Automated tests | ✅ | `test/`, `server/` | 312 pass đủ deps; `npm run check` OK |
+| Automated tests | ✅ | `test/`, `server/` | 297 pass đủ deps; `npm run check` OK |
 
 ## 3. Giả định đang giữ
 
