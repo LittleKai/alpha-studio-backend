@@ -43,12 +43,15 @@ import aiRoutes from './routes/ai.js';
 import interiorRoutes from './routes/interior.js';
 import eventLibraryRoutes from './routes/eventLibrary.js';
 import ledStudioRoutes from './routes/ledStudio.js';
+import ledStudioWorkspaceRoutes from './routes/ledStudioWorkspace.js';
+import ledStudioWorkspaceAdminRoutes from './routes/ledStudioWorkspaceAdmin.js';
 import crmRoutes from './routes/crm.js';
 import channelWebhookRoutes from './routes/channelWebhooks.js';
 import webchatPublicRoutes from './routes/webchatPublic.js';
 import toolDownloadRoutes from './routes/toolDownloads.js';
 import analyticsRoutes from './routes/analytics.js';
-import { configureBucketCors } from './utils/b2Storage.js';
+import { configureBucketCors, configureLedWorkspaceBucketCors } from './utils/b2Storage.js';
+import { cleanupWorkspaceTempDir } from './utils/ledWorkspacePolicy.js';
 import { seedInteriorTemplateAssets } from './utils/interiorTemplateAssets.js';
 import { runSubscriptionMaintenance } from './jobs/crmSubscriptionJobs.js';
 import cron from 'node-cron';
@@ -139,6 +142,8 @@ app.use('/api/interior', interiorRoutes);
 app.use('/api/crm', crmRoutes);
 app.use('/api/crm', channelWebhookRoutes);
 app.use('/api/event-library', eventLibraryRoutes);
+app.use('/api/led-studio/workspace', ledStudioWorkspaceRoutes);
+app.use('/api/admin/led-studio-workspace-assets', ledStudioWorkspaceAdminRoutes);
 app.use('/api/led-studio', ledStudioRoutes);
 app.use('/api/tools', toolDownloadRoutes);
 app.use('/api/analytics', analyticsRoutes);
@@ -374,7 +379,9 @@ async function runStartupSideEffects({ seed }) {
     } catch (error) {
         console.warn('[articleViews:backfill] startup backfill failed:', error.message);
     }
+    cleanupWorkspaceTempDir();
     await configureBucketCors();
+    await configureLedWorkspaceBucketCors();
 }
 
 export async function startServer() {

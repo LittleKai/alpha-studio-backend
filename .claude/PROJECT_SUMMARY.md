@@ -1,6 +1,6 @@
 # PROJECT SUMMARY — Alpha Studio Backend
 
-**Last Updated:** 2026-11-25 · **Session:** 34 · **Setup baseline:** 2026-11-22 · **applied:** 2026-11-22 · **mode:** upgrade
+**Last Updated:** 2026-11-28 · **Session:** 35 · **Setup baseline:** 2026-11-22 · **applied:** 2026-11-22 · **mode:** upgrade
 
 > Trạng thái hiện tại, không phải changelog (`archive/PROJECT_SUMMARY_v1.md` hết hiệu lực). **Chỉ cập nhật file này khi trạng thái đổi:** `Last Updated` + `Session`, Trạng thái (`⏳/🚧/✅`), Giả định/Cấu trúc/Phụ thuộc, xoá TODO xong (không giữ `[x]`), sửa drift theo code. **Giữ gọn:** `Ghi chú` ≤ ~120 ký tự (*cái gì* + symbol chính; quy ước/bẫy/schema theo `AGENTS.md`). Vượt ~6KB ⇒ dọn trước khi thêm.
 
@@ -24,8 +24,8 @@
 | AI pricing & models | ✅ | `server/utils/{aiPricing,aiProvider,lumiCatalog}.js` | `gemini-3.1-flash-lite` (13/51 Cr), `gemini-3.8-flash` (38/318 Cr), trial 100 Cr, BYOK 0 Cr (`ai`, `interior`, `ledStudio`) |
 | B2 orphan & retention | ✅ | `server/routes/admin.js`, `server/{retention,migrations}/` | `collectReferencedKeys` + `extractSectionB2Keys`: Article (`attachments` + `sections`), `APP_RELEASE_PREFIXES`, `LedStudioPreset` |
 | XML sitemap | ✅ | `server/routes/sitemap.js` | Public/indexable (gồm `/contact`, `/studio/led-studio`; `/studio/ai-skills` đã gỡ) |
-| LumiStage Cloud/PRO | ✅ | `server/routes/ledStudio.js`, `server/utils/lumiProExporters.js`, `scripts/publish-stagepack.mjs` | Vé HMAC, PRO, Share, `stage_pack` B2 (`?parts=core,audio,video`, `PRO_REQUIRED`, `--dry-run`) |
-| Automated tests | ✅ | `test/`, `server/` | 297 pass đủ deps; `npm run check` OK |
+| LumiStage Cloud/PRO | ✅ | `server/routes/ledStudio.js`, `server/routes/ledStudioWorkspace{,Admin}.js`, `server/utils/{lumiProExporters,ledWorkspacePolicy}.js`, `scripts/publish-stagepack.mjs` | Vé HMAC, PRO, Share, `stage_pack` B2, Workspace Autosave (`5/10` slot, `1 GiB` B2 private, admin version purge) |
+| Automated tests | ✅ | `test/`, `server/` | 307 pass đủ deps; `npm run check` OK |
 
 ## 3. Giả định đang giữ
 

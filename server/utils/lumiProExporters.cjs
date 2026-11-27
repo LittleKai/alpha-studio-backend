@@ -408,6 +408,11 @@
   }
 
   function computePhotometricFootprint(input = {}) {
+    const coreFn = [root?.STUDIO?.computePhotometricFootprint, root?.computePhotometricFootprint]
+      .find((fn) => typeof fn === 'function' && fn._isCorePhoto22);
+    if (coreFn) {
+      return coreFn(input);
+    }
     const lights = Array.isArray(input.lights) ? input.lights : [];
     const ledScreenNits = Math.max(100, +(input.ledScreenNits || 1200));
     const cones = lights.map((l, idx) => {
@@ -1013,60 +1018,86 @@
     return out;
   }
 
-  function buildStoreZipArchive18(fileName, contentBytes) {
-    const nameBytes = encodeUtf8Bytes18(fileName);
-    const crc = crc32Bytes18(contentBytes);
-    const size = contentBytes.length;
-    const localHeaderLen = 30 + nameBytes.length;
-    const centralHeaderLen = 46 + nameBytes.length;
+  function buildStoreZipEntries18(entries = []) {
+    const cleanEntries = (Array.isArray(entries) ? entries : [])
+      .filter((e) => e && e.name && e.bytes)
+      .map((e) => {
+        const nameBytes = encodeUtf8Bytes18(e.name);
+        const contentBytes = e.bytes instanceof Uint8Array ? e.bytes : new Uint8Array(e.bytes);
+        return {
+          nameBytes,
+          contentBytes,
+          crc: crc32Bytes18(contentBytes),
+          size: contentBytes.length,
+          localOffset: 0
+        };
+      });
+
+    let localTotal = 0;
+    let cdTotal = 0;
+    for (const item of cleanEntries) {
+      item.localOffset = localTotal;
+      localTotal += 30 + item.nameBytes.length + item.size;
+      cdTotal += 46 + item.nameBytes.length;
+    }
     const endRecordLen = 22;
-    const out = new Uint8Array(localHeaderLen + size + centralHeaderLen + endRecordLen);
+    const out = new Uint8Array(localTotal + cdTotal + endRecordLen);
     const dv = new DataView(out.buffer);
 
-    dv.setUint32(0, 0x04034b50, true);
-    dv.setUint16(4, 20, true);
-    dv.setUint16(6, 0, true);
-    dv.setUint16(8, 0, true);
-    dv.setUint16(10, 0, true);
-    dv.setUint16(12, 0, true);
-    dv.setUint32(14, crc, true);
-    dv.setUint32(18, size, true);
-    dv.setUint32(22, size, true);
-    dv.setUint16(26, nameBytes.length, true);
-    dv.setUint16(28, 0, true);
-    out.set(nameBytes, 30);
-    out.set(contentBytes, localHeaderLen);
+    for (const item of cleanEntries) {
+      const off = item.localOffset;
+      dv.setUint32(off + 0, 0x04034b50, true);
+      dv.setUint16(off + 4, 20, true);
+      dv.setUint16(off + 6, 0, true);
+      dv.setUint16(off + 8, 0, true);
+      dv.setUint16(off + 10, 0, true);
+      dv.setUint16(off + 12, 0, true);
+      dv.setUint32(off + 14, item.crc, true);
+      dv.setUint32(off + 18, item.size, true);
+      dv.setUint32(off + 22, item.size, true);
+      dv.setUint16(off + 26, item.nameBytes.length, true);
+      dv.setUint16(off + 28, 0, true);
+      out.set(item.nameBytes, off + 30);
+      out.set(item.contentBytes, off + 30 + item.nameBytes.length);
+    }
 
-    const cdOffset = localHeaderLen + size;
-    dv.setUint32(cdOffset + 0, 0x02014b50, true);
-    dv.setUint16(cdOffset + 4, 20, true);
-    dv.setUint16(cdOffset + 6, 20, true);
-    dv.setUint16(cdOffset + 8, 0, true);
-    dv.setUint16(cdOffset + 10, 0, true);
-    dv.setUint16(cdOffset + 12, 0, true);
-    dv.setUint16(cdOffset + 14, 0, true);
-    dv.setUint32(cdOffset + 16, crc, true);
-    dv.setUint32(cdOffset + 20, size, true);
-    dv.setUint32(cdOffset + 24, size, true);
-    dv.setUint16(cdOffset + 28, nameBytes.length, true);
-    dv.setUint16(cdOffset + 30, 0, true);
-    dv.setUint16(cdOffset + 32, 0, true);
-    dv.setUint16(cdOffset + 34, 0, true);
-    dv.setUint16(cdOffset + 36, 0, true);
-    dv.setUint32(cdOffset + 38, 0, true);
-    dv.setUint32(cdOffset + 42, 0, true);
-    out.set(nameBytes, cdOffset + 46);
+    let cdCursor = localTotal;
+    for (const item of cleanEntries) {
+      dv.setUint32(cdCursor + 0, 0x02014b50, true);
+      dv.setUint16(cdCursor + 4, 20, true);
+      dv.setUint16(cdCursor + 6, 20, true);
+      dv.setUint16(cdCursor + 8, 0, true);
+      dv.setUint16(cdCursor + 10, 0, true);
+      dv.setUint16(cdCursor + 12, 0, true);
+      dv.setUint16(cdCursor + 14, 0, true);
+      dv.setUint32(cdCursor + 16, item.crc, true);
+      dv.setUint32(cdCursor + 20, item.size, true);
+      dv.setUint32(cdCursor + 24, item.size, true);
+      dv.setUint16(cdCursor + 28, item.nameBytes.length, true);
+      dv.setUint16(cdCursor + 30, 0, true);
+      dv.setUint16(cdCursor + 32, 0, true);
+      dv.setUint16(cdCursor + 34, 0, true);
+      dv.setUint16(cdCursor + 36, 0, true);
+      dv.setUint32(cdCursor + 38, 0, true);
+      dv.setUint32(cdCursor + 42, item.localOffset, true);
+      out.set(item.nameBytes, cdCursor + 46);
+      cdCursor += 46 + item.nameBytes.length;
+    }
 
-    const eocdOffset = cdOffset + centralHeaderLen;
+    const eocdOffset = localTotal + cdTotal;
     dv.setUint32(eocdOffset + 0, 0x06054b50, true);
     dv.setUint16(eocdOffset + 4, 0, true);
     dv.setUint16(eocdOffset + 6, 0, true);
-    dv.setUint16(eocdOffset + 8, 1, true);
-    dv.setUint16(eocdOffset + 10, 1, true);
-    dv.setUint32(eocdOffset + 12, centralHeaderLen, true);
-    dv.setUint32(eocdOffset + 16, cdOffset, true);
+    dv.setUint16(eocdOffset + 8, cleanEntries.length, true);
+    dv.setUint16(eocdOffset + 10, cleanEntries.length, true);
+    dv.setUint32(eocdOffset + 12, cdTotal, true);
+    dv.setUint32(eocdOffset + 16, localTotal, true);
     dv.setUint16(eocdOffset + 20, 0, true);
     return out;
+  }
+
+  function buildStoreZipArchive18(fileName, contentBytes) {
+    return buildStoreZipEntries18([{ name: fileName, bytes: contentBytes }]);
   }
 
   function resolveDmxChannels18(l) {
@@ -1078,30 +1109,113 @@
     return Math.max(1, Math.min(512, Math.round(raw)));
   }
 
+  // Basis change C = [[1,0,0],[0,0,1],[0,-1,0]] mapping Y-up (x,y,z) -> Z-up (x,-z,y)
+  // Computes R_zup = C^T * R_yup * C so rotated lights & screens share exact right-handed MVR 1.6 orientation
+  function basisMatrixMvrFromYup(rotDeg = [0, 0, 0], posM = [0, 0, 0]) {
+    const rx = ((Number(rotDeg?.[0]) || 0) * Math.PI) / 180;
+    const ry = ((Number(rotDeg?.[1]) || 0) * Math.PI) / 180;
+    const rz = ((Number(rotDeg?.[2]) || 0) * Math.PI) / 180;
+    const cx = Math.cos(rx), sx = Math.sin(rx);
+    const cy = Math.cos(ry), sy = Math.sin(ry);
+    const cz = Math.cos(rz), sz = Math.sin(rz);
+    // R_yup = Rz * Ry * Rx (3x3 row-major)
+    const r00 = cz * cy;
+    const r01 = cz * sy * sx - sz * cx;
+    const r02 = cz * sy * cx + sz * sx;
+    const r10 = sz * cy;
+    const r11 = sz * sy * sx + cz * cx;
+    const r12 = sz * sy * cx - cz * sx;
+    const r20 = -sy;
+    const r21 = cy * sx;
+    const r22 = cy * cx;
+
+    // Conjugation C^T * R_yup * C where C maps Z-up columns (X, -Z_y, Y_y) -> Y-up
+    // col 0 = [1,0,0], col 1 = [0,0,-1], col 2 = [0,1,0]; rows of C^T swap & negate rows 1,2
+    const m00 = r00,  m01 = -r02,  m02 = r01;
+    const m10 = -r20, m11 = r22,   m12 = -r21;
+    const m20 = r10,  m21 = -r12,  m22 = r11;
+
+    const f = (n) => {
+      const v = Math.abs(n) < 1e-6 ? 0 : +n.toFixed(6);
+      return Number.isFinite(v) ? v : 0;
+    };
+    const tx = Math.round((Number(posM?.[0]) || 0) * 1000);
+    const ty = Math.round(-(Number(posM?.[2]) || 0) * 1000);
+    const tz = Math.round((Number(posM?.[1]) || 0) * 1000);
+    // MVR 4x3 format writes basis columns u, v, w then translation t
+    return `{${f(m00)},${f(m10)},${f(m20)}}{${f(m01)},${f(m11)},${f(m21)}}{${f(m02)},${f(m12)},${f(m22)}}{${tx},${ty},${tz}}`;
+  }
+
+  function resolveLightEulerYup18(l) {
+    if (Array.isArray(l?.rotDeg) && l.rotDeg.length === 3) return l.rotDeg;
+    if (Number.isFinite(+l?.rx) || Number.isFinite(+l?.ry) || Number.isFinite(+l?.rz)) {
+      return [+l.rx || 0, +l.ry || 0, +l.rz || 0];
+    }
+    if (Array.isArray(l?.pos) && Array.isArray(l?.target)) {
+      const dx = (Number(l.target[0]) || 0) - (Number(l.pos[0]) || 0);
+      const dy = (Number(l.target[1]) || 0) - (Number(l.pos[1]) || 0);
+      const dz = (Number(l.target[2]) || 0) - (Number(l.pos[2]) || 0);
+      if (Math.hypot(dx, dy, dz) > 1e-4) {
+        const horiz = Math.max(1e-6, Math.hypot(dx, dz));
+        const yawDeg = (Math.atan2(-dx, -dz) * 180) / Math.PI;
+        const pitchDeg = (Math.atan2(dy, horiz) * 180) / Math.PI;
+        return [pitchDeg, yawDeg, 0];
+      }
+    }
+    return [0, 0, 0];
+  }
+
   function exportLightingMvr18(opts = {}) {
     const eng = opts?.eng || root?.STUDIO?.engine || root?.engine || null;
     const rawLights = Array.isArray(opts?.lights) ? opts.lights : (Array.isArray(eng?.lights) ? eng.lights : []);
     const rawSurfaces = Array.isArray(opts?.surfaces) ? opts.surfaces : (Array.isArray(eng?.surfaces) ? eng.surfaces : []);
     const lights = rawLights.filter((l) => l && !l._deleted8);
     const surfaces = rawSurfaces.filter((s) => s && !s._deleted8);
+    const store = root?.STUDIO?.profileIR22?.GDTFStore22 || root?.profileIR22?.GDTFStore22 || null;
 
+    const gdtfEntries = new Map();
+    const gdtfFileByProfileKey = new Map();
+    const warnings = [];
     const fixtureXml = lights
       .map((l, idx) => {
-        const xMm = Math.round((Number(l.pos?.[0] ?? l.x) || 0) * 1000);
-        const yMm = Math.round(-(Number(l.pos?.[2] ?? l.z) || 0) * 1000);
-        const zMm = Math.round((Number(l.pos?.[1] ?? l.y) || 0) * 1000);
-        const uni = Number(l.dmxUniverse ?? l.universe) || (Math.floor(idx / 32) + 1);
-        const addr = Number(l.dmxAddress ?? l.address) || ((idx % 32) * 16 + 1);
+        const posM = [Number(l.pos?.[0] ?? l.x) || 0, Number(l.pos?.[1] ?? l.y) || 0, Number(l.pos?.[2] ?? l.z) || 0];
+        const matrixStr = basisMatrixMvrFromYup(resolveLightEulerYup18(l), posM);
+        const rawUni = Number(l.dmxUniverse ?? l.universe);
+        const rawAddr = Number(l.dmxAddress ?? l.address);
+        const uni = Number.isFinite(rawUni) && rawUni > 0 ? Math.max(1, Math.round(rawUni)) : (Math.floor(idx / 32) + 1);
+        const addr = Number.isFinite(rawAddr) && rawAddr > 0 ? Math.max(1, Math.min(512, Math.round(rawAddr))) : ((idx % 32) * 16 + 1);
         const chCount = resolveDmxChannels18(l);
-        const gdtfName = escapeXml12(l.fixtureModel18 || l.oflModel || l.name || `Fixture_${idx + 1}`);
         const uuid = `00000000-0000-4000-8000-${String(idx + 1).padStart(12, '0')}`;
+
+        const rawGdtf = l.profileKey && store?.getRawBytesSync ? store.getRawBytesSync(l.profileKey) : null;
+        const gdtfBase = String(l.fixtureModel18 || l.oflModel || l.name || `Fixture_${idx + 1}`)
+          .replace(/\.gdtf$/i, '')
+          .replace(/[^A-Za-z0-9._-]+/g, '_');
+        let gdtfSpecLine = '';
+        if (rawGdtf && rawGdtf.byteLength > 0) {
+          let gdtfFile = gdtfFileByProfileKey.get(l.profileKey);
+          if (!gdtfFile) {
+            gdtfFile = `${gdtfBase}.gdtf`;
+            if (gdtfEntries.has(gdtfFile)) {
+              let h = 0x811c9dc5;
+              const pk = String(l.profileKey);
+              for (let hi = 0; hi < pk.length; hi++) { h ^= pk.charCodeAt(hi); h = Math.imul(h, 0x01000193); }
+              gdtfFile = `${gdtfBase}_${(h >>> 0).toString(16).slice(0, 6)}.gdtf`;
+            }
+            gdtfFileByProfileKey.set(l.profileKey, gdtfFile);
+            gdtfEntries.set(gdtfFile, rawGdtf);
+          }
+          gdtfSpecLine = `\n          <GDTFSpec>${escapeXml12(gdtfFile)}</GDTFSpec>`;
+        } else {
+          warnings.push(`Fixture "${l.name || l.id || idx + 1}": omitted missing <GDTFSpec> (no cached .gdtf binary).`);
+        }
+
         return (
           `        <Fixture name="${escapeXml12(l.name || `L${idx + 1}`)}" uuid="${uuid}">\n` +
-          `          <Matrix>{1,0,0}{0,1,0}{0,0,1}{${xMm},${yMm},${zMm}}</Matrix>\n` +
-          `          <GDTFSpec>${gdtfName}.gdtf</GDTFSpec>\n` +
-          `          <GDTFMode>Standard ${chCount}ch</GDTFMode>\n` +
+          `          <Matrix>${matrixStr}</Matrix>${gdtfSpecLine}\n` +
+          `          <GDTFMode>${escapeXml12(l.dmxMode || l.oflModeName || `Standard ${chCount}ch`)}</GDTFMode>\n` +
           `          <Addresses><Address break="0">${(uni - 1) * 512 + addr}</Address></Addresses>\n` +
-          `          <FixtureID>${idx + 1}</FixtureID>\n` +
+          `          <FixtureID>${Math.max(1, Math.round(+(l.fixId || (idx + 1))))}</FixtureID>\n` +
           `          <UnitNumber>${idx + 1}</UnitNumber>\n` +
           `        </Fixture>`
         );
@@ -1111,21 +1225,21 @@
     const videoScreenXml = surfaces
       .map((s, idx) => {
         const pos = s.pos || s.center || s.mesh?.bounds?.center || [0, 0, 0];
-        const xMm = Math.round((Number(pos[0]) || 0) * 1000);
-        const yMm = Math.round(-(Number(pos[2]) || 0) * 1000);
-        const zMm = Math.round((Number(pos[1]) || 0) * 1000);
+        const rot = Array.isArray(s.rotDeg) ? s.rotDeg : [Number(s.pitchDeg) || 0, Number(s.yawDeg ?? s.rotation) || 0, Number(s.rollDeg) || 0];
+        const matrixStr = basisMatrixMvrFromYup(rot, pos);
         const uuid = `00000000-0000-4000-9000-${String(idx + 1).padStart(12, '0')}`;
         return (
           `        <SceneObject name="${escapeXml12(s.name || `LED_${idx + 1}`)}" uuid="${uuid}">\n` +
-          `          <Matrix>{1,0,0}{0,1,0}{0,0,1}{${xMm},${yMm},${zMm}}</Matrix>\n` +
+          `          <Matrix>${matrixStr}</Matrix>\n` +
           `        </SceneObject>`
         );
       })
       .join('\n');
 
+    // DIN SPEC 15801 (MVR 1.6)
     const xml =
       `<?xml version="1.0" encoding="UTF-8"?>\n` +
-      `<GeneralSceneDescription verMajor="1" verMinor="6" provider="Alpha LED Studio" providerVersion="1.8">\n` +
+      `<GeneralSceneDescription verMajor="1" verMinor="6" provider="Alpha LED Studio" providerVersion="22.0">\n` +
       `  <Scene>\n` +
       `    <Layers>\n` +
       `      <Layer name="Alpha_LED_Studio_Rigging_And_Lighting" uuid="00000000-0000-4000-7000-000000000001">\n` +
@@ -1138,18 +1252,26 @@
       `  </Scene>\n` +
       `</GeneralSceneDescription>`;
     const xmlBytes = encodeUtf8Bytes18(xml);
-    const zipBytes = buildStoreZipArchive18('GeneralSceneDescription.xml', xmlBytes);
-    return { xml, bytes: zipBytes, fixtureCount: lights.length, screenCount: surfaces.length };
+    const zipEntries = [{ name: 'GeneralSceneDescription.xml', bytes: xmlBytes }];
+    for (const [name, bytes] of gdtfEntries.entries()) {
+      zipEntries.push({ name, bytes });
+    }
+    const zipBytes = buildStoreZipEntries18(zipEntries);
+    return {
+      xml,
+      bytes: zipBytes,
+      fixtureCount: lights.length,
+      screenCount: surfaces.length,
+      embeddedGdtfCount: gdtfEntries.size,
+      warnings
+    };
   }
 
-  function buildGrandMaFixtureXml(lights = [], opts = {}) {
+  function normalizePatchedLights18(lights) {
     const list = Array.isArray(lights) ? lights.filter((l) => !l?._deleted8) : [];
-    const version = String(opts.version || 'ma3').toLowerCase() === 'ma2' ? 'ma2' : 'ma3';
-    const layerName = escapeXml12(opts.layerName || 'ALPHA_Stage_Rig');
-
     let cursorUni = 1;
     let cursorAddr = 1;
-    const patched = list.map((l, idx) => {
+    const normalized = list.map((l, idx) => {
       const chCount = resolveDmxChannels18(l);
       let reqUni = Math.max(1, Math.round(+(l?.dmxUniverse || l?.universe || cursorUni)));
       let reqAddr = Math.max(1, Math.round(+(l?.dmxAddress || l?.address || cursorAddr)));
@@ -1174,50 +1296,365 @@
 
       const rawPos = Array.isArray(l?.pos) ? l.pos : [l?.x ?? 0, l?.y ?? 0, l?.z ?? 0];
       const posX = (+(l?.x ?? rawPos[0]) || 0).toFixed(3);
-      const posY = (+(l?.z ?? rawPos[2]) || 0).toFixed(3);
+      const posY = (-(+(l?.z ?? rawPos[2]) || 0)).toFixed(3);
       const posZ = (+(l?.y ?? rawPos[1]) || 0).toFixed(3);
-      const rotX = (+(l?.rx ?? 0) || 0).toFixed(1);
-      const rotY = (+(l?.ry ?? 0) || 0).toFixed(1);
-      const rotZ = (+(l?.rz ?? 0) || 0).toFixed(1);
+      const ma3PosY = (+(l?.z ?? rawPos[2]) || 0).toFixed(3);
+      const rotX = (+(l?.rx ?? l?.rotDeg?.[0] ?? 0) || 0).toFixed(1);
+      const rotY = (+(l?.ry ?? l?.rotDeg?.[1] ?? 0) || 0).toFixed(1);
+      const rotZ = (+(l?.rz ?? l?.rotDeg?.[2] ?? 0) || 0).toFixed(1);
       const fixId = Math.max(1, Math.round(+(l?.fixId || (101 + idx))));
       const name = escapeXml12(l?.name || `Fixture_${idx + 1}`);
-      const fixtureType = escapeXml12(l?.oflModel || l?.type || 'Moving Head Beam');
+      const ir = resolveProfileIr18(l);
+      const baseRawFtName = String(ir?.model || l?.oflModel || l?.type || 'Moving Head Beam');
+      const irSig = String(ir?.profileKey || `${ir?.id || baseRawFtName}:${ir?.mode || chCount}:${chCount}`);
       const patchDot = `${reqUni}.${String(reqAddr).padStart(3, '0')}`;
-      return { idx, fixId, name, fixtureType, chCount, reqUni, reqAddr, patchDot, posX, posY, posZ, rotX, rotY, rotZ };
+      const absDmxAddr = (reqUni - 1) * 512 + reqAddr;
+      return { idx, fixId, name, baseRawFtName, irSig, ir, chCount, reqUni, reqAddr, absDmxAddr, patchDot, posX, posY, ma3PosY, posZ, rotX, rotY, rotZ };
     });
+    const sigsByName = new Map();
+    for (const item of normalized) {
+      if (!sigsByName.has(item.baseRawFtName)) sigsByName.set(item.baseRawFtName, new Set());
+      sigsByName.get(item.baseRawFtName).add(item.irSig);
+    }
+    const slugToSig = new Map();
+    const sigToSlug = new Map();
+    return normalized.map((item) => {
+      const needsModeSuffix = (sigsByName.get(item.baseRawFtName)?.size || 0) > 1;
+      const modeTag = String(item.ir?.mode || `${item.chCount}ch`);
+      const rawFtName = needsModeSuffix ? `${item.baseRawFtName} (${modeTag})` : item.baseRawFtName;
+      let fixtureSlug = sigToSlug.get(item.irSig);
+      if (!fixtureSlug) {
+        const baseSlug = slugifyMa2FileName18(`${item.ir?.id || item.baseRawFtName}_${modeTag}`, item.idx);
+        fixtureSlug = baseSlug;
+        let suffix = 2;
+        while (slugToSig.has(fixtureSlug) && slugToSig.get(fixtureSlug) !== item.irSig) {
+          fixtureSlug = `${baseSlug}_${suffix++}`;
+        }
+        sigToSlug.set(item.irSig, fixtureSlug);
+        slugToSig.set(fixtureSlug, item.irSig);
+      }
+      const fixtureType = escapeXml12(rawFtName);
+      return { ...item, rawFtName, fixtureType, fixtureSlug };
+    });
+  }
+
+  function slugifyMa2FileName18(raw, fallbackIdx = 0) {
+    const clean = String(raw || '').trim().toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '');
+    return clean || `fixture_type_${fallbackIdx + 1}`;
+  }
+
+  function resolveProfileIr18(light) {
+    const profMod = root?.STUDIO?.profileIR22 || root?.profileIR22;
+    if (light?.profileKey && profMod?.GDTFStore22?.getSync) {
+      const cached = profMod.GDTFStore22.getSync(light.profileKey);
+      if (cached) return cached;
+    }
+    const oflKey = light?.oflProfileId || light?.oflId || light?.oflModel || light?.model;
+    if (oflKey && typeof root?.resolveOflFixture === 'function' && profMod?.compileOflProfile) {
+      const fx = root.resolveOflFixture(oflKey);
+      if (fx) return profMod.compileOflProfile(fx, light?.oflModeIndex || 0);
+    }
+    if (Array.isArray(light?.dmxChannels) && light.dmxChannels.length > 0) {
+      return {
+        id: light.oflProfileId || light.model || 'custom',
+        manufacturer: light.oflManufacturer || 'Generic',
+        model: light.oflModel || light.model || light.type || 'Custom Fixture',
+        mode: light.dmxMode || `${resolveDmxChannels18(light)}ch`,
+        footprint: resolveDmxChannels18(light),
+        slots: light.dmxChannels.map((ch, i) => ({
+          offset: ch.offset || i + 1,
+          fineOffset: ch.fineOffset || null,
+          name: ch.name || `Ch${i + 1}`,
+          role: ch.role || 'other',
+          defaultDmx: ch.defaultDmx ?? ch.defaultValue ?? 0,
+          highlightDmx: ch.highlightDmx ?? 255,
+          capabilities: Array.isArray(ch.capabilities) ? ch.capabilities : []
+        })),
+        cells: [],
+        physical: { beamAngleMin: light.beamAngleDeg || 12, lumens: light.luminousFluxLm || 10000 }
+      };
+    }
+    if (profMod?.buildPlaceholderProfile) {
+      return profMod.buildPlaceholderProfile(light?.oflModel || light?.type || 'Generic Fixture', resolveDmxChannels18(light));
+    }
+    return null;
+  }
+
+  const MA2_ROLE_META_18 = Object.assign(Object.create(null), {
+    dimmer: ['DIM', 'DIMMER', 'DIMMER'],
+    pan: ['PAN', 'POSITION', 'POSITION'],
+    tilt: ['TILT', 'POSITION', 'POSITION'],
+    shutter: ['SHUTTER', 'SHUTTER', 'BEAM'],
+    red: ['COLORRGB1', 'COLORRGB', 'COLOR'],
+    green: ['COLORRGB2', 'COLORRGB', 'COLOR'],
+    blue: ['COLORRGB3', 'COLORRGB', 'COLOR'],
+    white: ['COLORRGB4', 'COLORRGB', 'COLOR'],
+    amber: ['COLORRGB5', 'COLORRGB', 'COLOR'],
+    uv: ['COLORRGB6', 'COLORRGB', 'COLOR'],
+    cyan: ['COLORRGB_C', 'COLORRGB', 'COLOR'],
+    magenta: ['COLORRGB_M', 'COLORRGB', 'COLOR'],
+    yellow: ['COLORRGB_Y', 'COLORRGB', 'COLOR'],
+    colorWheel: ['COLOR1', 'COLOR1', 'COLOR'],
+    gobo: ['GOBO1', 'GOBO1', 'GOBO'],
+    goboRot: ['GOBO1_POS', 'GOBO1', 'GOBO'],
+    prism: ['PRISMA1', 'BEAM', 'BEAM'],
+    prismRot: ['PRISMA1_POS', 'BEAM', 'BEAM'],
+    zoom: ['ZOOM', 'FOCUS', 'FOCUS'],
+    focus: ['FOCUS', 'FOCUS', 'FOCUS'],
+    frost: ['FROST', 'BEAM', 'BEAM'],
+    iris: ['IRIS', 'BEAM', 'BEAM'],
+    speed: ['SPEED', 'CONTROL', 'CONTROL'],
+    cto: ['CTO', 'COLORRGB', 'COLOR'],
+    effect: ['EFFECT', 'CONTROL', 'CONTROL'],
+    dummy: ['DUMMY', 'CONTROL', 'CONTROL'],
+    control: ['CONTROL', 'CONTROL', 'CONTROL']
+  });
+
+  function hexToMa2RgbAttr18(hex) {
+    const m = /^#?([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i.exec(String(hex || '').trim());
+    if (!m) return '';
+    return `${(parseInt(m[1], 16) / 255).toFixed(3)} ${(parseInt(m[2], 16) / 255).toFixed(3)} ${(parseInt(m[3], 16) / 255).toFixed(3)}`;
+  }
+
+  function buildGrandMa2FixtureTypeXml(profileIr, opts = {}) {
+    const ir = profileIr || {};
+    const ftName = escapeXml12(opts.name || ir.model || 'Alpha Moving Light');
+    const shortName = escapeXml12(String(opts.shortName || ir.model || 'AlphaFix').slice(0, 16));
+    const manufacturer = escapeXml12(opts.manufacturer || ir.manufacturer || 'Generic');
+    const modeName = escapeXml12(opts.mode || ir.mode || `${ir.footprint || 16}ch`);
+    const slots = Array.isArray(ir.slots) ? ir.slots : [];
+    const cells = Array.isArray(ir.cells) ? ir.cells : [];
+
+    // Separate main module slots from sub-cell slots so module coarse/fine remain clean
+    const cellOffsetSet = new Set();
+    for (const c of cells) {
+      for (const s of (c?.slots || [])) {
+        if (s?.offset) cellOffsetSet.add(s.offset);
+        if (s?.fineOffset) cellOffsetSet.add(s.fineOffset);
+      }
+    }
+    const mainSlots = slots.filter((s) => s && s.offset >= 1 && !cellOffsetSet.has(s.offset));
+
+    const wheelsXmlEntries = [];
+    let colorWheelSlotMap = new Map();
+    const cwSlot = mainSlots.find((s) => s.role === 'colorWheel' && Array.isArray(s.capabilities) && s.capabilities.length > 0);
+    if (cwSlot) {
+      const coloredCaps = cwSlot.capabilities.filter((c) => c.colorHex || c.hex);
+      if (coloredCaps.length > 0) {
+        const wSlotXml = coloredCaps.map((c, idx) => {
+          const hex = c.colorHex || c.hex;
+          colorWheelSlotMap.set(c, idx + 1);
+          const colAttr = hexToMa2RgbAttr18(hex);
+          return `        <Slot index="${idx}" name="${escapeXml12(c.name || `Color ${idx + 1}`)}" color="${colAttr}" />`;
+        }).join('\n');
+        wheelsXmlEntries.push(`      <Wheel index="0" name="Color Wheel">\n${wSlotXml}\n      </Wheel>`);
+      }
+    }
+
+    const renderChannelTypes = (modSlots, baseOffset = 0) => {
+      const seenOffsets = new Set();
+      const lines = [];
+      let ctIdx = 0;
+      for (const s of modSlots) {
+        const cOff = (Number(s.offset) || 1) - baseOffset;
+        if (cOff < 1 || seenOffsets.has(cOff)) continue;
+        seenOffsets.add(cOff);
+        let fOff = s.fineOffset ? (Number(s.fineOffset) - baseOffset) : null;
+        if (fOff !== null && (fOff < 1 || seenOffsets.has(fOff))) fOff = null;
+        if (fOff !== null) seenOffsets.add(fOff);
+
+        const meta = MA2_ROLE_META_18[s.role] || [escapeXml12(String(s.name || `CH${cOff}`).toUpperCase().replace(/[^A-Z0-9_]/g, '_')), 'CONTROL', 'CONTROL'];
+        const rawDef = Number(s.defaultDmx ?? 0);
+        const rawHi = Number(s.highlightDmx ?? 255);
+        const defVal = Math.max(0, Math.min(255, Math.round(Number.isFinite(rawDef) ? rawDef : 0)));
+        const hiVal = Math.max(0, Math.min(255, Math.round(Number.isFinite(rawHi) ? rawHi : 255)));
+        const fineAttr = fOff ? ` fine="${fOff}"` : '';
+        const wheelAttr = s.role === 'colorWheel' && wheelsXmlEntries.length ? ` wheel="0"` : '';
+
+        const caps = Array.isArray(s.capabilities) && s.capabilities.length
+          ? s.capabilities
+          : [{ name: s.name || meta[0], dmxFrom: 0, dmxTo: 255, physFrom: 0, physTo: 100 }];
+
+        // Group capabilities into separate <ChannelFunction> elements whenever explicit finite physical bounds differ
+        const cfGroups = [];
+        for (const c of caps) {
+          const rawP0 = c?.physFrom;
+          const rawP1 = c?.physTo;
+          const p0 = (rawP0 !== undefined && rawP0 !== null && rawP0 !== '') ? Number(rawP0) : NaN;
+          const p1 = (rawP1 !== undefined && rawP1 !== null && rawP1 !== '') ? Number(rawP1) : NaN;
+          const hasPhys = Number.isFinite(p0) && Number.isFinite(p1);
+          const physKey = hasPhys ? `${p0}:${p1}` : 'none';
+          const last = cfGroups[cfGroups.length - 1];
+          if (last && last.physKey === physKey) {
+            last.caps.push(c);
+          } else {
+            cfGroups.push({ physKey, hasPhys, physFrom: hasPhys ? p0 : null, physTo: hasPhys ? p1 : null, caps: [c] });
+          }
+        }
+        const cfXml = cfGroups.map((grp, fi) => {
+          const gCaps = grp.caps;
+          const d0First = Number(gCaps[0]?.dmxFrom ?? 0);
+          const d1Last = Number(gCaps[gCaps.length - 1]?.dmxTo ?? 255);
+          const gf0 = cfGroups.length === 1 ? 0 : Math.max(0, Math.min(255, Math.round(Number.isFinite(d0First) ? d0First : 0)));
+          const gf1 = cfGroups.length === 1 ? 255 : Math.max(gf0, Math.min(255, Math.round(Number.isFinite(d1Last) ? d1Last : 255)));
+          const csXml = gCaps.map((c, ci) => {
+            const rawD0 = Number(c.dmxFrom ?? gf0);
+            const rawD1 = Number(c.dmxTo ?? gf1);
+            const d0 = Math.max(0, Math.min(255, Math.round(Number.isFinite(rawD0) ? rawD0 : gf0)));
+            const d1 = Math.max(d0, Math.min(255, Math.round(Number.isFinite(rawD1) ? rawD1 : gf1)));
+            const slotRef = colorWheelSlotMap.has(c) ? ` slot_from="${colorWheelSlotMap.get(c)}" slot_to="${colorWheelSlotMap.get(c)}"` : '';
+            const colAttr = (c.colorHex || c.hex) ? ` color="${escapeXml12(c.colorHex || c.hex)}"` : '';
+            return `            <ChannelSet index="${ci}" name="${escapeXml12(c.name || `Set ${ci + 1}`)}" from_dmx="${d0}" to_dmx="${d1}"${slotRef}${colAttr} />`;
+          }).join('\n');
+          const cfFrom = grp.hasPhys ? grp.physFrom : 0;
+          const cfTo = grp.hasPhys ? grp.physTo : (s.role === 'shutter' ? 0 : 100);
+          return (
+            `          <ChannelFunction index="${fi}" name="${escapeXml12(s.name || meta[0])}" subattribute="${meta[0]}" from="${cfFrom}" to="${cfTo}" from_dmx="${gf0}" to_dmx="${gf1}"${wheelAttr}>\n` +
+            `${csXml}\n` +
+            `          </ChannelFunction>`
+          );
+        }).join('\n');
+        lines.push(
+          `        <ChannelType index="${ctIdx++}" attribute="${meta[0]}" feature="${meta[1]}" preset="${meta[2]}" coarse="${cOff}"${fineAttr} default="${defVal}" highlight="${hiVal}">\n` +
+          `${cfXml}\n` +
+          `        </ChannelType>`
+        );
+      }
+      return lines.join('\n');
+    };
+
+    const beamDeg = Number(ir.physical?.beamAngleMax || ir.physical?.beamAngleMin || 12);
+    const lumens = Number(ir.physical?.lumens || 10000);
+    const cat = String(ir.category || '').toLowerCase();
+    const irId = String(ir.id || ir.model || '').toLowerCase();
+    const hasPanTilt = mainSlots.some((s) => s.role === 'pan' || s.role === 'tilt');
+    let modClass = 'Headmover';
+    let beamType = 'Spot';
+    if (cat === 'other' || irId.includes('hazer') || irId.includes('sparkular')) {
+      modClass = 'None';
+      beamType = 'None';
+    } else if (cat === 'laser') {
+      modClass = 'Laser';
+      beamType = 'Spot';
+    } else if (cat === 'strobe' || cat === 'blinder') {
+      modClass = hasPanTilt ? 'Headmover' : 'LED';
+      beamType = 'Strobe';
+    } else if (cat === 'par') {
+      modClass = irId.includes('dimmer') ? 'Conventional' : 'LED';
+      beamType = 'Wash';
+    } else if (cat === 'wash') {
+      modClass = hasPanTilt ? 'Headmover' : 'Conventional';
+      beamType = hasPanTilt ? 'Wash' : 'Fresnel';
+    } else if (cat === 'pixel' || cat === 'bar') {
+      modClass = 'Headmover';
+      beamType = 'Wash';
+    }
+
+    const coveredMain = new Set();
+    for (const s of mainSlots) {
+      if (s.offset >= 1) coveredMain.add(Math.round(Number(s.offset)));
+      if (s.fineOffset >= 1) coveredMain.add(Math.round(Number(s.fineOffset)));
+    }
+    const paddedMainSlots = [...mainSlots];
+    const totalFootprint = Math.max(1, Math.min(512, Math.round(Number(ir.footprint) || 0)));
+    for (let off = 1; off <= totalFootprint; off++) {
+      if (!coveredMain.has(off) && !cellOffsetSet.has(off)) {
+        paddedMainSlots.push({
+          offset: off,
+          fineOffset: null,
+          name: 'Dummy',
+          role: 'dummy',
+          defaultDmx: 0,
+          highlightDmx: 0,
+          capabilities: [{ name: 'Dummy', dmxFrom: 0, dmxTo: 255, physFrom: 0, physTo: 100 }]
+        });
+      }
+    }
+    paddedMainSlots.sort((a, b) => (Number(a.offset) || 0) - (Number(b.offset) || 0));
+
+    const moduleXmlParts = [
+      `      <Module index="0" name="Main Module" class="${modClass}" beamtype="${beamType}" beam_angle="${beamDeg}" beam_intensity="${lumens}">\n${renderChannelTypes(paddedMainSlots, 0)}\n      </Module>`
+    ];
+
+    const instanceXmlParts = [`      <Instance index="0" module_index="0" patch="1" x="0.000" y="0.000" z="0.000" />`];
+    if (cells.length > 0 && Array.isArray(cells[0]?.slots) && cells[0].slots.length > 0) {
+      const firstCellMinOff = Math.min(...cells[0].slots.map((s) => s.offset || 1));
+      const relCellSlots = cells[0].slots.map((s) => ({
+        ...s,
+        offset: (s.offset || 1) - firstCellMinOff + 1,
+        fineOffset: s.fineOffset ? (s.fineOffset - firstCellMinOff + 1) : null
+      }));
+      moduleXmlParts.push(
+        `      <Module index="1" name="LED Cell" class="LED" beamtype="Wash" beam_angle="${beamDeg}" beam_intensity="${Math.round(lumens / Math.max(1, cells.length))}">\n${renderChannelTypes(relCellSlots, 0)}\n      </Module>`
+      );
+      cells.forEach((cell, ci) => {
+        const slotOffsets = Array.isArray(cell.slots) ? cell.slots.map((s) => Number(s.offset)).filter(Number.isFinite) : [];
+        const patchRaw = Number.isFinite(Number(cell.patch)) && Number(cell.patch) >= 1
+          ? Number(cell.patch)
+          : (slotOffsets.length ? Math.min(...slotOffsets) : 1);
+        const patchStart = Math.max(1, Math.min(512, Math.round(patchRaw)));
+        const pos = Array.isArray(cell.pos) ? cell.pos : [((ci - (cells.length - 1) * 0.5) * 0.08), 0, 0];
+        instanceXmlParts.push(
+          `      <Instance index="${ci + 1}" module_index="1" patch="${Math.max(1, patchStart)}" x="${Number(pos[0] || 0).toFixed(3)}" y="${(-Number(pos[2] || 0)).toFixed(3)}" z="${Number(pos[1] || 0).toFixed(3)}" />`
+        );
+      });
+    }
+
+    return [
+      `<?xml version="1.0" encoding="utf-8"?>`,
+      `<MA xmlns="http://schemas.malighting.de/grandma2/xml/MA" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://schemas.malighting.de/grandma2/xml/MA http://schemas.malighting.de/grandma2/xml/3.9.60/MA.xsd" major_vers="3" minor_vers="9" stream_vers="60">`,
+      `  <Info datetime="${new Date().toISOString()}" showfile="Alpha_LED_Studio" />`,
+      `  <FixtureType index="0" name="${ftName}" short_name="${shortName}" manufacturer="${manufacturer}" mode="${modeName}">`,
+      `    <Modules>`,
+      moduleXmlParts.join('\n'),
+      `    </Modules>`,
+      `    <Instances>`,
+      instanceXmlParts.join('\n'),
+      `    </Instances>`,
+      wheelsXmlEntries.length ? `    <Wheels>\n${wheelsXmlEntries.join('\n')}\n    </Wheels>` : `    <Wheels />`,
+      `  </FixtureType>`,
+      `</MA>`
+    ].join('\n');
+  }
+
+  function buildGrandMaFixtureXml(lights = [], opts = {}) {
+    const version = String(opts.version || 'ma3').toLowerCase() === 'ma2' ? 'ma2' : 'ma3';
+    const layerName = escapeXml12(opts.layerName || 'ALPHA_Stage_Rig');
+    const patched = normalizePatchedLights18(lights);
 
     if (version === 'ma2') {
-      const ma2Fixtures = patched.map((f) => [
-        `      <Fixture index="${f.idx}" name="${f.name}" fixture_id="${f.fixId}" channel_id="${f.fixId}">`,
-        `        <FixtureType name="${f.fixtureType}" />`,
-        `        <SubFixture index="0" react_to_grandmaster="true" color="ffffff">`,
-        `          <Patch><Address>${f.patchDot}</Address></Patch>`,
-        `          <AbsolutePosition><Location x="${f.posX}" y="${f.posY}" z="${f.posZ}" /><Rotation x="${f.rotX}" y="${f.rotY}" z="${f.rotZ}" /></AbsolutePosition>`,
-        `        </SubFixture>`,
-        `      </Fixture>`
-      ].join('\n')).join('\n');
-      const ma2Macros = patched.map((f, i) =>
-        `    <Macroline index="${i}"><text>Assign Fixture ${f.fixId} /x=${f.posX} /y=${f.posY} /z=${f.posZ} /dmx=${f.patchDot}</text></Macroline>`
-      ).join('\n');
+      // MA2 3.9.60 FixtureLayer XML only (1-based integer <Address>, plus <SubFixture> for multi-cell fixtures)
+      const ma2Fixtures = patched.map((f) => {
+        const subCells = Array.isArray(f.ir?.cells) && f.ir.cells.length > 0
+          ? f.ir.cells.map((_, ci) => `      <SubFixture index="${ci + 1}" react_to_grandmaster="true" color="ffffff" />`).join('\n') + '\n'
+          : '';
+        return [
+          `    <Fixture index="${f.idx}" name="${f.name}" fixture_id="${f.fixId}" channel_id="${f.fixId}">`,
+          `      <FixtureType name="${f.fixtureType}" />`,
+          `      <SubFixture index="0" react_to_grandmaster="true" color="ffffff">`,
+          `        <Patch><Address>${f.absDmxAddr}</Address></Patch>`,
+          `        <AbsolutePosition><Location x="${f.posX}" y="${f.posY}" z="${f.posZ}" /><Rotation x="${f.rotX}" y="${f.rotY}" z="${f.rotZ}" /></AbsolutePosition>`,
+          `      </SubFixture>`,
+          subCells ? subCells.trimEnd() : null,
+          `    </Fixture>`
+        ].filter(Boolean).join('\n');
+      }).join('\n');
       return [
         `<?xml version="1.0" encoding="utf-8"?>`,
-        `<MA xmlns="http://schemas.malighting.de/grandma2/xml/MA" major_vers="3" minor_vers="9" stream_vers="60">`,
+        `<MA xmlns="http://schemas.malighting.de/grandma2/xml/MA" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://schemas.malighting.de/grandma2/xml/MA http://schemas.malighting.de/grandma2/xml/3.9.60/MA.xsd" major_vers="3" minor_vers="9" stream_vers="60">`,
         `  <Info datetime="${new Date().toISOString()}" showfile="Alpha_LED_Studio" />`,
         `  <FixtureLayer index="0" name="${layerName}">`,
         ma2Fixtures,
         `  </FixtureLayer>`,
-        `  <Macro index="0" name="ALPHA Auto-Position 3D">`,
-        ma2Macros,
-        `  </Macro>`,
         `</MA>`
       ].join('\n');
     }
 
     const ma3Fixtures = patched.map((f) =>
-      `      <Fixture Name="${f.name}" FixId="${f.fixId}" Patch="${f.patchDot}" FixtureType="${f.fixtureType}" Channels="${f.chCount}" PosX="${f.posX}" PosY="${f.posY}" PosZ="${f.posZ}" RotX="${f.rotX}" RotY="${f.rotY}" RotZ="${f.rotZ}" />`
+      `      <Fixture Name="${f.name}" FixId="${f.fixId}" Patch="${f.patchDot}" FixtureType="${f.fixtureType}" Channels="${f.chCount}" PosX="${f.posX}" PosY="${f.ma3PosY}" PosZ="${f.posZ}" RotX="${f.rotX}" RotY="${f.rotY}" RotZ="${f.rotZ}" />`
     ).join('\n');
     const ma3MacroLines = patched.map((f, i) =>
-      `      <MacroLine Index="${i + 1}" Command="Set Fixture ${f.fixId} Property &quot;PosX&quot; &quot;${f.posX}&quot; &quot;PosY&quot; &quot;${f.posY}&quot; &quot;PosZ&quot; &quot;${f.posZ}&quot; &quot;Patch&quot; &quot;${f.patchDot}&quot;" />`
+      `      <MacroLine Index="${i + 1}" Command="Set Fixture ${f.fixId} Property &quot;PosX&quot; &quot;${f.posX}&quot; &quot;PosY&quot; &quot;${f.ma3PosY}&quot; &quot;PosZ&quot; &quot;${f.posZ}&quot; &quot;Patch&quot; &quot;${f.patchDot}&quot;" />`
     ).join('\n');
     return [
       `<?xml version="1.0" encoding="UTF-8"?>`,
@@ -1234,6 +1671,296 @@
       `  </MacroPool>`,
       `</GMA3>`
     ].join('\n');
+  }
+
+  function buildGrandMaMacroXml(lights = [], opts = {}) {
+    const patched = normalizePatchedLights18(lights);
+    const macroName = escapeXml12(opts.macroName || 'ALPHA Auto-Patch & Stage 3D');
+    const clearFirst = opts.clearFirst !== false;
+    const lines = [];
+    for (const f of patched) {
+      if (clearFirst) {
+        lines.push(`Delete Dmx ${f.patchDot} /nc`);
+      }
+      lines.push(`Assign Fixture ${f.fixId} At Dmx ${f.patchDot}`);
+      lines.push(`Move3D Fixture ${f.fixId} At ${f.posX} ${f.posY} ${f.posZ}`);
+      if (+f.rotX !== 0 || +f.rotY !== 0 || +f.rotZ !== 0) {
+        lines.push(`Rotate3D Fixture ${f.fixId} At ${f.rotX} ${f.rotY} ${f.rotZ}`);
+      }
+    }
+    if (opts.pageId && opts.execId) {
+      lines.push(`Go Executor ${Math.max(1, Number(opts.pageId) | 0)}.${Math.max(1, Number(opts.execId) | 0)}`);
+    }
+    const macroLines = lines.map((cmd, idx) => `    <Macroline index="${idx}"><text>${escapeXml12(cmd)}</text></Macroline>`).join('\n');
+    return [
+      `<?xml version="1.0" encoding="utf-8"?>`,
+      `<MA xmlns="http://schemas.malighting.de/grandma2/xml/MA" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://schemas.malighting.de/grandma2/xml/MA http://schemas.malighting.de/grandma2/xml/3.9.60/MA.xsd" major_vers="3" minor_vers="9" stream_vers="60">`,
+      `  <Info datetime="${new Date().toISOString()}" showfile="Alpha_LED_Studio" />`,
+      `  <Macro index="0" name="${macroName}">`,
+      macroLines,
+      `  </Macro>`,
+      `</MA>`
+    ].join('\n');
+  }
+
+  function buildMaTimecodeXml(cues = [], opts = {}) {
+    const fps = Math.max(1, Number(opts.fps) || 30);
+    const name = escapeXml12(opts.name || 'AlphaShow_TC');
+    const list = Array.isArray(cues) ? cues : [];
+    const maxTimeSec = list.reduce((m, c) => Math.max(m, Number(c?.timeSec ?? c?.start ?? 0)), 0);
+    const totalFrames = Math.max(1, Math.round((Number(opts.lengthSec) || (maxTimeSec + 5)) * fps));
+    const eventsXml = list.map((c, idx) => {
+      const f = Number.isFinite(+c?.frame) ? Math.max(0, Math.round(+c.frame)) : Math.max(0, Math.round((Number(c?.timeSec ?? c?.start ?? 0)) * fps));
+      const cmd = escapeXml12(c?.cmd || c?.name || `Goto Cue ${idx + 1}`);
+      return `        <Event index="${idx}" time="${f}" step="${idx + 1}" command="${cmd}" />`;
+    }).join('\n');
+    return [
+      `<?xml version="1.0" encoding="utf-8"?>`,
+      `<MA xmlns="http://schemas.malighting.de/grandma2/xml/MA" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://schemas.malighting.de/grandma2/xml/MA http://schemas.malighting.de/grandma2/xml/3.9.60/MA.xsd" major_vers="3" minor_vers="9" stream_vers="60">`,
+      `  <Timecode index="0" name="${name}" length="${totalFrames}" slot="0" frame_readout="${Math.round(fps)}fps">`,
+      `    <Track index="0" name="Main">`,
+      `      <SubTrack index="0">`,
+      eventsXml,
+      `      </SubTrack>`,
+      `    </Track>`,
+      `  </Timecode>`,
+      `</MA>`
+    ].join('\n');
+  }
+
+  function cutMaTimecodeXml(xmlText, opts = {}) {
+    const hadBom = String(xmlText || '').startsWith('\uFEFF');
+    let text = String(xmlText || '').replace(/^\uFEFF/, '');
+    const cutStart = Math.max(0, Math.round(Number(opts.cutStartFrames ?? opts.startFrame ?? 0)));
+    const cutEnd = Math.max(cutStart, Math.round(Number(opts.cutEndFrames ?? opts.endFrame ?? cutStart)));
+    const span = cutEnd - cutStart;
+    if (span <= 0) {
+      return {
+        xml: (hadBom ? '\uFEFF' : '') + text,
+        removedCount: 0,
+        shiftedCount: 0,
+        cutSpanFrames: 0
+      };
+    }
+
+    let removedCount = 0;
+    let shiftedCount = 0;
+    let eventIdx = 0;
+    text = text.replace(/<Event\b([^>]*?)\/>/g, (full, attrs) => {
+      const m = /\btime\s*=\s*"(-?\d+(?:\.\d+)?)"/.exec(attrs);
+      if (!m) return full;
+      const t = Math.round(Number(m[1]));
+      if (t >= cutStart && t < cutEnd) {
+        removedCount++;
+        return '';
+      }
+      const nextT = t >= cutEnd ? (t - span) : t;
+      if (t >= cutEnd) shiftedCount++;
+      let updatedAttrs = attrs.replace(/\btime\s*=\s*"[^"]*"/, `time="${nextT}"`);
+      updatedAttrs = updatedAttrs.replace(/\bindex\s*=\s*"[^"]*"/, `index="${eventIdx++}"`);
+      return `<Event${updatedAttrs}/>`;
+    });
+    text = text.replace(/(<Timecode\b[^>]*\blength\s*=\s*")(\d+)(")/, (_, pre, lenStr, post) => {
+      const newLen = Math.max(0, Number(lenStr) - span);
+      return `${pre}${newLen}${post}`;
+    });
+    text = text.replace(/\n{3,}/g, '\n');
+    return {
+      xml: (hadBom ? '\uFEFF' : '') + text,
+      removedCount,
+      shiftedCount,
+      cutSpanFrames: span
+    };
+  }
+
+  function parseReaperRpp(rppText) {
+    const lines = String(rppText || '').replace(/^\uFEFF/, '').split(/\r?\n/);
+    let projectOffsetSec = 0;
+    const markers = [];
+    const tracks = [];
+    const stack = [];
+    let currentTrack = null;
+    let currentItem = null;
+
+    const unquote = (s) => {
+      const t = String(s || '').trim();
+      if ((t.startsWith('"') && t.endsWith('"')) || (t.startsWith("'") && t.endsWith("'"))) return t.slice(1, -1);
+      return t;
+    };
+
+    for (const rawLine of lines) {
+      const line = rawLine.trim();
+      if (!line) continue;
+      if (line.startsWith('<')) {
+        const tag = line.slice(1).split(/\s+/)[0];
+        stack.push(tag);
+        if (tag === 'TRACK') {
+          currentTrack = { name: '', items: [] };
+          tracks.push(currentTrack);
+        } else if (tag === 'ITEM' && currentTrack) {
+          currentItem = { trackName: currentTrack.name, name: '', positionSec: 0, lengthSec: 0 };
+          currentTrack.items.push(currentItem);
+        }
+        continue;
+      }
+      if (line === '>') {
+        const closed = stack.pop();
+        if (closed === 'ITEM') currentItem = null;
+        if (closed === 'TRACK') currentTrack = null;
+        continue;
+      }
+      if (line.startsWith('PROJOFFS ')) {
+        projectOffsetSec = Number(line.slice(9).trim().split(/\s+/)[0]) || 0;
+      } else if (line.startsWith('MARKER ')) {
+        const m = /^MARKER\s+(\d+)\s+([-+\d.eE]+)\s+(?:"([^"]*)"|(\S+))(?:\s+(\d+))?/.exec(line);
+        if (m) {
+          markers.push({
+            id: Number(m[1]),
+            timeSec: Number(m[2]) || 0,
+            name: m[3] !== undefined ? m[3] : (m[4] || ''),
+            color: m[5] ? Number(m[5]) : 0
+          });
+        }
+      } else if (currentItem && line.startsWith('NAME ')) {
+        currentItem.name = unquote(line.slice(5));
+      } else if (currentItem && line.startsWith('POSITION ')) {
+        currentItem.positionSec = Number(line.slice(9).trim()) || 0;
+      } else if (currentItem && line.startsWith('LENGTH ')) {
+        currentItem.lengthSec = Number(line.slice(7).trim()) || 0;
+      } else if (currentTrack && !currentItem && line.startsWith('NAME ')) {
+        currentTrack.name = unquote(line.slice(5));
+      }
+    }
+    return { projectOffsetSec, markers, tracks };
+  }
+
+  function exportGrandMaPackage(lights = [], opts = {}) {
+    const version = String(opts.version || 'ma2').toLowerCase() === 'ma3' ? 'ma3' : 'ma2';
+    const fixtureXml = buildGrandMaFixtureXml(lights, { ...opts, version });
+    const macroXml = version === 'ma2' ? buildGrandMaMacroXml(lights, opts) : null;
+    const timecodeXml = Array.isArray(opts.cues) && opts.cues.length
+      ? buildMaTimecodeXml(opts.cues, { fps: opts.fps || 30, name: opts.showName || 'AlphaShow_TC' })
+      : null;
+
+    const entries = [
+      { name: version === 'ma2' ? 'ALPHA_MA2_FixtureLayer.xml' : 'ALPHA_MA3_FixtureLayer.xml', bytes: encodeUtf8Bytes18(fixtureXml) }
+    ];
+    if (macroXml) entries.push({ name: 'ALPHA_MA2_PatchMacro.xml', bytes: encodeUtf8Bytes18(macroXml) });
+    if (timecodeXml) entries.push({ name: 'ALPHA_MA_Timecode.xml', bytes: encodeUtf8Bytes18(timecodeXml) });
+
+    const fixtureTypeXmls = {};
+    if (version === 'ma2') {
+      const patched = normalizePatchedLights18(lights);
+      const seenSlugs = new Set();
+      for (const f of patched) {
+        if (!f.ir || seenSlugs.has(f.fixtureSlug)) continue;
+        seenSlugs.add(f.fixtureSlug);
+        const ftXml = buildGrandMa2FixtureTypeXml(f.ir, { name: f.rawFtName });
+        const relPath = `fixture_types/${f.fixtureSlug}.xml`;
+        fixtureTypeXmls[relPath] = ftXml;
+        entries.push({ name: relPath, bytes: encodeUtf8Bytes18(ftXml) });
+      }
+    }
+
+    const linter = root?.STUDIO?.showLinter22 || root?.showLinter22;
+    const lintReport = linter?.lintShowForExport22
+      ? linter.lintShowForExport22({ lights, fixtureXml, macroXml: macroXml || '', timecodeXml: timecodeXml || '', fixtureTypeXmls })
+      : { ok: true, errors: [], warnings: [], rulesChecked: [] };
+
+    return {
+      version,
+      fixtureXml,
+      fixtureTypeXmls,
+      macroXml,
+      timecodeXml,
+      lintReport,
+      zipBytes: buildStoreZipEntries18(entries)
+    };
+  }
+
+  function writeMidiVlq(val) {
+    let v = Math.max(0, Math.round(Number(val) || 0));
+    const out = [v & 0x7f];
+    while ((v >>= 7) > 0) out.unshift((v & 0x7f) | 0x80);
+    return out;
+  }
+
+  function buildMidiTrackChunk(rawBytes) {
+    const chunk = new Uint8Array(8 + rawBytes.length);
+    chunk[0] = 0x4d; chunk[1] = 0x54; chunk[2] = 0x72; chunk[3] = 0x6b; // "MTrk"
+    const len = rawBytes.length;
+    chunk[4] = (len >>> 24) & 0xff;
+    chunk[5] = (len >>> 16) & 0xff;
+    chunk[6] = (len >>> 8) & 0xff;
+    chunk[7] = len & 0xff;
+    chunk.set(rawBytes, 8);
+    return chunk;
+  }
+
+  function exportMidiCueTrack18(events = [], opts = {}) {
+    const ppq = 480;
+    const bpm = Math.max(20, Math.min(300, Number(opts.bpm) || 120));
+    const usPerBeat = Math.round(60000000 / bpm);
+
+    // Track 0: Tempo & Time Signature meta track
+    const t0 = [
+      0x00, 0xff, 0x51, 0x03, (usPerBeat >> 16) & 0xff, (usPerBeat >> 8) & 0xff, usPerBeat & 0xff,
+      0x00, 0xff, 0x58, 0x04, 4, 2, 24, 8,
+      0x00, 0xff, 0x2f, 0x00
+    ];
+
+    // Track 1: Sorted Cue markers + optional MIDI note triggers scheduled on absolute ticks
+    const sorted = (Array.isArray(events) ? events : [])
+      .map((e, i) => {
+        const rawT = Number(e?.timeSec ?? e?.start ?? e?.time ?? 0);
+        const hasNote = e?.note != null && e.note !== '' && Number.isFinite(Number(e.note));
+        const rawVel = Number(e?.velocity ?? 100);
+        return {
+          timeSec: Number.isFinite(rawT) ? Math.max(0, rawT) : 0,
+          label: String(e?.label || e?.name || `Cue ${i + 1}`).slice(0, 80),
+          note: hasNote ? Math.max(0, Math.min(127, Math.round(Number(e.note)))) : null,
+          velocity: Number.isFinite(rawVel) ? Math.max(1, Math.min(127, Math.round(rawVel))) : 100
+        };
+      })
+      .sort((a, b) => a.timeSec - b.timeSec);
+
+    const ticksPerSec = (bpm / 60) * ppq;
+    const noteLenTicks = Math.max(1, Math.round(ppq / 4));
+    const scheduled = [];
+    for (const ev of sorted) {
+      const tick = Math.max(0, Math.round(ev.timeSec * ticksPerSec));
+      const textBytes = encodeUtf8Bytes18(ev.label);
+      scheduled.push({ tick, order: 1, bytes: [0xff, 0x07, ...writeMidiVlq(textBytes.length), ...textBytes] });
+      if (ev.note !== null) {
+        scheduled.push({ tick, order: 2, bytes: [0x90, ev.note, ev.velocity] });
+        scheduled.push({ tick: tick + noteLenTicks, order: 0, bytes: [0x80, ev.note, 0x00] });
+      }
+    }
+    scheduled.sort((a, b) => (a.tick - b.tick) || (a.order - b.order));
+
+    const t1 = [];
+    let lastTick = 0;
+    for (const msg of scheduled) {
+      const delta = Math.max(0, msg.tick - lastTick);
+      lastTick = msg.tick;
+      t1.push(...writeMidiVlq(delta), ...msg.bytes);
+    }
+    t1.push(0x00, 0xff, 0x2f, 0x00);
+
+    const header = new Uint8Array([
+      0x4d, 0x54, 0x68, 0x64, // "MThd"
+      0x00, 0x00, 0x00, 0x06, // header length = 6
+      0x00, 0x01,             // Format 1 (multi-track sync)
+      0x00, 0x02,             // 2 tracks
+      (ppq >> 8) & 0xff, ppq & 0xff
+    ]);
+    const trk0 = buildMidiTrackChunk(t0);
+    const trk1 = buildMidiTrackChunk(t1);
+    const bytes = new Uint8Array(header.length + trk0.length + trk1.length);
+    bytes.set(header, 0);
+    bytes.set(trk0, header.length);
+    bytes.set(trk1, header.length + trk0.length);
+    return { bytes, format: 1, tracks: 2, ppq, bpm, eventCount: sorted.length };
   }
 
   function generateCrewSplitDossier18(role = 'CREW_1_STAGE_RIGGING', opts = {}) {
@@ -1414,9 +2141,18 @@
     generateStageDxf,
     crc32Bytes18,
     encodeUtf8Bytes18,
+    buildStoreZipEntries18,
     buildStoreZipArchive18,
+    basisMatrixMvrFromYup,
     exportLightingMvr18,
+    buildGrandMa2FixtureTypeXml,
     buildGrandMaFixtureXml,
+    buildGrandMaMacroXml,
+    buildMaTimecodeXml,
+    cutMaTimecodeXml,
+    parseReaperRpp,
+    exportGrandMaPackage,
+    exportMidiCueTrack18,
     computeSfxSafetyZones,
     computePhotometricFootprint,
     computeEngineeringRider,

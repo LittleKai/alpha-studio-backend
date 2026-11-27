@@ -135,6 +135,10 @@ const userSchema = new mongoose.Schema({
         imageCount: { type: Number, default: 0 },    // Phase 2: Flow image quota
         videoCount: { type: Number, default: 0 }     // Phase 2: Flow video quota
     },
+    chatUsage: {
+        date: { type: String, default: '' },  // 'YYYY-MM-DD' Asia/Ho_Chi_Minh
+        count: { type: Number, default: 0 }
+    },
     preferences: {
         interiorTwoStepConfirm: { type: Boolean, default: false }
     },

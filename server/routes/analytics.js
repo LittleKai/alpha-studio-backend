@@ -2,6 +2,7 @@ import express from 'express';
 import rateLimit from 'express-rate-limit';
 import mongoose from 'mongoose';
 import PageVisit, { RETENTION_DAYS } from '../models/PageVisit.js';
+import ChatMessage from '../models/ChatMessage.js';
 import { authMiddleware, adminOnly } from '../middleware/auth.js';
 
 const router = express.Router();
@@ -226,6 +227,46 @@ async function summarize(from, to) {
     return row || { pageviews: 0, visitors: 0, sessions: 0, newVisitors: 0, loggedInViews: 0 };
 }
 
+async function summarizeChatbot(from, to) {
+    const [row] = await ChatMessage.aggregate([
+        { $match: { role: 'user', createdAt: { $gte: from, $lt: to } } },
+        {
+            $group: {
+                _id: null,
+                turns: { $sum: 1 },
+                users: { $addToSet: '$userId' },
+            },
+        },
+        {
+            $project: {
+                _id: 0,
+                turns: 1,
+                users: { $size: '$users' },
+            },
+        },
+    ]);
+    return row || { turns: 0, users: 0 };
+}
+
+/**
+ * Merges daily PageVisit stats with daily chatbot user turns for each Vietnam local day.
+ */
+export function buildDailyAnalyticsSeries({ days, to, pageDaily = [], chatbotDaily = [] }) {
+    const dailyMap = new Map(pageDaily.map((d) => [d.date, d]));
+    const chatbotMap = new Map(chatbotDaily.map((d) => [d.date, d.turns || 0]));
+    const daily = [];
+    for (let i = days - 1; i >= 0; i -= 1) {
+        const day = new Date(to.getTime() - i * 24 * 60 * 60 * 1000);
+        const key = day.toLocaleDateString('en-CA', { timeZone: REPORT_TIMEZONE });
+        const row = dailyMap.get(key) || { date: key, views: 0, visitors: 0, sessions: 0 };
+        daily.push({
+            ...row,
+            chatbotTurns: chatbotMap.get(key) || 0,
+        });
+    }
+    return daily;
+}
+
 /**
  * GET /api/analytics/overview?days=30
  * Everything the dashboard renders, in one aggregation pass.
@@ -237,127 +278,147 @@ router.get('/overview', async (req, res) => {
         const from = new Date(to.getTime() - days * 24 * 60 * 60 * 1000);
         const prevFrom = new Date(from.getTime() - days * 24 * 60 * 60 * 1000);
 
-        const [facets] = await PageVisit.aggregate([
-            { $match: { createdAt: { $gte: from, $lte: to } } },
-            {
-                $facet: {
-                    daily: [
-                        {
-                            $group: {
-                                _id: { $dateToString: { format: '%Y-%m-%d', date: '$createdAt', timezone: REPORT_TIMEZONE } },
-                                views: { $sum: 1 },
-                                visitors: { $addToSet: '$visitorId' },
-                                sessions: { $addToSet: '$sessionId' },
-                            },
-                        },
-                        {
-                            $project: {
-                                _id: 0,
-                                date: '$_id',
-                                views: 1,
-                                visitors: { $size: '$visitors' },
-                                sessions: { $size: '$sessions' },
-                            },
-                        },
-                        { $sort: { date: 1 } },
-                    ],
-                    topPages: [...countStage('$path'), { $limit: 15 }],
-                    channels: [
-                        { $group: { _id: '$channel', views: { $sum: 1 }, sessions: { $addToSet: '$sessionId' } } },
-                        { $project: { _id: 0, key: '$_id', views: 1, sessions: { $size: '$sessions' } } },
-                        { $sort: { sessions: -1 } },
-                    ],
-                    referrers: [
-                        { $match: { referrerHost: { $ne: '' } } },
-                        ...countStage('$referrerHost'),
-                        { $limit: 10 },
-                    ],
-                    campaigns: [
-                        { $match: { $or: [{ utmCampaign: { $ne: '' } }, { gclid: { $ne: '' } }] } },
-                        {
-                            $group: {
-                                _id: {
-                                    source: { $cond: [{ $eq: ['$utmSource', ''] }, 'google', '$utmSource'] },
-                                    medium: { $cond: [{ $eq: ['$utmMedium', ''] }, 'cpc', '$utmMedium'] },
-                                    campaign: { $cond: [{ $eq: ['$utmCampaign', ''] }, '(no name)', '$utmCampaign'] },
+        const [
+            [facets],
+            current,
+            previous,
+            chatbotCurrent,
+            chatbotPrevious,
+            chatbotDaily,
+        ] = await Promise.all([
+            PageVisit.aggregate([
+                { $match: { createdAt: { $gte: from, $lte: to } } },
+                {
+                    $facet: {
+                        daily: [
+                            {
+                                $group: {
+                                    _id: { $dateToString: { format: '%Y-%m-%d', date: '$createdAt', timezone: REPORT_TIMEZONE } },
+                                    views: { $sum: 1 },
+                                    visitors: { $addToSet: '$visitorId' },
+                                    sessions: { $addToSet: '$sessionId' },
                                 },
-                                views: { $sum: 1 },
-                                visitors: { $addToSet: '$visitorId' },
-                                sessions: { $addToSet: '$sessionId' },
-                                paidClicks: { $sum: { $cond: [{ $ne: ['$gclid', ''] }, 1, 0] } },
                             },
-                        },
-                        {
-                            $project: {
-                                _id: 0,
-                                source: '$_id.source',
-                                medium: '$_id.medium',
-                                campaign: '$_id.campaign',
-                                views: 1,
-                                paidClicks: 1,
-                                visitors: { $size: '$visitors' },
-                                sessions: { $size: '$sessions' },
+                            {
+                                $project: {
+                                    _id: 0,
+                                    date: '$_id',
+                                    views: 1,
+                                    visitors: { $size: '$visitors' },
+                                    sessions: { $size: '$sessions' },
+                                },
                             },
-                        },
-                        { $sort: { sessions: -1 } },
-                        { $limit: 15 },
-                    ],
-                    devices: countStage('$device'),
-                    browsers: [...countStage('$browser'), { $limit: 8 }],
-                    os: [...countStage('$os'), { $limit: 8 }],
-                    languages: [{ $match: { language: { $ne: '' } } }, ...countStage('$language'), { $limit: 6 }],
-                    hourly: [
-                        {
-                            $group: {
-                                _id: { $hour: { date: '$createdAt', timezone: REPORT_TIMEZONE } },
-                                views: { $sum: 1 },
+                            { $sort: { date: 1 } },
+                        ],
+                        topPages: [...countStage('$path'), { $limit: 15 }],
+                        channels: [
+                            { $group: { _id: '$channel', views: { $sum: 1 }, sessions: { $addToSet: '$sessionId' } } },
+                            { $project: { _id: 0, key: '$_id', views: 1, sessions: { $size: '$sessions' } } },
+                            { $sort: { sessions: -1 } },
+                        ],
+                        referrers: [
+                            { $match: { referrerHost: { $ne: '' } } },
+                            ...countStage('$referrerHost'),
+                            { $limit: 10 },
+                        ],
+                        campaigns: [
+                            { $match: { $or: [{ utmCampaign: { $ne: '' } }, { gclid: { $ne: '' } }] } },
+                            {
+                                $group: {
+                                    _id: {
+                                        source: { $cond: [{ $eq: ['$utmSource', ''] }, 'google', '$utmSource'] },
+                                        medium: { $cond: [{ $eq: ['$utmMedium', ''] }, 'cpc', '$utmMedium'] },
+                                        campaign: { $cond: [{ $eq: ['$utmCampaign', ''] }, '(no name)', '$utmCampaign'] },
+                                    },
+                                    views: { $sum: 1 },
+                                    visitors: { $addToSet: '$visitorId' },
+                                    sessions: { $addToSet: '$sessionId' },
+                                    paidClicks: { $sum: { $cond: [{ $ne: ['$gclid', ''] }, 1, 0] } },
+                                },
                             },
-                        },
-                        { $project: { _id: 0, hour: '$_id', views: 1 } },
-                        { $sort: { hour: 1 } },
-                    ],
-                    weekday: [
-                        {
-                            $group: {
-                                _id: { $isoDayOfWeek: { date: '$createdAt', timezone: REPORT_TIMEZONE } },
-                                views: { $sum: 1 },
+                            {
+                                $project: {
+                                    _id: 0,
+                                    source: '$_id.source',
+                                    medium: '$_id.medium',
+                                    campaign: '$_id.campaign',
+                                    views: 1,
+                                    paidClicks: 1,
+                                    visitors: { $size: '$visitors' },
+                                    sessions: { $size: '$sessions' },
+                                },
                             },
-                        },
-                        { $project: { _id: 0, weekday: '$_id', views: 1 } },
-                        { $sort: { weekday: 1 } },
-                    ],
-                    entryPages: [
-                        { $match: { isSessionStart: true } },
-                        ...countStage('$path'),
-                        { $limit: 10 },
-                    ],
-                    sessionDepth: [
-                        { $group: { _id: '$sessionId', views: { $sum: 1 } } },
-                        {
-                            $group: {
-                                _id: null,
-                                sessions: { $sum: 1 },
-                                bounced: { $sum: { $cond: [{ $eq: ['$views', 1] }, 1, 0] } },
-                                totalViews: { $sum: '$views' },
+                            { $sort: { sessions: -1 } },
+                            { $limit: 15 },
+                        ],
+                        devices: countStage('$device'),
+                        browsers: [...countStage('$browser'), { $limit: 8 }],
+                        os: [...countStage('$os'), { $limit: 8 }],
+                        languages: [{ $match: { language: { $ne: '' } } }, ...countStage('$language'), { $limit: 6 }],
+                        hourly: [
+                            {
+                                $group: {
+                                    _id: { $hour: { date: '$createdAt', timezone: REPORT_TIMEZONE } },
+                                    views: { $sum: 1 },
+                                },
                             },
-                        },
-                        { $project: { _id: 0, sessions: 1, bounced: 1, totalViews: 1 } },
-                    ],
+                            { $project: { _id: 0, hour: '$_id', views: 1 } },
+                            { $sort: { hour: 1 } },
+                        ],
+                        weekday: [
+                            {
+                                $group: {
+                                    _id: { $isoDayOfWeek: { date: '$createdAt', timezone: REPORT_TIMEZONE } },
+                                    views: { $sum: 1 },
+                                },
+                            },
+                            { $project: { _id: 0, weekday: '$_id', views: 1 } },
+                            { $sort: { weekday: 1 } },
+                        ],
+                        entryPages: [
+                            { $match: { isSessionStart: true } },
+                            ...countStage('$path'),
+                            { $limit: 10 },
+                        ],
+                        sessionDepth: [
+                            { $group: { _id: '$sessionId', views: { $sum: 1 } } },
+                            {
+                                $group: {
+                                    _id: null,
+                                    sessions: { $sum: 1 },
+                                    bounced: { $sum: { $cond: [{ $eq: ['$views', 1] }, 1, 0] } },
+                                    totalViews: { $sum: '$views' },
+                                },
+                            },
+                            { $project: { _id: 0, sessions: 1, bounced: 1, totalViews: 1 } },
+                        ],
+                    },
                 },
-            },
+            ]),
+            summarize(from, to),
+            summarize(prevFrom, from),
+            summarizeChatbot(from, to),
+            summarizeChatbot(prevFrom, from),
+            ChatMessage.aggregate([
+                { $match: { role: 'user', createdAt: { $gte: from, $lte: to } } },
+                {
+                    $group: {
+                        _id: { $dateToString: { format: '%Y-%m-%d', date: '$createdAt', timezone: REPORT_TIMEZONE } },
+                        turns: { $sum: 1 },
+                    },
+                },
+                { $project: { _id: 0, date: '$_id', turns: 1 } },
+                { $sort: { date: 1 } },
+            ]),
         ]);
 
-        const [current, previous] = await Promise.all([summarize(from, to), summarize(prevFrom, from)]);
         const depth = facets?.sessionDepth?.[0] || { sessions: 0, bounced: 0, totalViews: 0 };
-
-        // Fill gaps so the line chart has one point per day even on quiet days.
-        const dailyMap = new Map((facets?.daily || []).map((d) => [d.date, d]));
-        const daily = [];
-        for (let i = days - 1; i >= 0; i -= 1) {
-            const day = new Date(to.getTime() - i * 24 * 60 * 60 * 1000);
-            const key = day.toLocaleDateString('en-CA', { timeZone: REPORT_TIMEZONE });
-            daily.push(dailyMap.get(key) || { date: key, views: 0, visitors: 0, sessions: 0 });
-        }
+        const daily = buildDailyAnalyticsSeries({
+            days,
+            to,
+            pageDaily: facets?.daily || [],
+            chatbotDaily,
+        });
 
         const channels = facets?.channels || [];
         const paidSessions = channels
@@ -370,7 +431,13 @@ router.get('/overview', async (req, res) => {
                 range: { days, from, to },
                 summary: {
                     ...current,
-                    previous,
+                    chatbotTurns: chatbotCurrent.turns,
+                    chatbotUsers: chatbotCurrent.users,
+                    previous: {
+                        ...previous,
+                        chatbotTurns: chatbotPrevious.turns,
+                        chatbotUsers: chatbotPrevious.users,
+                    },
                     bounceRate: depth.sessions ? Math.round((depth.bounced / depth.sessions) * 1000) / 10 : 0,
                     pagesPerSession: depth.sessions ? Math.round((depth.totalViews / depth.sessions) * 10) / 10 : 0,
                     returningVisitors: Math.max(0, current.visitors - current.newVisitors),

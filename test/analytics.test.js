@@ -7,6 +7,7 @@ import {
     isSelfHost,
     classifyChannel,
     normalizePath,
+    buildDailyAnalyticsSeries,
 } from '../server/routes/analytics.js';
 import { REQUIRED_INDEXES } from '../server/migrations/m0/indexPlan.js';
 import { RETENTION_MS } from '../server/retention/policy.js';
@@ -115,4 +116,26 @@ test('the analytics range cap matches the retention window', () => {
     // the TTL has already emptied and quietly report zeros.
     assert.equal(RETENTION_DAYS, 90);
     assert.equal(RETENTION_MS.analytics, RETENTION_DAYS * 24 * 60 * 60 * 1000);
+});
+
+test('buildDailyAnalyticsSeries merges chatbot turns into Vietnam local days and fills quiet days', () => {
+    const to = new Date('2026-11-27T15:00:00.000Z'); // 22:00 ICT on 2026-11-27
+    const series = buildDailyAnalyticsSeries({
+        days: 3,
+        to,
+        pageDaily: [
+            { date: '2026-11-25', views: 10, visitors: 4, sessions: 5 },
+            { date: '2026-11-27', views: 22, visitors: 9, sessions: 10 },
+        ],
+        chatbotDaily: [
+            { date: '2026-11-26', turns: 3 },
+            { date: '2026-11-27', turns: 7 },
+        ],
+    });
+
+    assert.deepEqual(series, [
+        { date: '2026-11-25', views: 10, visitors: 4, sessions: 5, chatbotTurns: 0 },
+        { date: '2026-11-26', views: 0, visitors: 0, sessions: 0, chatbotTurns: 3 },
+        { date: '2026-11-27', views: 22, visitors: 9, sessions: 10, chatbotTurns: 7 },
+    ]);
 });
