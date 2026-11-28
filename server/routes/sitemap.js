@@ -38,6 +38,7 @@ export function buildSitemapXml({ courses = [], articles = [], eventItems = [] }
         ['/news', { priority: '0.7' }], ['/studio', { priority: '0.8' }],
         ['/studio/event-library', { priority: '0.8' }],
         ['/studio/led-studio', { changefreq: 'weekly', priority: '0.8' }],
+        ['/studio/mesh-optimizer', { priority: '0.7' }],
         ['/studio/vietyaku', { priority: '0.7' }], ['/studio/crm', { priority: '0.7' }],
         ['/studio/vocab', { priority: '0.7' }],
     ].forEach(([path, options]) => add(path, options));

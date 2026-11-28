@@ -27,6 +27,7 @@ test('KNOWN_TOOLS dictionary contains expected studio tools', () => {
     assert.equal(KNOWN_TOOLS.vietyaku, 'VietYaku');
     assert.equal(KNOWN_TOOLS.vocabflip, 'VocabFlip');
     assert.equal(KNOWN_TOOLS.crm, 'Alpha CRM');
+    assert.equal(KNOWN_TOOLS['mesh-optimizer'], 'ALPHA Mesh Optimizer');
 });
 
 test('download metadata accepts query params used by sendBeacon', () => {

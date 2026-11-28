@@ -45,6 +45,7 @@ import eventLibraryRoutes from './routes/eventLibrary.js';
 import ledStudioRoutes from './routes/ledStudio.js';
 import ledStudioWorkspaceRoutes from './routes/ledStudioWorkspace.js';
 import ledStudioWorkspaceAdminRoutes from './routes/ledStudioWorkspaceAdmin.js';
+import meshOptimizerRoutes from './routes/meshOptimizer.js';
 import crmRoutes from './routes/crm.js';
 import channelWebhookRoutes from './routes/channelWebhooks.js';
 import webchatPublicRoutes from './routes/webchatPublic.js';
@@ -150,6 +151,7 @@ app.use('/api/event-library', eventLibraryRoutes);
 app.use('/api/led-studio/workspace', ledStudioWorkspaceRoutes);
 app.use('/api/admin/led-studio-workspace-assets', ledStudioWorkspaceAdminRoutes);
 app.use('/api/led-studio', ledStudioRoutes);
+app.use('/api/mesh-optimizer', meshOptimizerRoutes);
 app.use('/api/tools', toolDownloadRoutes);
 app.use('/api/analytics', analyticsRoutes);
 

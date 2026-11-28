@@ -336,10 +336,172 @@
     return items.filter((it) => known.has(normalizeSfxType18(it?.type || it?.kind)));
   }
 
+  function distToSegment2D(px, pz, ax, az, bx, bz) {
+    const vx = bx - ax, vz = bz - az;
+    const len2 = vx * vx + vz * vz;
+    if (len2 <= 1e-12) return Math.hypot(px - ax, pz - az);
+    const t = Math.max(0, Math.min(1, ((px - ax) * vx + (pz - az) * vz) / len2));
+    return Math.hypot(px - (ax + t * vx), pz - (az + t * vz));
+  }
+
+  function distToRect2D(px, pz, minX, maxX, minZ, maxZ) {
+    const dx = px < minX ? minX - px : (px > maxX ? px - maxX : 0);
+    const dz = pz < minZ ? minZ - pz : (pz > maxZ ? pz - maxZ : 0);
+    return Math.hypot(dx, dz);
+  }
+
+  function distToPolygon2D(px, pz, poly) {
+    if (!Array.isArray(poly) || poly.length < 3) return Infinity;
+    const pts = poly.map((pt) => (Array.isArray(pt) ? [+pt[0] || 0, +pt[1] || 0] : [+pt?.x || 0, +pt?.z || 0]));
+    let inside = false;
+    for (let i = 0, j = pts.length - 1; i < pts.length; j = i++) {
+      const [xi, zi] = pts[i], [xj, zj] = pts[j];
+      if (((zi > pz) !== (zj > pz)) && (px < ((xj - xi) * (pz - zi)) / ((zj - zi) || 1e-12) + xi)) {
+        inside = !inside;
+      }
+    }
+    if (inside) return 0;
+    let best = Infinity;
+    for (let i = 0, j = pts.length - 1; i < pts.length; j = i++) {
+      best = Math.min(best, distToSegment2D(px, pz, pts[j][0], pts[j][1], pts[i][0], pts[i][1]));
+    }
+    return best;
+  }
+
+  function isFiniteSafetyNum(v) {
+    return v !== null && v !== undefined && v !== '' && typeof v !== 'boolean' && Number.isFinite(+v);
+  }
+
+  function computeAudienceDist2D(x, z, input = {}, peopleList = null, hasExplicitLineZ = false, audienceLineZ = 4.0) {
+    let best = Infinity;
+    let usedExplicit2D = false;
+    if (Array.isArray(input.audiencePoints) && input.audiencePoints.length) {
+      usedExplicit2D = true;
+      for (const pt of input.audiencePoints) {
+        if (!pt) continue;
+        const ax = Array.isArray(pt) ? (+pt[0] || 0) : (+pt.x || 0);
+        const az = Array.isArray(pt) ? (+pt[1] || 0) : (+pt.z || 0);
+        best = Math.min(best, Math.hypot(x - ax, z - az));
+      }
+    }
+    if (Array.isArray(input.audiencePolygon) && input.audiencePolygon.length >= 3) {
+      usedExplicit2D = true;
+      best = Math.min(best, distToPolygon2D(x, z, input.audiencePolygon));
+    }
+    if (Array.isArray(input.audienceZones) && input.audienceZones.length) {
+      usedExplicit2D = true;
+      for (const zn of input.audienceZones) {
+        if (!zn) continue;
+        const minX = isFiniteSafetyNum(zn.minX) ? +zn.minX : ((+zn.x || 0) - Math.max(0, +zn.halfW || 0));
+        const maxX = isFiniteSafetyNum(zn.maxX) ? +zn.maxX : ((+zn.x || 0) + Math.max(0, +zn.halfW || 0));
+        const minZ = isFiniteSafetyNum(zn.minZ) ? +zn.minZ : ((+zn.z || 0) - Math.max(0, +zn.halfD || 0));
+        const maxZ = isFiniteSafetyNum(zn.maxZ) ? +zn.maxZ : ((+zn.z || 0) + Math.max(0, +zn.halfD || 0));
+        best = Math.min(best, distToRect2D(x, z, minX, maxX, minZ, maxZ));
+      }
+    }
+    if (usedExplicit2D && Number.isFinite(best)) return best;
+
+    if (!hasExplicitLineZ && Array.isArray(peopleList)) {
+      const audList = peopleList.filter((p) => p && p.type === 'audience' && !p.hidden);
+      if (audList.length) {
+        for (const p of audList) {
+          const px = +(p.pos?.[0] ?? p.x ?? 0) || 0;
+          const pz = +(p.pos?.[2] ?? p.z ?? 0) || 0;
+          const rad = ((Number(p.yaw) || 0) * Math.PI) / 180;
+          const cs = Math.cos(rad), sn = Math.sin(rad);
+          const rawSc = (Number(p.height) > 0 ? Number(p.height) : 1.75) / 1.75;
+          const sc = Array.isArray(input.audience) ? Math.max(0.3, rawSc) : rawSc;
+          const isSeated = p.posture === 'seated' || p.seated === true;
+          const maxSx = isSeated ? 1.18 : 1.22;
+          const occPad = (isSeated ? 0.55 : 0.80) * maxSx;
+          if (Array.isArray(p.seats) && p.seats.length) {
+            const occR = occPad * sc;
+            if (Array.isArray(input.audience)) {
+              for (const st of p.seats) {
+                if (!st) continue;
+                const slx = (Array.isArray(st) ? (+st[0] || 0) : (+st.x || 0)) * sc;
+                const slz = (Array.isArray(st) ? (+st[1] || 0) : (+st.z || 0)) * sc;
+                const wx = px + slx * cs + slz * sn;
+                const wz = pz - slx * sn + slz * cs;
+                best = Math.min(best, Math.max(0, Math.hypot(x - wx, z - wz) - occR));
+              }
+            } else {
+              const seatCount = Math.max(1, Math.min(2400, Math.round(Number(p.count) || 24)));
+              const lim = Math.min(seatCount, p.seats.length);
+              for (let si = 0; si < lim; si++) {
+                const st = p.seats[si];
+                if (!Array.isArray(st) || st.length < 3) continue;
+                const slx = (+st[0] || 0) * sc;
+                const slz = (+st[1] || 0) * sc;
+                const wx = px + slx * cs + slz * sn;
+                const wz = pz - slx * sn + slz * cs;
+                best = Math.min(best, Math.max(0, Math.hypot(x - wx, z - wz) - occR));
+              }
+            }
+          } else {
+            const count = Math.max(1, Math.min(2400, Math.round(Number(p.count) || 24)));
+            const cols = Math.max(1, Math.min(count, Math.round(Number(p.columns) || 12)));
+            const rows = Math.ceil(count / cols);
+            const sp = Math.max(0.3, Math.min(2, Number(p.spacing) || 0.65));
+            const rowSp = sp * (isSeated ? 1.16 : 0.866);
+            const halfW = ((cols - 1) * sp) * 0.5;
+            const maxD = (rows - 1) * rowSp;
+            const padX = (isSeated ? 0.0125 * sp : ((rows > 1 ? 0.25 * sp : 0) + 0.14 * sp)) + occPad;
+            const padZMin = (isSeated ? 0.01 * sp : 0.12 * sp) + occPad;
+            const padZMax = (isSeated ? 0.15 * sp : 0.34 * sp) + occPad;
+            const dx = (x - px) / sc, dz = (z - pz) / sc;
+            const lx = dx * cs - dz * sn;
+            const lz = dx * sn + dz * cs;
+            best = Math.min(best, distToRect2D(lx, lz, -halfW - padX, halfW + padX, -padZMin, maxD + padZMax) * sc);
+          }
+        }
+        if (Number.isFinite(best)) return best;
+      }
+    }
+    return Math.max(0, audienceLineZ - z);
+  }
+
+  function resolveOverheadCeilingM(x, y, z, safetyRadiusM, safetyHeightM, sc, eng, hasExplicitCeiling, venueEnv, ceilingHeightM) {
+    let limit = (venueEnv === 'indoor' || hasExplicitCeiling) ? ceilingHeightM : Infinity;
+    if (!hasExplicitCeiling) {
+      const stageMeshes = Array.isArray(eng?.stage) ? eng.stage : [];
+      let matchedCanopyMesh = false;
+      for (const m of stageMeshes) {
+        if (!m || m.hidden || !m._venueArch18 || !m.bounds) continue;
+        if (!/canopy|roof|ceiling/i.test(String(m.name || ''))) continue;
+        const b = m.bounds;
+        if (distToRect2D(x, z, b.min[0], b.max[0], b.min[2], b.max[2]) < safetyRadiusM && y <= b.max[1] && (y + safetyHeightM) > b.min[1]) {
+          limit = Math.min(limit, b.min[1]);
+          matchedCanopyMesh = true;
+        }
+      }
+      if (!matchedCanopyMesh && sc?.venueEnabled && sc?.venueType === 'outdoor_roof') {
+        const roofW = (Number(sc.deckWidthM) || 14) + 3.0;
+        const roofD = (Number(sc.deckDepthM) || 8) + 2.0;
+        const canopyMinY = 9.2 - 0.85 * 0.5;
+        const canopyMaxY = 9.2 + 0.85 * 0.5;
+        if (distToRect2D(x, z, -roofW * 0.5, roofW * 0.5, -0.5 - roofD * 0.5, -0.5 + roofD * 0.5) < safetyRadiusM && y <= canopyMaxY && (y + safetyHeightM) > canopyMinY) {
+          limit = Math.min(limit, canopyMinY);
+        }
+      }
+    }
+    return limit;
+  }
+
   function computeSfxSafetyZones(input = {}) {
-    const venueEnv = String(input.venueEnv || 'outdoor').toLowerCase() === 'indoor' ? 'indoor' : 'outdoor';
-    const ceilingHeightM = Math.max(2.5, +(input.ceilingHeightM || 12.0));
-    const audienceLineZ = Number.isFinite(+input.audienceLineZ) ? +input.audienceLineZ : 4.0;
+    const sc = root?.STUDIO?.lumi18?.state?.structureConfig18;
+    const eng = root?.STUDIO?.engine;
+    const rawEnv = input.venueEnv !== undefined && input.venueEnv !== null ? String(input.venueEnv).trim() : '';
+    const venueEnv = rawEnv
+      ? (rawEnv.toLowerCase() === 'indoor' ? 'indoor' : 'outdoor')
+      : (sc?.venueEnabled && sc?.venueType === 'indoor_hall' ? 'indoor' : 'outdoor');
+    const hasExplicitCeiling = isFiniteSafetyNum(input.ceilingHeightM);
+    const ceilingHeightM = Math.max(2.5, hasExplicitCeiling ? +input.ceilingHeightM : (isFiniteSafetyNum(sc?.venueHeight) ? +sc.venueHeight : 12.0));
+    const hasExplicitLineZ = isFiniteSafetyNum(input.audienceLineZ);
+    const audienceLineZ = hasExplicitLineZ ? +input.audienceLineZ : 4.0;
+    const peopleList = Array.isArray(input.audience)
+      ? input.audience
+      : (Array.isArray(root?.STUDIO?.seq?.people) ? root.STUDIO.seq.people : null);
     const units = extractStageSfxUnits18(input.units ?? input.sfxUnits);
 
     const zones = [];
@@ -373,26 +535,32 @@
           unitId,
           type,
           severity: 'CRITICAL',
+          blocking: true,
           code: 'INDOOR_PYRO_PROHIBITED',
           message: `${unitId} (${type}) prohibited indoors per NFPA 1126 / EN 16256.`
         });
       }
-      if (y + safetyHeightM > ceilingHeightM) {
+      const unitCeilingM = resolveOverheadCeilingM(x, y, z, safetyRadiusM, safetyHeightM, sc, eng, hasExplicitCeiling, venueEnv, ceilingHeightM);
+      if (Number.isFinite(unitCeilingM) && y + safetyHeightM > unitCeilingM) {
         violations.push({
           unitId,
           type,
           severity: 'CRITICAL',
+          blocking: true,
           code: 'CEILING_CLEARANCE_BREACH',
-          message: `${unitId} safety clearance height (${(y + safetyHeightM).toFixed(1)}m) exceeds venue ceiling (${ceilingHeightM.toFixed(1)}m).`
+          message: `${unitId} safety clearance height (${(y + safetyHeightM).toFixed(1)}m) exceeds venue ceiling (${unitCeilingM.toFixed(1)}m).`
         });
       }
-      if (Math.abs(audienceLineZ - z) < safetyRadiusM) {
+      const audienceDistM = computeAudienceDist2D(x, z, input, peopleList, hasExplicitLineZ, audienceLineZ);
+      if (audienceDistM < safetyRadiusM) {
         violations.push({
           unitId,
           type,
           severity: 'CRITICAL',
+          blocking: true,
           code: 'AUDIENCE_DISTANCE_BREACH',
-          message: `${unitId} is ${Math.abs(audienceLineZ - z).toFixed(2)}m from audience line (minimum required: ${safetyRadiusM}m).`
+          distanceM: +audienceDistM.toFixed(2),
+          message: `${unitId} is ${audienceDistM.toFixed(2)}m from audience (minimum required: ${safetyRadiusM}m).`
         });
       }
     });
@@ -1101,10 +1269,16 @@
   }
 
   function resolveDmxChannels18(l) {
+    const profMod = root?.STUDIO?.profileIR22 || root?.profileIR22;
+    const cachedFootprint = l?.profileKey && profMod?.GDTFStore22?.getSync
+      ? Number(profMod.GDTFStore22.getSync(l.profileKey)?.footprint)
+      : 0;
     const raw =
       +l?.dmxChannelCount ||
       (Array.isArray(l?.dmxChannels) ? l.dmxChannels.length : +l?.dmxChannels) ||
       +l?.channels ||
+      (Number.isFinite(cachedFootprint) && cachedFootprint > 0 ? cachedFootprint : 0) ||
+      +l?.profileIr?.footprint ||
       16;
     return Math.max(1, Math.min(512, Math.round(raw)));
   }
@@ -1306,7 +1480,25 @@
       const name = escapeXml12(l?.name || `Fixture_${idx + 1}`);
       const ir = resolveProfileIr18(l);
       const baseRawFtName = String(ir?.model || l?.oflModel || l?.type || 'Moving Head Beam');
-      const irSig = String(ir?.profileKey || `${ir?.id || baseRawFtName}:${ir?.mode || chCount}:${chCount}`);
+      const irPhys = ir?.physical || {};
+      const irPhysSig = [
+        isFiniteSafetyNum(irPhys.lumens) && Number(irPhys.lumens) >= 0 ? Number(irPhys.lumens) : '',
+        isFiniteSafetyNum(irPhys.powerW) ? Number(irPhys.powerW) : '',
+        isFiniteSafetyNum(irPhys.beamAngleMin) ? Number(irPhys.beamAngleMin) : '',
+        isFiniteSafetyNum(irPhys.weightKg) ? Number(irPhys.weightKg) : ''
+      ].join(',');
+      const irCapSig = (caps) => Array.isArray(caps)
+        ? caps.map((c) => `${c?.dmxFrom ?? ''}-${c?.dmxTo ?? ''}:${c?.name || ''}:${c?.label || ''}:${c?.physFrom ?? ''}:${c?.physTo ?? ''}:${c?.colorHex || c?.hex || ''}:${c?.slotIndex ?? ''}:${c?.goboName || ''}`).join(',')
+        : '';
+      const irSlotsSigFn = (sl) => Array.isArray(sl)
+        ? sl.map((s) => `${s?.offset || ''}:${s?.fineOffset || ''}:${s?.role || ''}:${s?.name || ''}:${s?.defaultDmx ?? ''}:${s?.highlightDmx ?? ''}:${irCapSig(s?.capabilities)}`).join(';')
+        : '';
+      const irSlotsSig = irSlotsSigFn(ir?.slots);
+      const irCellsSig = Array.isArray(ir?.cells)
+        ? ir.cells.map((c) => `${c?.cellIndex ?? c?.index ?? ''}:${c?.key || c?.name || ''}:${c?.moduleIndex ?? ''}:${c?.patch ?? ''}:${Array.isArray(c?.pos) ? c.pos.join(',') : ''}:${irSlotsSigFn(c?.slots)}`).join(';')
+        : '';
+      const irWheelsSig = ir?.wheelColors ? JSON.stringify(ir.wheelColors) : '';
+      const irSig = `${String(ir?.profileKey || `${ir?.id || baseRawFtName}:${ir?.mode || chCount}:${chCount}`)}|${ir?.manufacturer || ''}|${ir?.category || ''}|${irPhysSig}|${irWheelsSig}|${irCellsSig}|${irSlotsSig}`;
       const patchDot = `${reqUni}.${String(reqAddr).padStart(3, '0')}`;
       const absDmxAddr = (reqUni - 1) * 512 + reqAddr;
       return { idx, fixId, name, baseRawFtName, irSig, ir, chCount, reqUni, reqAddr, absDmxAddr, patchDot, posX, posY, ma3PosY, posZ, rotX, rotY, rotZ };
@@ -1318,10 +1510,22 @@
     }
     const slugToSig = new Map();
     const sigToSlug = new Map();
+    const ftNameToSig = new Map();
+    const sigToFtName = new Map();
     return normalized.map((item) => {
       const needsModeSuffix = (sigsByName.get(item.baseRawFtName)?.size || 0) > 1;
       const modeTag = String(item.ir?.mode || `${item.chCount}ch`);
-      const rawFtName = needsModeSuffix ? `${item.baseRawFtName} (${modeTag})` : item.baseRawFtName;
+      const candFtName = needsModeSuffix ? `${item.baseRawFtName} (${modeTag})` : item.baseRawFtName;
+      let rawFtName = sigToFtName.get(item.irSig);
+      if (!rawFtName) {
+        rawFtName = candFtName;
+        let nameIdx = 2;
+        while (ftNameToSig.has(rawFtName) && ftNameToSig.get(rawFtName) !== item.irSig) {
+          rawFtName = `${candFtName} #${nameIdx++}`;
+        }
+        sigToFtName.set(item.irSig, rawFtName);
+        ftNameToSig.set(rawFtName, item.irSig);
+      }
       let fixtureSlug = sigToSlug.get(item.irSig);
       if (!fixtureSlug) {
         const baseSlug = slugifyMa2FileName18(`${item.ir?.id || item.baseRawFtName}_${modeTag}`, item.idx);
@@ -1343,11 +1547,136 @@
     return clean || `fixture_type_${fallbackIdx + 1}`;
   }
 
+  function sanitizeProfileCap18(c) {
+    if (!c || typeof c !== 'object') return null;
+    const d0 = Number(c.dmxFrom ?? 0);
+    const d1 = Number(c.dmxTo ?? 255);
+    const dmxFrom = Math.max(0, Math.min(255, Math.round(Number.isFinite(d0) ? d0 : 0)));
+    const dmxTo = Math.max(dmxFrom, Math.min(255, Math.round(Number.isFinite(d1) ? d1 : 255)));
+    const out = {
+      name: String(c.name || '').slice(0, 80),
+      dmxFrom,
+      dmxTo
+    };
+    if (c.label != null && c.label !== '') out.label = String(c.label).slice(0, 80);
+    if (c.subattribute != null && c.subattribute !== '') out.subattribute = String(c.subattribute).slice(0, 64);
+    if (isFiniteSafetyNum(c.physFrom)) out.physFrom = Number(c.physFrom);
+    if (isFiniteSafetyNum(c.physTo)) out.physTo = Number(c.physTo);
+    const hex = c.colorHex || c.hex;
+    if (typeof hex === 'string' && hex.trim()) out.colorHex = hex.trim().slice(0, 32);
+    if (isFiniteSafetyNum(c.slotIndex)) out.slotIndex = Math.round(Number(c.slotIndex));
+    if (c.goboName != null && c.goboName !== '') out.goboName = String(c.goboName).slice(0, 80);
+    return out;
+  }
+
+  function sanitizeProfileSlot18(s, idx) {
+    if (!s || typeof s !== 'object') return null;
+    const rawOff = Number(s.offset ?? (idx + 1));
+    if (!Number.isFinite(rawOff) || rawOff < 1 || rawOff > 512) return null;
+    const rawFine = s.fineOffset != null && s.fineOffset !== '' ? Number(s.fineOffset) : NaN;
+    const fineOffset = Number.isFinite(rawFine) && rawFine >= 1 && rawFine <= 512 ? Math.round(rawFine) : null;
+    const rawDef = Number(s.defaultDmx ?? s.defaultValue ?? 0);
+    const rawHi = Number(s.highlightDmx ?? 255);
+    return {
+      offset: Math.round(rawOff),
+      fineOffset,
+      name: String(s.name || `Ch${idx + 1}`).slice(0, 80),
+      role: String(s.role || 'other').slice(0, 40),
+      defaultDmx: Math.max(0, Math.min(255, Math.round(Number.isFinite(rawDef) ? rawDef : 0))),
+      highlightDmx: Math.max(0, Math.min(255, Math.round(Number.isFinite(rawHi) ? rawHi : 255))),
+      capabilities: Array.isArray(s.capabilities)
+        ? s.capabilities.slice(0, 128).map(sanitizeProfileCap18).filter(Boolean)
+        : []
+    };
+  }
+
+  function sanitizeProfileIr18(rawIr, fallbackChCount = 16) {
+    if (!rawIr || typeof rawIr !== 'object') return null;
+    const slots = Array.isArray(rawIr.slots)
+      ? rawIr.slots.slice(0, 512).map((s, i) => sanitizeProfileSlot18(s, i)).filter(Boolean)
+      : [];
+    const cells = Array.isArray(rawIr.cells)
+      ? rawIr.cells.slice(0, 256).map((c, ci) => {
+          if (!c || typeof c !== 'object') return null;
+          const cellSlots = Array.isArray(c.slots)
+            ? c.slots.slice(0, 64).map((s, si) => sanitizeProfileSlot18(s, si)).filter(Boolean)
+            : [];
+          const patchRaw = Number(c.patch);
+          const pos = Array.isArray(c.pos)
+            ? [Number(c.pos[0]) || 0, Number(c.pos[1]) || 0, Number(c.pos[2]) || 0]
+            : undefined;
+          const cellOut = {
+            cellIndex: isFiniteSafetyNum(c.cellIndex ?? c.index) ? Math.round(Number(c.cellIndex ?? c.index)) : ci,
+            key: String(c.key || c.name || `Instance_${ci + 1}`).slice(0, 80),
+            slots: cellSlots
+          };
+          if (isFiniteSafetyNum(c.moduleIndex)) cellOut.moduleIndex = Math.round(Number(c.moduleIndex));
+          if (Number.isFinite(patchRaw) && patchRaw >= 1 && patchRaw <= 512) cellOut.patch = Math.round(patchRaw);
+          if (pos) cellOut.pos = pos;
+          return cellOut;
+        }).filter(Boolean)
+      : [];
+    if (!slots.length && !cells.length && !rawIr.profileKey) return null;
+
+    let maxOff = Number(rawIr.footprint) || 0;
+    for (const s of slots) maxOff = Math.max(maxOff, s.offset, s.fineOffset || 0);
+    for (const c of cells) {
+      for (const s of c.slots) maxOff = Math.max(maxOff, s.offset, s.fineOffset || 0);
+    }
+    const footprint = Math.max(1, Math.min(512, Math.round(maxOff || fallbackChCount || 16)));
+    const pIn = rawIr.physical && typeof rawIr.physical === 'object' ? rawIr.physical : {};
+    const physical = {};
+    if (isFiniteSafetyNum(pIn.lumens) && Number(pIn.lumens) >= 0) physical.lumens = Number(pIn.lumens);
+    if (isFiniteSafetyNum(pIn.beamAngleMin) && Number(pIn.beamAngleMin) > 0) physical.beamAngleMin = Number(pIn.beamAngleMin);
+    if (isFiniteSafetyNum(pIn.beamAngleMax) && Number(pIn.beamAngleMax) > 0) physical.beamAngleMax = Number(pIn.beamAngleMax);
+    if (isFiniteSafetyNum(pIn.powerW) && Number(pIn.powerW) >= 0) physical.powerW = Number(pIn.powerW);
+    if (isFiniteSafetyNum(pIn.weightKg) && Number(pIn.weightKg) >= 0) physical.weightKg = Number(pIn.weightKg);
+    if (isFiniteSafetyNum(pIn.colorTempK) && Number(pIn.colorTempK) > 0) physical.colorTempK = Number(pIn.colorTempK);
+    if (isFiniteSafetyNum(pIn.panMaxDeg) && Number(pIn.panMaxDeg) >= 0) physical.panMaxDeg = Number(pIn.panMaxDeg);
+    if (isFiniteSafetyNum(pIn.tiltMaxDeg) && Number(pIn.tiltMaxDeg) >= 0) physical.tiltMaxDeg = Number(pIn.tiltMaxDeg);
+
+    let wheelColors;
+    if (rawIr.wheelColors && typeof rawIr.wheelColors === 'object' && !Array.isArray(rawIr.wheelColors)) {
+      const wc = {};
+      let wCount = 0;
+      for (const [wName, wList] of Object.entries(rawIr.wheelColors)) {
+        if (wCount >= 16) break;
+        if (!Array.isArray(wList)) continue;
+        wc[String(wName).slice(0, 64)] = wList.slice(0, 64).map((ws, wi) => ({
+          index: isFiniteSafetyNum(ws?.index) ? Math.round(Number(ws.index)) : (wi + 1),
+          name: String(ws?.name || `Slot ${wi + 1}`).slice(0, 64),
+          colorHex: typeof (ws?.colorHex || ws?.hex) === 'string' ? String(ws.colorHex || ws.hex).slice(0, 32) : null
+        }));
+        wCount++;
+      }
+      if (wCount > 0) wheelColors = wc;
+    }
+
+    const out = {
+      id: String(rawIr.id || rawIr.model || 'custom').slice(0, 120),
+      manufacturer: String(rawIr.manufacturer || 'Generic').slice(0, 120),
+      model: String(rawIr.model || 'Custom Fixture').slice(0, 120),
+      mode: String(rawIr.mode || `${footprint}ch`).slice(0, 80),
+      footprint,
+      slots,
+      cells,
+      physical
+    };
+    if (typeof rawIr.profileKey === 'string' && rawIr.profileKey.trim()) out.profileKey = rawIr.profileKey.trim().slice(0, 180);
+    if (typeof rawIr.category === 'string' && rawIr.category.trim()) out.category = rawIr.category.trim().slice(0, 40);
+    if (wheelColors) out.wheelColors = wheelColors;
+    return out;
+  }
+
   function resolveProfileIr18(light) {
     const profMod = root?.STUDIO?.profileIR22 || root?.profileIR22;
     if (light?.profileKey && profMod?.GDTFStore22?.getSync) {
       const cached = profMod.GDTFStore22.getSync(light.profileKey);
       if (cached) return cached;
+    }
+    if (light?.profileIr && typeof light.profileIr === 'object') {
+      const sanitized = sanitizeProfileIr18(light.profileIr, resolveDmxChannels18(light));
+      if (sanitized) return sanitized;
     }
     const oflKey = light?.oflProfileId || light?.oflId || light?.oflModel || light?.model;
     if (oflKey && typeof root?.resolveOflFixture === 'function' && profMod?.compileOflProfile) {
@@ -1371,7 +1700,12 @@
           capabilities: Array.isArray(ch.capabilities) ? ch.capabilities : []
         })),
         cells: [],
-        physical: { beamAngleMin: light.beamAngleDeg || 12, lumens: light.luminousFluxLm || 10000 }
+        physical: {
+          beamAngleMin: light.beamAngleDeg || 12,
+          lumens: (light.luminousFluxLm !== null && light.luminousFluxLm !== undefined && light.luminousFluxLm !== '' && typeof light.luminousFluxLm !== 'boolean' && Number.isFinite(Number(light.luminousFluxLm)) && Number(light.luminousFluxLm) >= 0)
+            ? Number(light.luminousFluxLm)
+            : 10000
+        }
       };
     }
     if (profMod?.buildPlaceholderProfile) {
@@ -1524,7 +1858,10 @@
     };
 
     const beamDeg = Number(ir.physical?.beamAngleMax || ir.physical?.beamAngleMin || 12);
-    const lumens = Number(ir.physical?.lumens || 10000);
+    const rawLumens = ir.physical?.lumens;
+    const lumens = (rawLumens !== null && rawLumens !== undefined && rawLumens !== '' && typeof rawLumens !== 'boolean' && Number.isFinite(Number(rawLumens)) && Number(rawLumens) >= 0)
+      ? Number(rawLumens)
+      : 10000;
     const cat = String(ir.category || '').toLowerCase();
     const irId = String(ir.id || ir.model || '').toLowerCase();
     const hasPanTilt = mainSlots.some((s) => s.role === 'pan' || s.role === 'tilt');
@@ -1577,25 +1914,43 @@
     ];
 
     const instanceXmlParts = [`      <Instance index="0" module_index="0" patch="1" x="0.000" y="0.000" z="0.000" />`];
-    if (cells.length > 0 && Array.isArray(cells[0]?.slots) && cells[0].slots.length > 0) {
-      const firstCellMinOff = Math.min(...cells[0].slots.map((s) => s.offset || 1));
-      const relCellSlots = cells[0].slots.map((s) => ({
-        ...s,
-        offset: (s.offset || 1) - firstCellMinOff + 1,
-        fineOffset: s.fineOffset ? (s.fineOffset - firstCellMinOff + 1) : null
-      }));
-      moduleXmlParts.push(
-        `      <Module index="1" name="LED Cell" class="LED" beamtype="Wash" beam_angle="${beamDeg}" beam_intensity="${Math.round(lumens / Math.max(1, cells.length))}">\n${renderChannelTypes(relCellSlots, 0)}\n      </Module>`
-      );
-      cells.forEach((cell, ci) => {
-        const slotOffsets = Array.isArray(cell.slots) ? cell.slots.map((s) => Number(s.offset)).filter(Number.isFinite) : [];
-        const patchRaw = Number.isFinite(Number(cell.patch)) && Number(cell.patch) >= 1
-          ? Number(cell.patch)
-          : (slotOffsets.length ? Math.min(...slotOffsets) : 1);
-        const patchStart = Math.max(1, Math.min(512, Math.round(patchRaw)));
-        const pos = Array.isArray(cell.pos) ? cell.pos : [((ci - (cells.length - 1) * 0.5) * 0.08), 0, 0];
+    const activeCells = cells.filter((cell) => Array.isArray(cell?.slots) && cell.slots.length > 0);
+    if (activeCells.length > 0) {
+      const cellModMap = new Map();
+      let nextCellModIdx = 1;
+      const cellLumens = Math.round(lumens / Math.max(1, activeCells.length));
+      activeCells.forEach((cell, ci) => {
+        const slotOffsets = cell.slots.map((s) => Number(s?.offset)).filter((n) => Number.isFinite(n) && n >= 1);
+        const minSlotOff = slotOffsets.length ? Math.min(...slotOffsets) : 1;
+        const explicitPatch = Number.isFinite(Number(cell.patch)) && Number(cell.patch) >= 1 ? Math.round(Number(cell.patch)) : null;
+        const cellBase = explicitPatch !== null && explicitPatch <= minSlotOff ? explicitPatch : minSlotOff;
+        const patchStart = Math.max(1, Math.min(512, cellBase));
+        const relCellSlots = cell.slots
+          .filter((s) => s && Number.isFinite(Number(s.offset)) && Number(s.offset) >= 1)
+          .map((s) => {
+            const relOff = Math.max(1, Math.round(Number(s.offset)) - patchStart + 1);
+            const rawFine = s.fineOffset != null && s.fineOffset !== '' ? Number(s.fineOffset) : NaN;
+            const relFine = Number.isFinite(rawFine) && rawFine >= patchStart ? (Math.round(rawFine) - patchStart + 1) : null;
+            return {
+              ...s,
+              offset: relOff,
+              fineOffset: relFine
+            };
+          })
+          .sort((a, b) => (Number(a.offset) || 0) - (Number(b.offset) || 0));
+        const cellChXml = renderChannelTypes(relCellSlots, 0);
+        let modIdx = cellModMap.get(cellChXml);
+        if (modIdx === undefined) {
+          modIdx = nextCellModIdx++;
+          cellModMap.set(cellChXml, modIdx);
+          const modName = modIdx === 1 ? 'LED Cell' : `LED Cell ${modIdx}`;
+          moduleXmlParts.push(
+            `      <Module index="${modIdx}" name="${modName}" class="LED" beamtype="Wash" beam_angle="${beamDeg}" beam_intensity="${cellLumens}">\n${cellChXml}\n      </Module>`
+          );
+        }
+        const pos = Array.isArray(cell.pos) ? cell.pos : [((ci - (activeCells.length - 1) * 0.5) * 0.08), 0, 0];
         instanceXmlParts.push(
-          `      <Instance index="${ci + 1}" module_index="1" patch="${Math.max(1, patchStart)}" x="${Number(pos[0] || 0).toFixed(3)}" y="${(-Number(pos[2] || 0)).toFixed(3)}" z="${Number(pos[1] || 0).toFixed(3)}" />`
+          `      <Instance index="${ci + 1}" module_index="${modIdx}" patch="${patchStart}" x="${Number(pos[0] || 0).toFixed(3)}" y="${(-Number(pos[2] || 0)).toFixed(3)}" z="${Number(pos[1] || 0).toFixed(3)}" />`
         );
       });
     }

@@ -8,6 +8,7 @@ export const KNOWN_TOOLS = {
     vietyaku: 'VietYaku',
     vocabflip: 'VocabFlip',
     crm: 'Alpha CRM',
+    'mesh-optimizer': 'ALPHA Mesh Optimizer',
 };
 
 const VALID_PLATFORMS = ['windows', 'android', 'mac', 'linux', 'other'];

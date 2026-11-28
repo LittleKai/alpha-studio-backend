@@ -112,6 +112,7 @@ test('vẫn chặn bản phát hành app kể cả khi không có trong usedKeys
     assert.match(blockedDeleteReason('vocabflip-app/version.json', used), /bản phát hành/);
     assert.match(blockedDeleteReason('vietyaku-app/VietYaku-1.0.zip', used), /bản phát hành/);
     assert.match(blockedDeleteReason('crm-app/version.json', used), /bản phát hành/);
+    assert.match(blockedDeleteReason('mesh-optimizer-app/version.json', used), /bản phát hành/);
 });
 
 test('key rỗng bị từ chối', () => {

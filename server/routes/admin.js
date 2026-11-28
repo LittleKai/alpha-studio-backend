@@ -793,7 +793,7 @@ export function extractSectionB2Keys(sections) {
 // `version.json` manifest is the source of truth, published by each app's
 // build-and-release skill. Treat them as referenced so they are never listed
 // as orphaned and deleted, which would 404 the /studio download links.
-const APP_RELEASE_PREFIXES = ['vocabflip-app/', 'vietyaku-app/', 'crm-app/'];
+const APP_RELEASE_PREFIXES = ['vocabflip-app/', 'vietyaku-app/', 'crm-app/', 'mesh-optimizer-app/'];
 const isAppReleaseKey = (key) => APP_RELEASE_PREFIXES.some(prefix => key.startsWith(prefix));
 
 /**
