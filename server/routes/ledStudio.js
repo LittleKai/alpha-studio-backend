@@ -2,6 +2,8 @@ import express from 'express';
 import crypto from 'node:crypto';
 import mongoose from 'mongoose';
 import LedStudioProject from '../models/LedStudioProject.js';
+import LedStudioWorkspaceProject from '../models/LedStudioWorkspaceProject.js';
+import LedStudioWorkspaceAsset from '../models/LedStudioWorkspaceAsset.js';
 import LedStudioPreset, { PRESET_CATEGORIES, PRESET_TYPES } from '../models/LedStudioPreset.js';
 import User from '../models/User.js';
 import Transaction from '../models/Transaction.js';
@@ -26,7 +28,9 @@ import {
   generatePresignedDownloadUrl,
   uploadFile,
   downloadFile,
-  deleteFile
+  deleteFile,
+  isLedWorkspaceB2Configured,
+  generateWorkspacePresignedGetUrl
 } from '../utils/b2Storage.js';
 import {
   generateStageDxf,
@@ -321,6 +325,45 @@ function issueSessionTicketCookie(res, sub, mode) {
   return new Date(nowMs + SESSION_TICKET_MAX_AGE_SEC * 1000).toISOString();
 }
 
+async function findSharedProjectByTokenHash(tokenHash, { selectPayload = false, lean = true } = {}) {
+  const canQueryWorkspace =
+    mongoose.connection?.readyState === 1 ||
+    LedStudioWorkspaceProject.findOne !== mongoose.Model.findOne;
+  if (canQueryWorkspace) {
+    const wsQuery = LedStudioWorkspaceProject.findOne({ shareTokenHash: tokenHash, shareEnabled: true });
+    let wsProject = null;
+    if (wsQuery) {
+      if (lean) {
+        wsProject = typeof wsQuery.select === 'function'
+          ? await wsQuery.select('+sharePasswordHash').lean()
+          : await wsQuery.lean();
+      } else {
+        wsProject = await wsQuery;
+      }
+    }
+    if (wsProject) {
+      return { kind: 'workspace', project: wsProject };
+    }
+  }
+
+  const legacySelect = selectPayload ? '+projectPayload +sharePasswordHash' : '+sharePasswordHash';
+  const query = LedStudioProject.findOne({ shareTokenHash: tokenHash, shareEnabled: true });
+  let legacyProject = null;
+  if (query) {
+    if (lean) {
+      legacyProject = typeof query.select === 'function'
+        ? await query.select(legacySelect).lean()
+        : await query.lean();
+    } else {
+      legacyProject = await query;
+    }
+  }
+  if (legacyProject) {
+    return { kind: 'legacy', project: legacyProject };
+  }
+  return { kind: null, project: null };
+}
+
 router.post('/session-ticket', async (req, res) => {
   try {
     if (!String(process.env.LUMI_STUDIO_TICKET_SECRET || '').trim()) {
@@ -343,10 +386,7 @@ router.post('/session-ticket', async (req, res) => {
       }
 
       const tokenHash = hashShareToken(rawShareToken);
-      const query = LedStudioProject.findOne({ shareTokenHash: tokenHash, shareEnabled: true });
-      const project = typeof query?.select === 'function'
-        ? await query.select('+sharePasswordHash').lean()
-        : await query?.lean();
+      const { kind, project } = await findSharedProjectByTokenHash(tokenHash, { selectPayload: false, lean: true });
       const check = validateShareAccess(project, rawShareToken);
       if (!check.ok) {
         return res.status(403).json({
@@ -407,7 +447,8 @@ router.post('/session-ticket', async (req, res) => {
         });
       }
 
-      const expiresAt = issueSessionTicketCookie(res, `share:${project._id}`, 'share');
+      const subjectId = kind === 'workspace' ? `share:ws:${project.id}` : `share:${project._id}`;
+      const expiresAt = issueSessionTicketCookie(res, subjectId, 'share');
       return res.status(200).json({
         success: true,
         message: 'OK',
@@ -1003,10 +1044,7 @@ router.get('/share/:shareToken', async (req, res) => {
   try {
     const rawToken = String(req.params.shareToken || '');
     const tokenHash = hashShareToken(rawToken);
-    const query = LedStudioProject.findOne({ shareTokenHash: tokenHash, shareEnabled: true });
-    const project = typeof query.select === 'function'
-      ? await query.select('+projectPayload +sharePasswordHash').lean()
-      : await query.lean();
+    const { kind, project } = await findSharedProjectByTokenHash(tokenHash, { selectPayload: true, lean: true });
     const check = validateShareAccess(project, rawToken);
     if (!check.ok) {
       return res.status(403).json({ success: false, message: check.reason });
@@ -1031,9 +1069,9 @@ router.get('/share/:shareToken', async (req, res) => {
             mode: 'client_review_readonly',
             requiresPassword: true,
             passwordProtected: true,
-            projectId: project._id,
+            projectId: kind === 'workspace' ? project.id : project._id,
             title: project.title,
-            description: project.description,
+            description: project.description || '',
             stageSummary: project.stageSummary,
             shareExpiresAt: proGate.expiresAt,
             shareUntilPro: Boolean(project.shareUntilPro)
@@ -1044,6 +1082,63 @@ router.get('/share/:shareToken', async (req, res) => {
         success: false,
         code: 'INVALID_SHARE_PASSWORD',
         message: pwdCheck.reason
+      });
+    }
+
+    if (kind === 'workspace') {
+      const assetUrls = {};
+      if (Array.isArray(project.assetIds) && project.assetIds.length > 0) {
+        const assets = await LedStudioWorkspaceAsset.find({
+          owner: project.owner,
+          assetId: { $in: project.assetIds },
+          status: 'active'
+        }).lean();
+        const configured = isLedWorkspaceB2Configured();
+        const urls = await Promise.all(
+          assets.map((a) =>
+            configured
+              ? generateWorkspacePresignedGetUrl(a.objectKey, a.versionId, 3600, `${a.assetId}.bin`)
+              : Promise.resolve(null)
+          )
+        );
+        assets.forEach((a, idx) => {
+          assetUrls[a.assetId] = {
+            assetId: a.assetId,
+            sha256: a.sha256,
+            sizeBytes: a.sizeBytes,
+            mimeType: a.mimeType,
+            kind: a.kind,
+            downloadUrl: urls[idx]
+          };
+        });
+      }
+      if (!project.manifest?.scene) {
+        return res.status(404).json({ success: false, message: 'Shared project stage payload is unavailable' });
+      }
+      return res.json({
+        success: true,
+        message: 'OK',
+        data: {
+          mode: 'client_review_readonly',
+          source: 'workspace',
+          requiresPassword: false,
+          passwordProtected: Boolean(project.sharePasswordProtected),
+          projectId: project.id,
+          title: project.title,
+          description: '',
+          stageSummary: project.stageSummary,
+          shareExpiresAt: proGate.expiresAt,
+          shareUntilPro: Boolean(project.shareUntilPro),
+          unlockedPro: false,
+          reviewStatus: project.reviewStatus || 'pending',
+          reviewBy: project.reviewBy || '',
+          reviewNote: project.reviewNote || '',
+          reviewUpdatedAt: project.reviewUpdatedAt || null,
+          reviewComments: Array.isArray(project.reviewComments) ? project.reviewComments : [],
+          manifest: project.manifest,
+          assetUrls,
+          updatedAt: project.updatedAt
+        }
       });
     }
 
@@ -1071,6 +1166,7 @@ router.get('/share/:shareToken', async (req, res) => {
       message: 'OK',
       data: {
         mode: 'client_review_readonly',
+        source: 'legacy',
         requiresPassword: false,
         passwordProtected: Boolean(project.sharePasswordProtected),
         projectId: project._id,
@@ -1097,7 +1193,7 @@ router.get('/share/:shareToken', async (req, res) => {
 
 async function loadSharedProjectForReview(rawToken, incomingPassword) {
   const tokenHash = hashShareToken(rawToken);
-  const project = await LedStudioProject.findOne({ shareTokenHash: tokenHash, shareEnabled: true });
+  const { kind, project } = await findSharedProjectByTokenHash(tokenHash, { selectPayload: false, lean: false });
   const check = validateShareAccess(project, rawToken);
   if (!check.ok) {
     return { status: 403, error: check.reason };
@@ -1111,8 +1207,9 @@ async function loadSharedProjectForReview(rawToken, incomingPassword) {
     };
   }
   if (project.sharePasswordProtected && !project.sharePasswordHash) {
-    const q = LedStudioProject.findOne({ shareTokenHash: tokenHash, shareEnabled: true });
-    const leanWithPwd = typeof q.select === 'function' ? await q.select('+sharePasswordHash').lean() : null;
+    const Model = kind === 'workspace' ? LedStudioWorkspaceProject : LedStudioProject;
+    const q = Model.findOne({ shareTokenHash: tokenHash, shareEnabled: true });
+    const leanWithPwd = typeof q?.select === 'function' ? await q.select('+sharePasswordHash').lean() : null;
     if (leanWithPwd?.sharePasswordHash) {
       project.sharePasswordHash = leanWithPwd.sharePasswordHash;
     }

@@ -57,7 +57,61 @@ const ledStudioWorkspaceProjectSchema = new mongoose.Schema({
     ledCount: { type: Number, default: 0 },
     lightCount: { type: Number, default: 0 },
     cueCount: { type: Number, default: 0 }
-  }
+  },
+  shareEnabled: {
+    type: Boolean,
+    default: false
+  },
+  shareTokenHash: {
+    type: String,
+    default: null,
+    index: true
+  },
+  shareExpiresAt: {
+    type: Date,
+    default: null
+  },
+  shareUntilPro: {
+    type: Boolean,
+    default: false
+  },
+  sharePasswordProtected: {
+    type: Boolean,
+    default: false
+  },
+  sharePasswordHash: {
+    type: String,
+    default: null,
+    select: false
+  },
+  reviewStatus: {
+    type: String,
+    enum: ['pending', 'approved', 'changes_requested'],
+    default: 'pending'
+  },
+  reviewBy: {
+    type: String,
+    default: '',
+    maxlength: 120
+  },
+  reviewNote: {
+    type: String,
+    default: '',
+    maxlength: 1000
+  },
+  reviewUpdatedAt: {
+    type: Date,
+    default: null
+  },
+  reviewComments: [{
+    id: { type: String, required: true },
+    author: { type: String, default: 'Khách hàng', maxlength: 100 },
+    message: { type: String, required: true, maxlength: 800 },
+    position: [{ type: Number }],
+    targetName: { type: String, default: '', maxlength: 120 },
+    resolved: { type: Boolean, default: false },
+    createdAt: { type: Date, default: Date.now }
+  }]
 }, {
   timestamps: true
 });

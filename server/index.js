@@ -64,6 +64,7 @@ import StudioGeneration from './models/StudioGeneration.js';
 import { buildEndedSessionUpdate } from './retention/terminalUpdates.js';
 import { localStorageMount } from './storage/localStorageMount.js';
 import { buildAllowedOrigins, buildCorsOptions } from './config/cors.js';
+import { resolveTrustProxy } from './config/trustProxy.js';
 import { purgeExpiredPendingTransactions } from './utils/transactionCleanup.js';
 import { backfillServiceArticleViewsFromPageVisits } from './utils/articleViews.js';
 
@@ -71,6 +72,10 @@ import { backfillServiceArticleViewsFromPageVisits } from './utils/articleViews.
 dotenv.config();
 
 const app = express();
+const trustProxy = resolveTrustProxy(process.env);
+if (trustProxy !== false) {
+    app.set('trust proxy', trustProxy);
+}
 const PORT = process.env.PORT || 3001;
 
 // Security headers

@@ -7,7 +7,13 @@ import LedStudioWorkspaceProject from '../models/LedStudioWorkspaceProject.js';
 import LedStudioWorkspaceAsset, { WORKSPACE_ASSET_KINDS } from '../models/LedStudioWorkspaceAsset.js';
 import LedStudioWorkspaceUpload from '../models/LedStudioWorkspaceUpload.js';
 import LedStudioWorkspaceQuota from '../models/LedStudioWorkspaceQuota.js';
-import { sanitizeStageSummary } from './ledStudio.js';
+import {
+  sanitizeStageSummary,
+  hashShareToken,
+  hashSharePassword,
+  FREE_SHARE_MAX_HOURS,
+  normalizeUserLumiState
+} from './ledStudio.js';
 import {
   isLedWorkspaceB2Configured,
   getLedWorkspaceBucketName,
@@ -97,6 +103,15 @@ function serializeProjectSummary(doc) {
     hasLocalOnlyMedia: Boolean(doc.hasLocalOnlyMedia),
     stageSummary: doc.stageSummary || {},
     manifestBytes: doc.manifestBytes || 0,
+    shareEnabled: Boolean(doc.shareEnabled),
+    shareExpiresAt: doc.shareExpiresAt || null,
+    shareUntilPro: Boolean(doc.shareUntilPro),
+    passwordProtected: Boolean(doc.sharePasswordProtected),
+    reviewStatus: doc.reviewStatus || 'pending',
+    reviewBy: doc.reviewBy || '',
+    reviewNote: doc.reviewNote || '',
+    reviewUpdatedAt: doc.reviewUpdatedAt || null,
+    reviewCommentsCount: Array.isArray(doc.reviewComments) ? doc.reviewComments.length : 0,
     createdAt: doc.createdAt,
     updatedAt: doc.updatedAt
   };
@@ -108,7 +123,7 @@ router.get('/projects', async (req, res) => {
     const [projects, quotaUsage] = await Promise.all([
       LedStudioWorkspaceProject.find({ owner: req.user._id })
         .sort({ updatedAt: -1 })
-        .select('id title revision hasLocalOnlyMedia stageSummary manifestBytes createdAt updatedAt')
+        .select('id title revision hasLocalOnlyMedia stageSummary manifestBytes shareEnabled shareExpiresAt shareUntilPro sharePasswordProtected reviewStatus reviewBy reviewNote reviewUpdatedAt reviewComments createdAt updatedAt')
         .lean(),
       computeReferencedBytesForOwner(req.user._id)
     ]);
@@ -283,6 +298,7 @@ router.get('/projects/:id', async (req, res) => {
       data: {
         project: {
           ...serializeProjectSummary(project),
+          reviewComments: Array.isArray(project.reviewComments) ? project.reviewComments : [],
           manifest: project.manifest
         },
         assetUrls
@@ -436,6 +452,68 @@ router.delete('/projects/:id', async (req, res) => {
       success: true,
       message: 'Project deleted; B2 asset versions retained for admin management',
       data: { id: req.params.id }
+    });
+  } catch (err) {
+    return res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+router.post('/projects/:id/share', async (req, res) => {
+  try {
+    const { enabled = true, expiresInHours = FREE_SHARE_MAX_HOURS, untilPro = false, password } = req.body || {};
+    const project = await LedStudioWorkspaceProject.findOne({
+      id: req.params.id,
+      owner: req.user._id
+    });
+    if (!project) {
+      return res.status(404).json({ success: false, message: 'Project not found' });
+    }
+    if (!enabled) {
+      project.shareEnabled = false;
+      project.shareTokenHash = null;
+      project.shareExpiresAt = null;
+      project.shareUntilPro = false;
+      project.sharePasswordProtected = false;
+      project.sharePasswordHash = null;
+      await project.save();
+      return res.json({
+        success: true,
+        message: 'Share disabled',
+        data: { shareEnabled: false, passwordProtected: false }
+      });
+    }
+    const ownerSub = normalizeUserLumiState(req.user);
+    if (untilPro && !ownerSub.proActive) {
+      return res.status(403).json({
+        success: false,
+        code: 'PRO_REQUIRED',
+        message: 'Chỉ tài khoản đang có gói Pro mới tạo được link hiệu lực theo thời hạn gói Pro.'
+      });
+    }
+    const rawToken = crypto.randomBytes(24).toString('base64url');
+    const hours = Math.min(FREE_SHARE_MAX_HOURS, Math.max(1, Number(expiresInHours) || FREE_SHARE_MAX_HOURS));
+    project.shareEnabled = true;
+    project.shareTokenHash = hashShareToken(rawToken);
+    project.shareUntilPro = Boolean(untilPro);
+    project.shareExpiresAt = untilPro ? null : new Date(Date.now() + hours * 3600_000);
+    if (typeof password === 'string' && password.trim().length > 0) {
+      project.sharePasswordProtected = true;
+      project.sharePasswordHash = hashSharePassword(password.trim());
+    } else if (password === '' || password === null) {
+      project.sharePasswordProtected = false;
+      project.sharePasswordHash = null;
+    }
+    await project.save();
+    return res.json({
+      success: true,
+      message: 'Share link generated',
+      data: {
+        shareToken: rawToken,
+        shareEnabled: true,
+        shareExpiresAt: untilPro ? ownerSub.expiresAt : project.shareExpiresAt,
+        shareUntilPro: project.shareUntilPro,
+        passwordProtected: Boolean(project.sharePasswordProtected)
+      }
     });
   } catch (err) {
     return res.status(500).json({ success: false, message: err.message });

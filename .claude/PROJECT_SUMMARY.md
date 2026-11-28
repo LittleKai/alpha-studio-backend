@@ -1,6 +1,6 @@
 # PROJECT SUMMARY — Alpha Studio Backend
 
-**Last Updated:** 2026-11-28 · **Session:** 36 · **Setup baseline:** 2026-11-22 · **applied:** 2026-11-22 · **mode:** upgrade
+**Last Updated:** 2026-11-28 · **Session:** 37 · **Setup baseline:** 2026-11-22 · **applied:** 2026-11-22 · **mode:** upgrade
 
 > Trạng thái hiện tại, không phải changelog (`archive/PROJECT_SUMMARY_v1.md` hết hiệu lực). **Chỉ cập nhật file này khi trạng thái đổi:** `Last Updated` + `Session`, Trạng thái (`⏳/🚧/✅`), Giả định/Cấu trúc/Phụ thuộc, xoá TODO xong (không giữ `[x]`), sửa drift theo code. **Giữ gọn:** `Ghi chú` ≤ ~120 ký tự (*cái gì* + symbol chính; quy ước/bẫy/schema theo `AGENTS.md`). Vượt ~6KB ⇒ dọn trước khi thêm.
 
@@ -15,7 +15,7 @@
 | Hạng mục | TT | File chính | Ghi chú |
 |---|---|---|---|
 | Auth, users, roles | 🔶 | `server/routes/auth.js`, `server/middleware/auth.js` | `tokenVersion` revocation, ẩn reset fields; chờ smoke sandbox |
-| CMS (Course/Job/Partner/Prompt), tin & dịch vụ | ✅ | `server/routes/{articles,serviceCategories}.js`, `server/utils/articleViews.js` | `vi` bắt buộc (`en` tùy chọn); `contentSections` 9 kind (gồm `videos` xem trước MP4/WebM); `/services` (Flower Street, HOME, Nhà anh Thái, Lào Cai, image-to-3D, Video-to-3D LED) |
+| CMS (Course/Job/Partner/Prompt), tin & dịch vụ | ✅ | `server/routes/{articles,serviceCategories}.js`, `server/utils/articleViews.js` | `vi` bắt buộc (`en` tuỳ chọn); `contentSections` 9 kind (gồm `videos`); `/services` (Flower Street, HOME, Thái, Lào Cai, img/video-to-3D) |
 | Bình luận, xem & tải | ✅ | `server/routes/{comments,toolDownloads}.js`, `server/utils/viewCooldown.js` | `Comment` `article`; `viewCooldown` 6h giữ `updatedAt`; tải published `$inc`, `getAttachmentDownloadFilename`, `versions` `.`→`_`, `serviceDownloads`, ẩn `downloadCount` |
 | VietYaku release | ✅ | `server/routes/vietyaku.js` | Suy link APK GitHub theo tag khi B2 chỉ có ZIP |
 | Workflow & event library | ✅ | `server/routes/{workflow,eventLibrary}.js` | Phân quyền 2 tầng project/doc; escape regex `searchUsers` (AI Skills Library đã gỡ) |
@@ -24,8 +24,8 @@
 | AI pricing & models | ✅ | `server/utils/{aiPricing,aiProvider,lumiCatalog}.js` | `gemini-3.1-flash-lite` (13/51 Cr), `gemini-3.8-flash` (38/318 Cr), trial 100 Cr, BYOK 0 Cr (`ai`, `interior`, `ledStudio`) |
 | B2 orphan & retention | ✅ | `server/routes/admin.js`, `server/{retention,migrations}/` | `collectReferencedKeys` + `extractSectionB2Keys`: Article (`attachments` + `sections`), `APP_RELEASE_PREFIXES`, `LedStudioPreset` |
 | XML sitemap | ✅ | `server/routes/sitemap.js` | Public/indexable (gồm `/contact`, `/studio/led-studio`; `/studio/ai-skills` đã gỡ) |
-| LumiStage Cloud/PRO | ✅ | `server/routes/ledStudio.js`, `server/routes/ledStudioWorkspace{,Admin}.js`, `server/utils/{lumiProExporters,ledWorkspacePolicy}.js`, `scripts/publish-stagepack.mjs` | Vé HMAC, PRO, Share, `stage_pack` B2, Workspace Autosave (`5/10` slot, `200 MiB/1 GiB` B2 private, `50/256 MiB/file`, admin purge) |
-| Automated tests | ✅ | `test/`, `server/` | 307 pass đủ deps; `npm run check` OK |
+| LumiStage Cloud/PRO | ✅ | `server/routes/ledStudio.js`, `server/routes/ledStudioWorkspace{,Admin}.js`, `server/utils/{lumiProExporters,ledWorkspacePolicy}.js`, `scripts/publish-stagepack.mjs` | Vé HMAC, PRO, `stage_pack` B2, Workspace V24 (`5/10` slot, B2 private, share/review + fallback legacy) |
+| Automated tests | ✅ | `test/`, `server/` | 312 pass đủ deps; `npm run check` OK |
 
 ## 3. Giả định đang giữ
 
@@ -35,6 +35,7 @@
 | Index prod | `autoIndex: false`; qua `db:m0:audit` / migration | `server/db/connection.js` |
 | B2 trong HTML | Quét bằng `extractB2KeysFromHtml` | `test/storage-orphan-html.test.js` |
 | VocabFlip FSRS | `lapses, stability, difficulty, fsrs_state, fsrs_step`: omit giữ, `null` xoá, bản cũ `0`/`null` (FE normalize); BE deploy trước, không index/backfill | `server/routes/vocab.js`, `test/vocab-fsrs.test.js` |
+| Trust proxy | `1` hop trên Fly/prod (`resolveTrustProxy`) | `server/config/trustProxy.js`, `server/index.js` |
 
 ## 4. Cấu trúc
 
@@ -64,16 +65,13 @@ scripts/ · test/  release/B2/M0 CLIs · node:test suites
 ## 7. Known Issues & TODOs
 
 ### Cao
-- [ ] Dependency audit còn 2 advisory critical (ngoài diff).
-- [ ] View backfill transaction: smoke trên MongoDB test trước deploy.
-- [ ] Audit input sanitization ở public write routes.
-- [ ] Cân nhắc `MONGODB_MIN_POOL_SIZE=2` trên Fly nếu cold handshake chậm.
+- [ ] Dependency audit: 2 critical (ngoài diff).
+- [ ] View backfill tx & public write sanitization: kiểm trước deploy.
+- [ ] Cân nhắc `MONGODB_MIN_POOL_SIZE=2` trên Fly.
 
 ### Trung bình
-- [ ] Thiếu forgot-password & email verification (register còn enumerable).
-- [ ] Auth patch: chạy `test/auth-security.test.js` + smoke trong sandbox đủ deps.
-- [ ] VocabFlip FSRS (live Mongo smoke) & bài Lào Cai / image-to-3D (browser review) chờ kiểm tay.
+- [ ] Thiếu forgot-password & email verification (`register` còn enumerable).
+- [ ] Auth patch (`test/auth-security.test.js`) & VocabFlip FSRS / Lào Cai chờ smoke.
 
 ### Thấp
-- [ ] Chưa có OpenAPI/Swagger và ESLint/Prettier.
-- [ ] `server/utils/lumiCatalog.js` (`getLicenseSecret`, fallback=1): bỏ fallback `JWT_SECRET` ở task code riêng.
+- [ ] Chưa có OpenAPI/Swagger, ESLint/Prettier; `getLicenseSecret` bỏ fallback `JWT_SECRET` riêng.
