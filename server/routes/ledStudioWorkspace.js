@@ -19,8 +19,6 @@ import {
   readWorkspaceObjectHeadBytes
 } from '../utils/b2Storage.js';
 import {
-  WORKSPACE_MAX_FILE_BYTES,
-  WORKSPACE_MAX_USER_BYTES,
   WORKSPACE_UPLOAD_TTL_MS,
   WORKSPACE_TEMP_DIR,
   resolveWorkspaceEntitlement,
@@ -460,8 +458,14 @@ router.post('/assets/prepare', async (req, res) => {
     if (!WORKSPACE_ASSET_KINDS.includes(kind)) {
       return res.status(400).json({ success: false, message: 'Invalid asset kind' });
     }
-    if (!Number.isInteger(sizeBytes) || sizeBytes < 1 || sizeBytes > WORKSPACE_MAX_FILE_BYTES) {
-      return res.status(400).json({ success: false, message: 'Asset size out of allowed bounds (1B - 256 MiB)' });
+    const maxFileMb = Math.round(entitlement.maxFileBytes / (1024 * 1024));
+    if (!Number.isInteger(sizeBytes) || sizeBytes < 1 || sizeBytes > entitlement.maxFileBytes) {
+      return res.status(400).json({
+        success: false,
+        code: 'FILE_TOO_LARGE',
+        message: `Asset size out of allowed bounds (1B - ${maxFileMb} MiB)`,
+        data: { maxFileBytes: entitlement.maxFileBytes, proActive: entitlement.proActive }
+      });
     }
     if (!isMediaKindAllowedForPlan(kind, entitlement.proActive)) {
       return res.status(403).json({
@@ -503,13 +507,17 @@ router.post('/assets/prepare', async (req, res) => {
 
     await reconcileOwnerExpiredUploads(req.user._id);
     const usage = await computeReferencedBytesForOwner(req.user._id);
-    const maxReservedAllowed = WORKSPACE_MAX_USER_BYTES - usage.referencedBytes;
+    const maxUserBytes = entitlement.maxUserBytes;
+    const quotaLabel = maxUserBytes >= 1024 * 1024 * 1024
+      ? `${Math.round(maxUserBytes / (1024 * 1024 * 1024))} GiB`
+      : `${Math.round(maxUserBytes / (1024 * 1024))} MiB`;
+    const maxReservedAllowed = maxUserBytes - usage.referencedBytes;
     if (sizeBytes > maxReservedAllowed) {
       return res.status(409).json({
         success: false,
         code: 'STORAGE_QUOTA_EXCEEDED',
-        message: 'Account storage quota (1 GiB) exceeded',
-        data: { usedBytes: usage.totalUsedBytes, maxBytes: WORKSPACE_MAX_USER_BYTES }
+        message: `Account storage quota (${quotaLabel}) exceeded`,
+        data: { usedBytes: usage.totalUsedBytes, maxBytes: maxUserBytes }
       });
     }
 
@@ -523,8 +531,8 @@ router.post('/assets/prepare', async (req, res) => {
       return res.status(409).json({
         success: false,
         code: 'STORAGE_QUOTA_EXCEEDED',
-        message: 'Account storage quota (1 GiB) exceeded',
-        data: { usedBytes: usage.referencedBytes + usage.reservedBytes, maxBytes: WORKSPACE_MAX_USER_BYTES }
+        message: `Account storage quota (${quotaLabel}) exceeded`,
+        data: { usedBytes: usage.referencedBytes + usage.reservedBytes, maxBytes: maxUserBytes }
       });
     }
     reservedForThisRequest = sizeBytes;
@@ -589,6 +597,7 @@ router.post('/assets/prepare', async (req, res) => {
 });
 
 router.put('/assets/:uploadId/content', async (req, res) => {
+  const entitlement = resolveWorkspaceEntitlement(req.user);
   const upload = await LedStudioWorkspaceUpload.findOne({
     uploadId: req.params.uploadId,
     owner: req.user._id
@@ -632,7 +641,7 @@ router.put('/assets/:uploadId/content', async (req, res) => {
       req.on('data', (chunk) => {
         if (settled) return;
         receivedBytes += chunk.length;
-        if (receivedBytes > upload.sizeBytes || receivedBytes > WORKSPACE_MAX_FILE_BYTES) {
+        if (receivedBytes > upload.sizeBytes || receivedBytes > entitlement.maxFileBytes) {
           fail(new Error('Uploaded stream exceeds declared size'));
           return;
         }

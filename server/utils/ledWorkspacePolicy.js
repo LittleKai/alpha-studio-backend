@@ -9,20 +9,25 @@ import { normalizeUserLumiState } from '../routes/ledStudio.js';
 
 export const WORKSPACE_FREE_MAX_SLOTS = 5;
 export const WORKSPACE_PRO_MAX_SLOTS = 10;
-export const WORKSPACE_MAX_FILE_BYTES = 256 * 1024 * 1024;
-export const WORKSPACE_MAX_USER_BYTES = 1024 * 1024 * 1024;
+export const WORKSPACE_FREE_MAX_FILE_BYTES = 50 * 1024 * 1024;
+export const WORKSPACE_PRO_MAX_FILE_BYTES = 256 * 1024 * 1024;
+export const WORKSPACE_FREE_MAX_USER_BYTES = 200 * 1024 * 1024;
+export const WORKSPACE_PRO_MAX_USER_BYTES = 1024 * 1024 * 1024;
+export const WORKSPACE_MAX_FILE_BYTES = WORKSPACE_PRO_MAX_FILE_BYTES;
+export const WORKSPACE_MAX_USER_BYTES = WORKSPACE_PRO_MAX_USER_BYTES;
 export const WORKSPACE_MAX_MANIFEST_BYTES = 4 * 1024 * 1024;
 export const WORKSPACE_UPLOAD_TTL_MS = 30 * 60 * 1000;
 export const WORKSPACE_TEMP_DIR = path.join(os.tmpdir(), 'alpha-led-workspace-uploads');
 
 export function resolveWorkspaceEntitlement(userDoc) {
   const lumi = normalizeUserLumiState(userDoc);
+  const proActive = Boolean(lumi.proActive);
   return {
-    proActive: Boolean(lumi.proActive),
+    proActive,
     plan: lumi.plan || 'free',
-    maxSlots: lumi.proActive ? WORKSPACE_PRO_MAX_SLOTS : WORKSPACE_FREE_MAX_SLOTS,
-    maxFileBytes: WORKSPACE_MAX_FILE_BYTES,
-    maxUserBytes: WORKSPACE_MAX_USER_BYTES,
+    maxSlots: proActive ? WORKSPACE_PRO_MAX_SLOTS : WORKSPACE_FREE_MAX_SLOTS,
+    maxFileBytes: proActive ? WORKSPACE_PRO_MAX_FILE_BYTES : WORKSPACE_FREE_MAX_FILE_BYTES,
+    maxUserBytes: proActive ? WORKSPACE_PRO_MAX_USER_BYTES : WORKSPACE_FREE_MAX_USER_BYTES,
     maxManifestBytes: WORKSPACE_MAX_MANIFEST_BYTES
   };
 }

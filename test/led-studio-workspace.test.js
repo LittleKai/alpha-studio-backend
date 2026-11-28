@@ -1,10 +1,15 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
 import LedStudioWorkspacePurgePreview from '../server/models/LedStudioWorkspacePurgePreview.js';
 import LedStudioWorkspaceQuota from '../server/models/LedStudioWorkspaceQuota.js';
 import {
   WORKSPACE_FREE_MAX_SLOTS,
   WORKSPACE_PRO_MAX_SLOTS,
+  WORKSPACE_FREE_MAX_FILE_BYTES,
+  WORKSPACE_PRO_MAX_FILE_BYTES,
+  WORKSPACE_FREE_MAX_USER_BYTES,
+  WORKSPACE_PRO_MAX_USER_BYTES,
   WORKSPACE_MAX_MANIFEST_BYTES,
   resolveWorkspaceEntitlement,
   isMediaKindAllowedForPlan,
@@ -14,10 +19,14 @@ import {
   buildWorkspaceAssetKey
 } from '../server/utils/ledWorkspacePolicy.js';
 
-test('resolveWorkspaceEntitlement returns 5 slots for free and 10 slots for active Pro or admin/partner', () => {
+test('resolveWorkspaceEntitlement separates slots and storage limits for free vs Pro or admin/partner', () => {
   const free = resolveWorkspaceEntitlement({ role: 'user', lumiStage: { plan: 'free' } });
   assert.equal(free.proActive, false);
   assert.equal(free.maxSlots, WORKSPACE_FREE_MAX_SLOTS);
+  assert.equal(free.maxFileBytes, WORKSPACE_FREE_MAX_FILE_BYTES);
+  assert.equal(free.maxUserBytes, WORKSPACE_FREE_MAX_USER_BYTES);
+  assert.equal(free.maxFileBytes, 50 * 1024 * 1024);
+  assert.equal(free.maxUserBytes, 200 * 1024 * 1024);
 
   const activePro = resolveWorkspaceEntitlement({
     role: 'user',
@@ -25,6 +34,10 @@ test('resolveWorkspaceEntitlement returns 5 slots for free and 10 slots for acti
   });
   assert.equal(activePro.proActive, true);
   assert.equal(activePro.maxSlots, WORKSPACE_PRO_MAX_SLOTS);
+  assert.equal(activePro.maxFileBytes, WORKSPACE_PRO_MAX_FILE_BYTES);
+  assert.equal(activePro.maxUserBytes, WORKSPACE_PRO_MAX_USER_BYTES);
+  assert.equal(activePro.maxFileBytes, 256 * 1024 * 1024);
+  assert.equal(activePro.maxUserBytes, 1024 * 1024 * 1024);
 
   const expiredPro = resolveWorkspaceEntitlement({
     role: 'user',
@@ -32,10 +45,14 @@ test('resolveWorkspaceEntitlement returns 5 slots for free and 10 slots for acti
   });
   assert.equal(expiredPro.proActive, false);
   assert.equal(expiredPro.maxSlots, WORKSPACE_FREE_MAX_SLOTS);
+  assert.equal(expiredPro.maxFileBytes, WORKSPACE_FREE_MAX_FILE_BYTES);
+  assert.equal(expiredPro.maxUserBytes, WORKSPACE_FREE_MAX_USER_BYTES);
 
   const admin = resolveWorkspaceEntitlement({ role: 'admin' });
   assert.equal(admin.proActive, true);
   assert.equal(admin.maxSlots, WORKSPACE_PRO_MAX_SLOTS);
+  assert.equal(admin.maxFileBytes, WORKSPACE_PRO_MAX_FILE_BYTES);
+  assert.equal(admin.maxUserBytes, WORKSPACE_PRO_MAX_USER_BYTES);
 });
 
 test('isMediaKindAllowedForPlan restricts audio and video to active Pro', () => {
@@ -138,4 +155,12 @@ test('isDeclaredMimeAllowedForKind rejects active HTML/SVG/JS MIMEs and detectMa
 
   assert.ok(LedStudioWorkspacePurgePreview.schema.path('status').enumValues.includes('failed'));
   assert.ok(LedStudioWorkspaceQuota.schema.path('reservedBytes'));
+});
+
+test('ledStudioWorkspace route uses per-plan entitlement limits instead of hardcoded global caps', () => {
+  const routeSrc = fs.readFileSync(new URL('../server/routes/ledStudioWorkspace.js', import.meta.url), 'utf8');
+  assert.equal(routeSrc.includes('WORKSPACE_MAX_USER_BYTES'), false);
+  assert.equal(routeSrc.includes('WORKSPACE_MAX_FILE_BYTES'), false);
+  assert.equal(routeSrc.includes('entitlement.maxFileBytes'), true);
+  assert.equal(routeSrc.includes('entitlement.maxUserBytes'), true);
 });
